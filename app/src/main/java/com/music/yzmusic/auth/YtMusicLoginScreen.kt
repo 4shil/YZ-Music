@@ -38,3 +38,26 @@ fun YtMusicLoginScreen(
                 webViewClient = object : WebViewClient() {
                     private var captured = false
 
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        if (captured || url?.startsWith(MUSIC_ORIGIN) != true) return
+                        val cookies = CookieManager.getInstance().getCookie(MUSIC_ORIGIN)
+                        // Not a substring test. See [AuthStore.hasApiSid] — the
+                        // one this replaces accepted a jar with no signing
+                        // secret in it, and the sign-in then appeared to
+                        // succeed while every request stayed anonymous.
+                        if (cookies != null && AuthStore.hasApiSid(cookies)) {
+                            captured = true
+                            onCookiesCaptured(cookies)
+                        }
+                    }
+                }
+
+                loadUrl(
+                    "https://accounts.google.com/ServiceLogin" +
+                        "?ltmpl=music&service=youtube&passive=true" +
+                        "&continue=https%3A%2F%2Fmusic.youtube.com%2F",
+                )
+            }
+        },
+    )
+}
