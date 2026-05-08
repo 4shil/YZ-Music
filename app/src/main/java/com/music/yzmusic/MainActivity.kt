@@ -381,3 +381,216 @@ private fun YZMusicApp(
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()
+    val libraryState by viewModel.library.collectAsStateWithLifecycle()
+    val filter by viewModel.filter.collectAsStateWithLifecycle()
+    val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
+    val account by viewModel.account.collectAsStateWithLifecycle()
+    val historyState by viewModel.history.collectAsStateWithLifecycle()
+    val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
+    val lyricsSource by viewModel.lyricsSource.collectAsStateWithLifecycle()
+    val lyricsChecked by viewModel.lyricsChecked.collectAsStateWithLifecycle()
+    val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
+    val searchSuggestions by viewModel.suggestions.collectAsStateWithLifecycle()
+    val detailStack by viewModel.detailStack.collectAsStateWithLifecycle()
+    val detail = detailStack.lastOrNull()
+    // Local Music has no artwork to wash the bar in, so it renders with a
+    // plain status bar rather than the artwork-driven blur other detail
+    // pages (album/artist/playlist) get. Downloads is the same page, and the
+    // tab row it now carries sits directly under the bar, so it needs the same
+    // treatment — an artwork blur over it would tint the tabs.
+    //
+    // A downloaded playlist's page is under `local:` too and is none of that: it
+    // has a cover and a track list, so it takes the bar every other release page
+    // takes. Hence the folder question rather than the prefix.
+    val isLocalDetail = detail?.browseId.isDeviceFolder()
+    val likeStatuses by viewModel.likeStatuses.collectAsStateWithLifecycle()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val playlistsLoading by viewModel.playlistsLoading.collectAsStateWithLifecycle()
+
+    // Settings has no tab of its own — it sits on top of whatever tab was
+    // selected. A pushed album/artist page (from the player, search, etc.)
+    // should surface above it rather than being hidden behind it.
+    LaunchedEffect(detail) { if (detail != null) showSettings = false }
+    LaunchedEffect(showSettings) {
+        if (!showSettings) {
+            showAccountScrobbling = false
+        }
+    }
+
+    // The Downloads page is a snapshot of the folder, taken when it was opened.
+    // Saving a track or deleting one while it is on screen changes what belongs
+    // on it — and now that the page groups by artist and album, a stale list is
+    // stale counts and a missing row in three places rather than one. So it is
+    // taken again whenever the record of what's on disk changes.
+    val savedDownloads by Downloads.saved.collectAsStateWithLifecycle()
+    // The releases those files were asked for as — read here rather than in the
+    // page so the Downloads folder recomposes when one is added, the same way it
+    // does when a file is.
+    val savedCollections by Downloads.collections.collectAsStateWithLifecycle()
+    // The playlists among them, for the Library page's On Device shelf. Read off
+    // both records: the collection record is what says a playlist was downloaded
+    // as a playlist, and what is on disk is what says it still has anything left
+    // to open.
+    val downloadedPlaylists = remember(savedCollections, savedDownloads) {
+        Downloads.savedPlaylists()
+    }
+    // What a browse id is recorded under in Downloads.collections, when it names
+    // a release downloaded whole — see BrowseTarget.downloadId. A downloaded
+    // playlist's own page and its card both carry the id under the
+    // `local:playlist:` prefix; a release still reachable by its real id (an
+    // album's own page, a search hit) is looked up directly under that instead.
+    val downloadIdFor: (String?) -> String? = { id ->
+        id?.let { Downloads.recordIdOf(it) ?: it }?.takeIf { it in savedCollections }
+    }
+    LaunchedEffect(savedDownloads, savedCollections, detail?.browseId) {
+        val open = detail?.browseId ?: return@LaunchedEffect
+        // A downloaded playlist's page is a snapshot of the same folder and goes
+        // stale for the same reasons — and it is the one page a delete can empty
+        // out entirely, which is worth saying rather than leaving rows behind
+        // that play nothing.
+        if (open == "local:downloads" || Downloads.recordIdOf(open) != null) {
+            viewModel.reloadLocalDetail(open)
+        }
+    }
+
+    val controller = rememberMediaController()
+    val player = rememberPlayerState(controller)
+    val shuffleEnabled by QueueShuffle.enabled.collectAsStateWithLifecycle()
+
+    // Lyrics follow whatever is playing; duration lands a beat after the track.
+    // Keyed on the lyric settings too, so turning a source on or off applies to
+    // the track already playing rather than only the next one.
+    val syncedLyricsEnabled by AppSettings.syncedLyrics.collectAsStateWithLifecycle()
+    val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
+    LaunchedEffect(player.song?.videoId, player.durationMs, syncedLyricsEnabled, lyricsSources) {
+        player.song?.let {
+            viewModel.loadLyrics(
+                it.videoId,
+                it.title,
+                it.artist,
+                player.durationMs,
+                it.albumName,
+                it.localUri,
+            )
+        }
+    }
+
+    val homeListState = rememberLazyListState()
+    val exploreListState = rememberLazyListState()
+    val libraryListState = rememberLazyListState()
+    val historyListState = rememberLazyListState()
+    val libraryShowAllGridState = rememberLazyGridState()
+    val searchListState = rememberLazyListState()
+    val currentListState = when (selectedTab) {
+        TAB_HOME -> homeListState
+        TAB_EXPLORE -> exploreListState
+        TAB_LIBRARY -> libraryListState
+        else -> searchListState
+    }
+
+    // Pull-to-refresh: the drag lives with the feed, but the indicator is the
+    // line under the top bar, so the state has to be visible to both.
+    val homePull = rememberPullToRefreshState()
+    val explorePull = rememberPullToRefreshState()
+    val libraryPull = rememberPullToRefreshState()
+    val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
+    val currentFeed = when {
+        showSettings || showAccountScrobbling || detail != null -> null
+        selectedTab == TAB_HOME -> MainViewModel.Feed.HOME
+        selectedTab == TAB_EXPLORE -> MainViewModel.Feed.EXPLORE
+        selectedTab == TAB_LIBRARY -> MainViewModel.Feed.LIBRARY
+        else -> null
+    }
+    // The lead shelf is listening history, so opening Home after playing
+    // something is exactly when it needs re-fetching.
+    LaunchedEffect(currentFeed) {
+        if (currentFeed == MainViewModel.Feed.HOME) viewModel.onHomeShown()
+        // Likewise for Library: a playlist created or a song liked since it
+        // was last fetched is a change to exactly this page.
+        if (currentFeed == MainViewModel.Feed.LIBRARY) viewModel.onLibraryShown()
+    }
+
+    val currentPull = when (currentFeed) {
+        MainViewModel.Feed.HOME -> homePull
+        MainViewModel.Feed.EXPLORE -> explorePull
+        MainViewModel.Feed.LIBRARY -> libraryPull
+        null -> null
+    }
+    val scrolled by remember(currentListState) {
+        derivedStateOf {
+            currentListState.firstVisibleItemIndex > 0 ||
+                currentListState.firstVisibleItemScrollOffset > 24
+        }
+    }
+
+    // A pushed album/artist/playlist page has a large header of its own — the
+    // sleeve, or an artist's photo running edge to edge — which owns the title
+    // until it is scrolled away, exactly as a tab's big heading does. The state
+    // is hoisted because the bar lives beside that page rather than inside it,
+    // and is rebuilt per page: pushing a second one must not inherit the
+    // first's scroll offset.
+    // As [detailListState], for Replay: its own large heading owns the title
+    // until it is scrolled away, and the bar lives out here rather than on the
+    // page. Rebuilt per opening so reopening starts at the top.
+    val replayListState = rememberLazyListState()
+    val replayScrolled by remember(replayListState) {
+        derivedStateOf {
+            replayListState.firstVisibleItemIndex > 0 ||
+                replayListState.firstVisibleItemScrollOffset > 24
+        }
+    }
+
+    val detailListState = remember(detail?.browseId) { LazyListState() }
+    val detailTitleDrop = with(LocalDensity.current) { DETAIL_TITLE_DROP.toPx() }
+    val detailScrolled by remember(detailListState, detailTitleDrop) {
+        derivedStateOf {
+            detailListState.firstVisibleItemIndex > 0 ||
+                detailListState.firstVisibleItemScrollOffset > detailTitleDrop
+        }
+    }
+
+    val tabs = listOf(
+        BottomTab(stringResource(R.string.play), YZMusicIcons.Play),
+        BottomTab(stringResource(R.string.explore), YZMusicIcons.Explore),
+        BottomTab(stringResource(R.string.library), YZMusicIcons.Library),
+        BottomTab(stringResource(R.string.search), YZMusicIcons.Search),
+    )
+
+    val scope = rememberCoroutineScope()
+
+    val play: (List<Song>, Int) -> Unit = { songs, index ->
+        scope.launch {
+            val starting = YtMusicRepository.resolveAudio(songs[index])
+            val queued = songs.toMutableList().also { it[index] = starting }
+            controller?.playSongs(queued, index)
+            // Nothing to raise where the player is already open beside the page.
+            if (!playerDocked) showNowPlaying = true
+            // Starting playback only waits on the track about to play; the
+            // rest of a long album/playlist resolves in the background and
+            // is patched into the queue well before it's reached.
+            queued.forEachIndexed { i, song ->
+                if (i == index || !song.isVideo) return@forEachIndexed
+                launch {
+                    val resolved = YtMusicRepository.resolveAudio(song)
+                    if (resolved.videoId == song.videoId) return@launch
+                    // Found by id rather than by the index it went in at:
+                    // shuffling and queue edits both move tracks around while
+                    // this is in flight, and a song that has since been removed
+                    // must not have something else overwritten in its place.
+                    val c = controller ?: return@launch
+                    val at = (0 until c.mediaItemCount)
+                        .firstOrNull { c.getMediaItemAt(it).mediaId == song.videoId }
+                        ?: return@launch
+                    c.replaceMediaItem(at, resolved.toMediaItem())
+                }
+            }
+        }
+    }
+
+    /**
+     * A song picked on its own — off a home card or a search hit — starts a
+     * station rather than queueing the list it was shown in. Searching
+     * "Perfect" and tapping the top hit otherwise queues twenty covers and
+     * remixes of the same song. Album, artist and playlist pages keep [play],
+     * where the surrounding list *is* the thing the user asked for.
+     */
