@@ -145,3 +145,89 @@ fun DiscordLoginScreen(
                 settings.domStorageEnabled = true
                 settings.userAgentString = browserUserAgent(settings.userAgentString)
 
+                var captured = false
+                var attempts = 0
+
+                fun harvestToken() {
+                    if (captured) return
+                    if (attempts >= MAX_TOKEN_ATTEMPTS) {
+                        TrackLog.w(
+                            "Discord",
+                            "no token in localStorage after $attempts tries",
+                            about = null,
+                        )
+                        return
+                    }
+                    attempts++
+                    evaluateJavascript(TOKEN_SNIPPET, null)
+                }
+
+                webViewClient = object : WebViewClient() {
+                    @Deprecated("Deprecated in Java")
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                        if (isSignedIn(url)) harvestToken()
+                        return false
+                    }
+
+                    /**
+                     * The one hook that also fires for `pushState`. Discord's
+                     * client routes itself from the login form to the app without
+                     * a real navigation, so [shouldOverrideUrlLoading] alone can
+                     * miss the moment the token appears — and which URL it lands
+                     * on differs between `/app` and `/channels/@me` depending on
+                     * how the session was established.
+                     */
+                    override fun doUpdateVisitedHistory(
+                        view: WebView?,
+                        url: String?,
+                        isReload: Boolean,
+                    ) {
+                        if (isSignedIn(url)) harvestToken()
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        canGoBack = view?.canGoBack() == true
+                        if (isSignedIn(url)) harvestToken()
+                    }
+                }
+
+                webChromeClient = object : WebChromeClient() {
+                    override fun onJsAlert(
+                        view: WebView,
+                        url: String,
+                        message: String,
+                        result: JsResult,
+                    ): Boolean {
+                        result.confirm()
+                        if (captured) return true
+
+                        val token = message.takeUnless {
+                            it.isBlank() || it == "null" || it == "undefined"
+                        }
+                        if (token == null) {
+                            // Client still booting — the key isn't written yet.
+                            view.postDelayed({ harvestToken() }, TOKEN_RETRY_MS)
+                            return true
+                        }
+
+                        captured = true
+                        TrackLog.d("Discord", "token captured after $attempts read(s)", about = null)
+                        // Hide before handing the token over, so the Discord
+                        // client we're sitting on doesn't flash up as the
+                        // overlay tears down.
+                        view.visibility = View.GONE
+                        onTokenCaptured(token)
+                        return true
+                    }
+                }
+
+                webView = this
+                loadUrl("https://discord.com/login")
+            }
+        },
+    )
+
+    BackHandler(enabled = canGoBack) {
+        webView?.goBack()
+    }
+}
