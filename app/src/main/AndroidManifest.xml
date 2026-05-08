@@ -132,3 +132,135 @@
               that always works, because sharing asks rather than routing.
 
               One host, not a family of them. Every entry here becomes a line
+              the user has to tick under "Supported web addresses", so a
+              plausible-looking host that never appears in a real link (a `www.`
+              form of this one, say) is a line to tick by mistake instead of the
+              one that matters.
+
+              Schemes and paths still multiply out: every scheme × every path
+              prefix listed here is one accepted shape.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="music.youtube.com" />
+                <data android:pathPrefix="/watch" />
+                <data android:pathPrefix="/playlist" />
+                <data android:pathPrefix="/browse" />
+                <data android:pathPrefix="/channel" />
+                <data android:pathPrefix="/search" />
+            </intent-filter>
+            <!--
+              youtu.be short links, which are a bare video id and nothing else.
+              Kept in their own filter because the path there *is* the id, so it
+              can't share the path prefixes above.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="youtu.be" />
+            </intent-filter>
+
+            <!--
+              Share → YZ Music, from YT Music's own share sheet or from
+              anywhere a link can be sent. The text is whatever the sending app
+              wrote around the URL, so the URL is picked out of it rather than
+              parsed whole.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".playback.PlaybackService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
+        <!--
+          Downloads. Not exported: it is started by the app and by its own
+          cancel action, and nothing outside has any business queueing work.
+        -->
+        <service
+            android:name=".download.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!--
+          Home-screen widgets. Two providers so the picker lists a 2×2 and a 4×2,
+          both of which are the same widget resized — see MediaWidget.
+
+          Not exported, which is correct for a widget provider despite the
+          launcher being the one that talks to it: the system delivers
+          APPWIDGET_UPDATE to providers regardless, and the button PendingIntents
+          are sent with this app's own identity. Exporting them would only make
+          the update broadcast reachable by anything on the device.
+        -->
+        <receiver
+            android:name=".widget.MediaWidgetSquare"
+            android:exported="false"
+            android:label="@string/widget_square_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_media_square" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.MediaWidgetWide"
+            android:exported="false"
+            android:label="@string/widget_wide_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_media_wide" />
+        </receiver>
+
+        <!-- The transport buttons. Reached only by this app's own PendingIntents. -->
+        <receiver
+            android:name=".widget.MediaWidgetActions"
+            android:exported="false" />
+
+        <!--
+          Hands the Replay poster to whichever app the user picks to send it
+          with. The authority is derived from the applicationId rather than
+          written out, because the dev and prod flavours are two packages that
+          can be installed side by side — a fixed authority would make the
+          second install fail outright with INSTALL_FAILED_CONFLICTING_PROVIDER.
+
+          Not exported, and grantUriPermissions is the whole mechanism: the
+          receiving app gets a read grant that arrives with the intent, covers
+          one file (see @xml/file_paths) and expires with it.
+
+          Also serves the downloaded update APK to the system installer
+          without it needing broad storage access — its own cache-only scope,
+          nothing else shared through it.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+</manifest>
