@@ -118,3 +118,22 @@ class YZMusicApplication : Application(), SingletonImageLoader.Factory {
             .build()
 
     private fun initLastfm() {
+        val sessionKey = AppSettings.lastfmSessionKey.value
+        if (sessionKey.isBlank()) return
+        val endpoint = AppSettings.lastfmEndpoint.value.ifBlank { LastFM.DEFAULT_API_ENDPOINT }
+        val apiKey = AppSettings.lastfmApiKey.value.trim()
+        val secret = AppSettings.lastfmSecret.value.trim()
+        if (apiKey.isBlank() || secret.isBlank()) return
+        LastFM.configure(
+            endpoint = endpoint,
+            apiKey = apiKey,
+            secret = secret,
+            sessionKey = sessionKey,
+        )
+    }
+
+    companion object {
+        lateinit var authStore: AuthStore
+            private set
+    }
+}
