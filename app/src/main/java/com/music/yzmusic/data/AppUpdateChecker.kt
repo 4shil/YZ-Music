@@ -119,3 +119,103 @@ object AppUpdateChecker {
      */
     suspend fun downloadApk(context: Context): Unit = withContext(Dispatchers.IO) {
         val info = _available.value ?: return@withContext
+        val url = info.apkUrl ?: return@withContext
+        downloadCancelled = false
+        _download.value = DownloadState.Downloading(0f)
+
+        runCatching {
+            val dir = File(context.cacheDir, CACHE_SUBDIR).apply { mkdirs() }
+            // Drop anything left over from an earlier attempt.
+            dir.listFiles()?.forEach { it.delete() }
+            val target = File(dir, "bitchord-${info.version}.apk")
+
+            val request = Request.Builder().url(url).build()
+            Http.client.newCall(request).execute().use { response ->
+                check(response.isSuccessful) { "Download failed: HTTP ${response.code}" }
+                val body = response.body ?: error("Empty download body")
+                val total = body.contentLength().takeIf { it > 0 }
+
+                body.byteStream().use { input ->
+                    target.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var readTotal = 0L
+                        while (true) {
+                            if (downloadCancelled) {
+                                _download.value = DownloadState.Idle
+                                return@withContext
+                            }
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
+                            readTotal += read
+                            total?.let {
+                                _download.value =
+                                    DownloadState.Downloading((readTotal.toFloat() / it).coerceIn(0f, 1f))
+                            }
+                        }
+                    }
+                }
+            }
+            _download.value = DownloadState.Ready(target)
+        }.onFailure { error ->
+            _download.value = if (downloadCancelled) {
+                DownloadState.Idle
+            } else {
+                DownloadState.Failed(error.message ?: "Download failed")
+            }
+        }
+    }
+
+    /** Stops an in-flight download; the next read loop sees this and bails. */
+    fun cancelDownload() {
+        downloadCancelled = true
+    }
+
+    /** Back to square one after a failure, so the dialog offers Download again. */
+    fun resetDownload() {
+        _download.value = DownloadState.Idle
+    }
+
+    /**
+     * Hands a downloaded APK to the system installer.
+     *
+     * Sideloaded apps need the user's blessing per app ("install unknown apps");
+     * without it the installer intent silently does nothing on most ROMs, so
+     * the user is sent to that one switch first and taps Install again after.
+     */
+    fun installApk(context: Context, file: File) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !context.packageManager.canRequestPackageInstalls()
+        ) {
+            context.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                    .setData(Uri.parse("package:${context.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return
+        }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        context.startActivity(
+            Intent(Intent.ACTION_INSTALL_PACKAGE)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                .putExtra(Intent.EXTRA_RETURN_RESULT, true)
+                .addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_ACTIVITY_NEW_TASK,
+                ),
+        )
+    }
+
+    /** Numeric, dot-separated comparison — "1.10" outranks "1.9". */
+    private fun isNewer(latest: String, current: String): Boolean {
+        val l = latest.split(".").map { it.toIntOrNull() ?: 0 }
+        val c = current.split(".").map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(l.size, c.size)) {
+            val a = l.getOrElse(i) { 0 }
+            val b = c.getOrElse(i) { 0 }
+            if (a != b) return a > b
+        }
+        return false
+    }
+}
