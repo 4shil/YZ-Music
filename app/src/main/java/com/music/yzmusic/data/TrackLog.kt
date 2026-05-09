@@ -160,3 +160,118 @@ object TrackLog {
      */
     private val startedAt = ConcurrentHashMap<String, Long>()
 
+    fun onTrackStarted(videoId: String) {
+        if (startedAt.size >= MAX_REMEMBERED) startedAt.clear()
+        startedAt[videoId] = System.currentTimeMillis()
+    }
+
+    /**
+     * The log for [song]: the lines about that track, plus the ones about
+     * nothing in particular, from where its own story starts.
+     *
+     * Both halves of that are the fix for the same bug, and a plain time window
+     * gets both of them wrong:
+     *
+     *  - **Where it starts.** A track is resolved while the track *before* it
+     *    is still playing — that is what read-ahead is — so the resolve that
+     *    decides its source, its bitrate and whether it plays at all sits
+     *    minutes earlier than the moment the queue reached it. No window
+     *    measured back from the selection reaches that.
+     *  - **What is in it.** The first seconds of every track are spent
+     *    resolving the next one, so a window running from the selection to now
+     *    is largely the *following* song's story: its ladder, its client walk,
+     *    its read-ahead. That is what a paste taken a few seconds into a track
+     *    was almost entirely made of.
+     *
+     * Falling back to everything held is still the right way to be wrong for a
+     * track nothing was ever filed against — one served whole from the disk
+     * cache, or the track a cold start resumes on.
+     */
+    suspend fun forTrack(song: Song, stats: NerdStats.Snapshot?): String = withContext(Dispatchers.Default) {
+        val held = synchronized(lines) { lines.toList() }
+        val from = listOfNotNull(
+            held.firstOrNull { it.track == song.videoId }?.at,
+            startedAt[song.videoId]?.minus(LEAD_IN_MS),
+        ).minOrNull()
+        val since = held.filter { from == null || it.at >= from }
+        val window = since.filter { it.track == null || it.track == song.videoId }
+        header(song, stats, from, window.size, since.size - window.size) + "\n" +
+            window.joinToString("\n") { "${CLOCK.format(Date(it.at))} ${it.level} ${it.text}" } +
+            "\n"
+    }
+
+    // ── The part that isn't the log ─────────────────────────────────────────
+
+    /**
+     * What the lines alone can't say: which build produced them, on what, and
+     * what the player believed it was playing when the log was taken.
+     *
+     * @param elsewhere how many lines in the same stretch belonged to another
+     *   track and were left out. Stated rather than silently dropped: it is the
+     *   difference between "nothing happened" and "nothing happened *to this
+     *   track*", and the two send a reader looking in opposite places.
+     */
+    private fun header(
+        song: Song,
+        stats: NerdStats.Snapshot?,
+        from: Long?,
+        count: Int,
+        elsewhere: Int,
+    ) = buildString {
+        appendLine("YZ Music log — ${song.title} — ${song.artist}")
+        appendLine("id=${song.videoId} duration=${song.durationText ?: "?"} album=${song.albumName ?: "?"}")
+        appendLine("playing: ${stats.describe()}")
+        appendLine(
+            "sources: substitution=${SourceResolver.canSubstituteForYouTube()} " +
+                "request=${SourceResolver.requestForNow()}",
+        )
+        appendLine(
+            "window: ${from?.let { CLOCK.format(Date(it)) } ?: "everything held"} → " +
+                "${CLOCK.format(Date())} ($count lines" +
+                (if (elsewhere > 0) ", $elsewhere for other tracks left out)" else ")"),
+        )
+        appendLine("build: ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE})")
+        appendLine("device: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}")
+    }
+
+    private fun NerdStats.Snapshot?.describe(): String {
+        if (this == null) return "nothing reported"
+        val measured = listOfNotNull(
+            mimeType,
+            bitDepth?.let { "$it-bit" },
+            bitrateKbps?.let { "$it kbps" },
+            sampleRateHz?.let { "$it Hz" },
+            channels?.let { "${it}ch" },
+        ).joinToString(" · ").ifEmpty { "nothing reported" }
+        val promised = claimed?.summary?.let { " (source said: $it)" }.orEmpty()
+        val tier = when {
+            isHiRes -> " [Hi-Res Lossless]"
+            isLossless -> " [Lossless]"
+            isHiQuality -> " [Hi-Quality]"
+            else -> ""
+        }
+        return measured + promised + tier
+    }
+
+    private val CLOCK = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+
+    /**
+     * How far back of a track's selection to reach when nothing was ever filed
+     * against it — see [startedAt].
+     *
+     * Only a fallback now. It used to be the whole of the window, on the
+     * reasoning that the resolve runs a moment before the player reports the
+     * item as current; what it actually reaches back into is the *previous*
+     * track's playback, and what the track being asked about spent it doing is
+     * usually nothing.
+     */
+    private const val LEAD_IN_MS = 20_000L
+
+    /** Roughly the last few tracks' worth, and small enough to hold without thinking about it. */
+    private const val MAX_HELD_CHARS = 512_000
+
+    /** Enough for a stack trace or a search response's opening; not a whole catalogue page. */
+    private const val MAX_LINE_CHARS = 2_000
+
+    private const val MAX_REMEMBERED = 32
+}
