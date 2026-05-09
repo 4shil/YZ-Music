@@ -188,3 +188,57 @@ class ModuleSource(
      * possibilities only when nothing was stated — otherwise every row from
      * that module claims the top tier and the ordering it feeds is noise.
      */
+    private fun rowTier(track: ModuleSearchResult): String? =
+        qualityTier("${track.audioQuality} ${track.format}")
+            ?: track.availableQualities
+                .maxByOrNull { TIERS.indexOf(qualityTier(it)) }
+                ?.let(::qualityTier)
+
+    /** First of each, then second of each: nth place everywhere beats second place anywhere. */
+    private fun interleave(lists: List<List<Song>>): List<Song> {
+        val merged = mutableListOf<Song>()
+        var rank = 0
+        while (lists.any { it.size > rank }) {
+            for (list in lists) list.getOrNull(rank)?.let(merged::add)
+            rank++
+        }
+        return merged
+    }
+
+    // ── Stream ────────────────────────────────────────────────────────────
+
+    override suspend fun stream(trackId: String, request: StreamRequest): SourceStream? =
+        withContext(Dispatchers.IO) {
+            // trackId is "<moduleId>::<upstreamId>"
+            val cut = trackId.indexOf(MOD_SEPARATOR)
+            if (cut < 0) {
+                TrackLog.w(TAG, "${config.displayName}: malformed trackId '$trackId'")
+                return@withContext null
+            }
+            val moduleId = trackId.substring(0, cut)
+            val upstreamId = trackId.substring(cut + MOD_SEPARATOR.length)
+
+            // Find the module in the index, load it (cache hit after search),
+            // then ask for the stream URL.
+            val modules = manager.fetchIndex(config.baseUrl).getOrElse { e ->
+                TrackLog.w(TAG, "${config.displayName}: index fetch failed — ${e.message}")
+                return@withContext null
+            }
+            val module = modules.firstOrNull { it.id == moduleId } ?: run {
+                TrackLog.w(TAG, "${config.displayName}: module '$moduleId' not found in index")
+                return@withContext null
+            }
+            val baseUrl = config.baseUrl.substringBeforeLast("/")
+            val loaded = manager.loadModule(module) { baseUrl }.getOrElse { e ->
+                TrackLog.w(TAG, "${config.displayName}: load failed for $moduleId — ${e.message}")
+                return@withContext null
+            }
+            val streamResponse = manager.getStreamUrl(
+                loaded = loaded,
+                trackId = upstreamId,
+                quality = request.tier,
+                settings = settingsFor(request),
+            ).getOrElse { e ->
+                TrackLog.w(TAG, "${config.displayName}: getStreamUrl failed for $upstreamId — ${e.message}")
+                return@withContext null
+            }
