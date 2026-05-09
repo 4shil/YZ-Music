@@ -197,3 +197,121 @@ data class DetailPage(
     val songs: UiState<List<Song>>,
     val type: BrowseType = BrowseType.OTHER,
     /** Albums / singles carousels, populated for artist pages. */
+    val sections: List<HomeShelf> = emptyList(),
+    /**
+     * Tracks YouTube offers to round out a playlist but that were never
+     * added — see [com.music.yzmusic.data.innertube.InnertubeParser.parsePlaylistShelf].
+     * Shown as their own section with a button to actually add them, rather
+     * than folded into [songs] where they'd read as the user's own picks.
+     */
+    val suggestedSongs: List<Song> = emptyList(),
+    /**
+     * Whether this release can be saved to the library and whether it already
+     * is — null when the page doesn't offer it at all. Only ever set for an
+     * album or playlist fetched with a session; see [LibraryState].
+     */
+    val library: LibraryState? = null,
+    /**
+     * The editorial blurb YouTube Music writes for a release or an artist —
+     * absent for most playlists, which is also why the "About" section only
+     * ever shows for an album or an artist page.
+     */
+    val description: String? = null,
+    /** "1.2M subscribers" off an artist page's header — see [ArtistPage.subscriberCountText]. */
+    val subscriberCountText: String? = null,
+    /** "3.4M monthly listeners" off an artist page's header. */
+    val monthlyListenerCount: String? = null,
+)
+
+/**
+ * Whether an album or playlist is in the library, and the id that changes that.
+ *
+ * YouTube has no "save" verb for a release: a saved album is a *liked* one, and
+ * what gets liked is the playlist behind the page rather than the browse id the
+ * page was fetched with — an `MPREb…` album is backed by an `OLAK5uy_…`
+ * playlist, and liking the browse id does nothing at all. So the id has to be
+ * read off the page rather than derived from what was asked for.
+ */
+data class LibraryState(
+    val playlistId: String,
+    val saved: Boolean,
+)
+
+/** Parsed artist landing page. */
+data class ArtistPage(
+    val songs: List<Song>,
+    /** Playlist holding the artist's full song list, when the page links one. */
+    val moreSongsBrowseId: String?,
+    val sections: List<HomeShelf>,
+    /** The artist's own picture, off the page header. */
+    val thumbnailUrl: String? = null,
+    /** The single artist this page is for, as the header bills them. */
+    val name: String? = null,
+    /** The artist bio YouTube Music writes for the page, when it has one. */
+    val description: String? = null,
+    /** "1.2M subscribers" — the artist's YouTube channel, when subscribed counts are shown. */
+    val subscriberCountText: String? = null,
+    /** "3.4M monthly listeners", off the same header. */
+    val monthlyListenerCount: String? = null,
+)
+
+/**
+ * A track's thumbs rating on the signed-in account.
+ *
+ * [INDIFFERENT] is YouTube's own word for "neither", and is a real state
+ * rather than the absence of one — clearing a like is a request in its own
+ * right (`like/removelike`), not the omission of one.
+ */
+enum class LikeStatus { LIKE, DISLIKE, INDIFFERENT }
+
+/** Who can see a playlist. YouTube's own three values, sent verbatim. */
+enum class PlaylistPrivacy(val label: String, val apiValue: String) {
+    PRIVATE("Private", "PRIVATE"),
+    UNLISTED("Unlisted", "UNLISTED"),
+    PUBLIC("Public", "PUBLIC"),
+}
+
+/**
+ * One of the account's own playlists, as the picker lists them.
+ *
+ * [playlistId] is the raw id (no `VL`), because that is what the edit endpoint
+ * takes; [browseId] is the same playlist addressed as a page. Keeping both
+ * spares every caller from remembering which prefix each side wants.
+ */
+data class UserPlaylist(
+    val playlistId: String,
+    val title: String,
+    val subtitle: String,
+    val thumbnailUrl: String?,
+) {
+    val browseId: String get() = "VL$playlistId"
+}
+
+/**
+ * The per-track state that only YouTube can answer: its rating, and whether it
+ * is in the library.
+ *
+ * Library membership is not addressable by video id — it is toggled with an
+ * opaque feedback token that YouTube mints per row and per direction, so the
+ * tokens have to be fetched before the action can be offered at all. Both
+ * arrive together on the watch queue's own menu, which is why this is one
+ * lookup rather than two.
+ */
+data class SongMenu(
+    /**
+     * The rating YouTube states on this row, or null when the row states
+     * none — which is common, and is *not* the same as INDIFFERENT. A watch
+     * queue frequently renders without a like button at all, and reading that
+     * silence as "not liked" is how a liked song ends up claiming it isn't.
+     */
+    val likeStatus: LikeStatus?,
+    val inLibrary: Boolean,
+    val addToLibraryToken: String?,
+    val removeFromLibraryToken: String?,
+)
+
+sealed interface UiState<out T> {
+    data object Loading : UiState<Nothing>
+    data class Success<T>(val data: T) : UiState<T>
+    data class Error(val message: String) : UiState<Nothing>
+}
