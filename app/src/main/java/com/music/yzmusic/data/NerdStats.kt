@@ -100,3 +100,154 @@ object NerdStats {
          * Decided on the bitrate rather than on which source served it: a
          * 256kbps stream is a 256kbps stream wherever it came from.
          */
+        val isHiQuality: Boolean
+            get() = !isLossless && (bitrateKbps ?: claimed?.kbps ?: 0) >= HI_QUALITY_KBPS
+    }
+
+    /**
+     * What the renderer's input mime type looks like when the bytes behind it
+     * are bit-exact.
+     *
+     * `audio/raw` is here because that is how Media3 names PCM — a WAV stream
+     * reaches the renderer as raw samples, not as `audio/wav`.
+     */
+    private val LOSSLESS_CODEC_SUFFIXES = listOf("flac", "alac", "raw")
+
+    /**
+     * Whether [mimeType] names a bit-exact codec.
+     *
+     * Exposed because the decoder's own verdict is also what decides whether a
+     * track playing from the disk cache is worth hunting a better copy of — see
+     * [QualityUpgrade.adoptUnresolved][com.music.yzmusic.playback.QualityUpgrade.adoptUnresolved].
+     * Reading [Snapshot.isLossless] there instead would mean trusting whichever
+     * track the last [current] publish happened to describe, which after a
+     * queue advance is the previous one.
+     */
+    fun isLosslessMime(mimeType: String?): Boolean =
+        mimeType != null && LOSSLESS_CODEC_SUFFIXES.any { mimeType.endsWith(it) }
+
+    /**
+     * The bitrate a lossy stream has to reach to be worth calling out.
+     *
+     * At 256 an Apple-style AAC counts and YouTube's Opus, which tops out
+     * around 160, does not — which is the distinction the label exists to
+     * draw.
+     */
+    private const val HI_QUALITY_KBPS = 256
+
+    val current = MutableStateFlow<Snapshot?>(null)
+
+    /**
+     * YouTube video ids with a module lookup racing YouTube's own resolve
+     * for the stream to actually play — see
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService]'s
+     * resolving data source. Both start together and whichever answers first
+     * plays; the module is the one still worth hearing about, because a
+     * YouTube win only means the search continues under the music — so this
+     * is what the UI shows "looking for a better copy" from. A track leaves
+     * the set the moment its own lookup settles either way, never on a timer.
+     */
+    val racingLossless = MutableStateFlow<Set<String>>(emptySet())
+
+    fun onLosslessRaceStart(videoId: String) {
+        racingLossless.value += videoId
+    }
+
+    fun onLosslessRaceEnd(videoId: String) {
+        racingLossless.value -= videoId
+    }
+
+    /**
+     * Bitrate in kbps of the stream picked for each videoId.
+     *
+     * Keyed by track rather than kept as a single "last picked": the read-ahead
+     * resolves the *next* track through the same code, so one loose value would
+     * end up describing the wrong song.
+     */
+    private val picked = ConcurrentHashMap<String, Int>()
+
+    /** As [picked], for the richer format a non-YouTube source can state. */
+    private val declared = ConcurrentHashMap<String, StreamFormat>()
+
+    fun onStreamPicked(videoId: String, kbps: Int) {
+        if (kbps <= 0) return
+        // Enough for the queue in hand; this is a lookup, not a store.
+        if (picked.size >= MAX_REMEMBERED) picked.clear()
+        picked[videoId] = kbps
+    }
+
+    /** Recorded as a source hands over a stream, keyed by that source's own track id. */
+    fun onSourceStream(trackId: String?, format: StreamFormat) {
+        if (trackId.isNullOrBlank()) return
+        if (declared.size >= MAX_REMEMBERED) declared.clear()
+        declared[trackId] = format
+    }
+
+    fun pickedBitrateKbps(videoId: String?): Int? = videoId?.let { picked[it] }
+
+    /**
+     * Undoes [onSourceStream] for [trackId].
+     *
+     * For when a swap to a claimed-better stream doesn't pan out and the
+     * player falls back to what it had — see
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService]'s
+     * upgrade revert. Without this the claim from the abandoned stream keeps
+     * describing the one that's actually playing, which is how a reverted
+     * FLAC swap leaves the "Lossless" badge lit over plain Opus.
+     */
+    fun clearDeclared(trackId: String?) {
+        if (trackId != null) declared.remove(trackId)
+    }
+
+    /**
+     * @param mediaId the queue's id for the track, which for a source-backed
+     *   one wraps the source's id — unwrapped here so callers don't each have
+     *   to know the key format.
+     */
+    fun declaredFormat(mediaId: String?): StreamFormat? {
+        val key = mediaId ?: return null
+        return declared[key]
+            ?: com.music.yzmusic.data.sources.SourceRegistry.parseTrackKey(key)
+                ?.second?.let { declared[it] }
+    }
+
+    /**
+     * Drops everything measured about the last player, because there isn't one
+     * any more.
+     *
+     * All of this describes a stream that a particular player was reading, and
+     * it is scoped to the *process* while the player it describes is scoped to
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService] — which the
+     * app being closed destroys while leaving the process alive to be reused.
+     * Nothing else clears it: [current] is nulled when the queue moves on, and
+     * a service standing back up is not the queue moving on.
+     *
+     * Measured, with the process surviving throughout — one log buffer holds
+     * both halves:
+     *
+     * ```
+     *   15:12:11  upgraded to FLAC at 4759ms      ← last session
+     *   ——— app closed, service destroyed ———
+     *   15:13:38  AdEKgwUqPKI <- audio/opus       ← played from the cache
+     * ```
+     *
+     * Between those two lines the Now Playing screen read "Lossless" over a
+     * player that had not been handed a single byte, and the nerd stats sheet
+     * read `audio/opus · 160 kbps (source said: FLAC)` afterwards. Both are the
+     * same fact: [Snapshot.isLossless] falls back to [Snapshot.claimed] while
+     * the decoder has not spoken, and the claim came from a stream that had
+     * stopped existing a minute earlier.
+     *
+     * @see com.music.yzmusic.playback.QualityUpgrade.forgetLastSession for the
+     *   half of this that decides whether the track gets its lossless copy back
+     *   rather than merely how it is labelled.
+     */
+    fun forgetLastSession() {
+        current.value = null
+        racingLossless.value = emptySet()
+        picked.clear()
+        declared.clear()
+    }
+
+    private const val MAX_REMEMBERED = 64
+}
