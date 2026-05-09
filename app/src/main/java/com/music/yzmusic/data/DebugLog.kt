@@ -21,3 +21,19 @@ object DebugLog {
         if (BuildConfig.DEBUG) Log.i(tag, message)
     }
 
+    fun w(tag: String, message: String) {
+        if (BuildConfig.DEBUG) Log.w(tag, message)
+    }
+
+    fun w(tag: String, message: String, error: Throwable) {
+        if (BuildConfig.DEBUG) Log.w(tag, message, error)
+    }
+
+    fun e(tag: String, message: String) {
+        if (BuildConfig.DEBUG) Log.e(tag, message)
+    }
+
+    fun e(tag: String, message: String, error: Throwable) {
+        if (BuildConfig.DEBUG) Log.e(tag, message, error)
+    }
+}
