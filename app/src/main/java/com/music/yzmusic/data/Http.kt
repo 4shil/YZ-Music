@@ -87,3 +87,33 @@ object Http {
     }
 
     private val usageInterceptor = okhttp3.Interceptor { chain ->
+        val request = chain.request()
+        val response = chain.proceed(request)
+        val body = response.body
+        if (body == null) {
+            response
+        } else {
+            val host = request.url.host
+            val range = request.header("Range")
+            val counting = CountingSource(body.source()) { bytes ->
+                val total = usageTotals.computeIfAbsent(host) { AtomicLong() }.addAndGet(bytes)
+                Log.d(
+                    USAGE_TAG,
+                    "$host ${request.method} ${request.url.encodedPath} " +
+                        "range=$range status=${response.code} bytes=$bytes total[$host]=$total",
+                )
+            }.buffer()
+            response.newBuilder().body(CountedBody(body, counting)).build()
+        }
+    }
+    // ---- End temporary instrumentation ----------------------------------
+
+    val client: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .dispatcher(Dispatcher().apply { maxRequestsPerHost = 16 })
+        .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
+        .apply { if (USAGE_LOGGING_ENABLED) addNetworkInterceptor(usageInterceptor) }
+        .build()
+}
