@@ -226,3 +226,324 @@ object YtMusicRepository {
      */
     suspend fun library(): Result<LibraryPage> = call("library") {
         coroutineScope {
+            val liked = async { runCatching { songsPaged(LIKED_MUSIC) }.getOrDefault(emptyList()) }
+            val added = async { runCatching { songsPaged(LIBRARY_SONGS) }.getOrDefault(emptyList()) }
+            val shelves = LIBRARY_FEEDS
+                .map { (title, browseId) ->
+                    async {
+                        val items = runCatching {
+                            InnertubeParser.parseLibraryItems(Innertube.browse(browseId))
+                        }.getOrDefault(emptyList())
+                        HomeShelf(title, items)
+                    }
+                }
+                .awaitAll()
+                .filter { it.items.isNotEmpty() }
+
+            val likedSongs = liked.await()
+            val likedIds = likedSongs.mapTo(HashSet()) { it.videoId }
+            LikeState.seedLiked(likedIds)
+            LibraryPage(
+                likedSongs = likedSongs,
+                // Thumbs-up'd tracks are also in the library feed; only what
+                // the "Liked Music" list doesn't already cover is worth a
+                // second section.
+                librarySongs = added.await().filterNot { it.videoId in likedIds },
+                shelves = shelves,
+            )
+        }
+    }
+
+    /**
+     * What YouTube Music would play on after [videoId]. Feeds AutoPlay; the
+     * seed track itself comes back first, so callers filter what they have.
+     */
+    suspend fun radio(videoId: String): Result<List<Song>> = call("radio:$videoId") {
+        InnertubeParser.parseWatchQueue(Innertube.next(videoId))
+    }
+
+    /**
+     * The artist and album pages a track links out to.
+     *
+     * Search rows carry them, but home cards and anything already sitting in a
+     * queue often don't — and the credits in the player have to lead somewhere
+     * either way. A track's own watch queue entry always names both.
+     */
+    suspend fun trackLinks(videoId: String): Result<Song> = call("links:$videoId") {
+        InnertubeParser.parseWatchQueue(Innertube.next(videoId))
+            .firstOrNull { it.videoId == videoId }
+            ?: error("no watch entry for $videoId")
+    }
+
+    /**
+     * One page of a browse feed's tracks, and the token for the page after
+     * it — null once there is nothing more. [suggested] is only ever
+     * non-empty for a playlist page — see [InnertubeParser.parsePlaylistShelf].
+     */
+    data class SongPage(
+        val songs: List<Song>,
+        val continuation: String?,
+        val suggested: List<Song> = emptyList(),
+        /**
+         * Whether the release this page describes is in the library. Only the
+         * first page can answer — a continuation carries rows and nothing else
+         * — so it is null from [moreSongs] and must not overwrite what
+         * [browseSongs] already established.
+         */
+        val library: LibraryState? = null,
+        /**
+         * Whether this page's playlist is one the account made rather than one
+         * it saved — see [InnertubeParser.parsePlaylistOwned]. Null for an
+         * album, a continuation, or a page that doesn't say.
+         */
+        val owned: Boolean? = null,
+        /**
+         * What the page calls itself — only needed by callers that opened it
+         * with nothing but a browse id, i.e. a tapped link. Null on a
+         * continuation, which carries rows and no header.
+         */
+        val header: InnertubeParser.BrowseHeader? = null,
+        /**
+         * The editorial blurb YouTube Music writes for the release, when it
+         * has one — see [InnertubeParser.parseDescription]. Null from a
+         * continuation, same as [header].
+         */
+        val description: String? = null,
+    )
+
+    /**
+     * The first page of an album/playlist's tracks, and nothing more.
+     *
+     * Deliberately not the whole list. Following every continuation before
+     * returning meant a long playlist spent up to ten round trips showing a
+     * spinner, when every row needed to fill the first screenful was in the
+     * first response. The rest arrives behind a page that is by then already
+     * being read — see [moreSongs].
+     */
+    suspend fun browseSongs(browseId: String): Result<SongPage> = call("browse:$browseId") {
+        val response = Innertube.browse(browseId)
+        val page = pageOf(response)
+        // Only a playlist has an owner in the sense that matters — see
+        // parsePlaylistOwned — and only its own first response can be asked.
+        if (!browseId.startsWith("VL")) page
+        else page.copy(owned = InnertubeParser.parsePlaylistOwned(response))
+    }
+
+    /** The page [SongPage.continuation] points at. */
+    suspend fun moreSongs(token: String): Result<SongPage> = call("browse:more") {
+        pageOf(Innertube.browseContinuation(token))
+    }
+
+    /**
+     * Whether [browseId] is a playlist the account made — see
+     * [InnertubeParser.parsePlaylistOwned].
+     *
+     * The same question [browseSongs] answers on the way past, asked on its own
+     * by whatever needs it without a page open: holding a playlist card offers
+     * Rename and Delete, and the card itself cannot say whether either applies.
+     * The rows it fetches are thrown away, which is the price of one request for
+     * a menu that would otherwise have to guess.
+     */
+    suspend fun playlistOwned(browseId: String): Result<Boolean?> = call("owner:$browseId") {
+        InnertubeParser.parsePlaylistOwned(Innertube.browse(browseId))
+    }
+
+    private fun pageOf(response: JsonObject): SongPage {
+        val library = InnertubeParser.parseLibraryState(response)
+        val header = InnertubeParser.parseBrowseHeader(response)
+        // A playlist page is scoped to its own shelf so its "Suggested
+        // tracks" never read as songs the user added — see
+        // parsePlaylistShelf. Anything else (album, library, history) has no
+        // such shelf, and falls back to the layout-agnostic walk.
+        InnertubeParser.parsePlaylistShelf(response)?.let { shelf ->
+            return SongPage(shelf.songs, shelf.continuation, shelf.suggested, library, header = header)
+        }
+        return SongPage(
+            // One response can name the same track twice — an album page that
+            // also carries a "you might also like" shelf, say. Collecting into a
+            // map used to take care of that; paging by hand means saying so.
+            songs = InnertubeParser.collectSongsDeep(response).distinctBy { it.videoId },
+            continuation = InnertubeParser.continuationToken(response),
+            library = library,
+            header = header,
+            description = InnertubeParser.parseDescription(response),
+        )
+    }
+
+    /**
+     * The complete track listing behind an album or playlist browse id.
+     *
+     * The whole list rather than [browseSongs]' first page, because the callers
+     * are the ones that act on all of it at once — "Add to queue" on a card
+     * whose page was never opened. Queueing the first hundred rows of a
+     * three-hundred-track playlist and calling it the playlist would be a
+     * quieter kind of wrong than failing outright.
+     *
+     * Takes as long as the list is long — see [songsPaged].
+     */
+    suspend fun allSongs(browseId: String): Result<List<Song>> = call("all:$browseId") {
+        songsPaged(browseId).ifEmpty { error("No tracks here") }
+    }
+
+    /**
+     * Every track behind a browse id, following continuations.
+     *
+     * A playlist page returns its first ~100 rows and a token for the rest, so
+     * a long list otherwise arrives silently truncated. Capped at
+     * [MAX_PAGES] so a runaway feed can't hold the UI open forever, and a
+     * failed page keeps whatever was already collected.
+     *
+     * Holds its caller until the last page lands, so it belongs behind things
+     * nobody is watching — the library sync, an artist's back catalogue. For
+     * anything a screen is waiting on, use [browseSongs] and [moreSongs].
+     */
+    private suspend fun songsPaged(browseId: String): List<Song> {
+        val out = LinkedHashMap<String, Song>()
+        var response = Innertube.browse(browseId)
+        var page = 1
+        while (true) {
+            // Same shelf-scoping as pageOf: a playlist (Liked Music and the
+            // Library Songs auto-playlist included) is read from its own
+            // shelf so a trailing "Suggested tracks" shelf never joins in.
+            val shelf = InnertubeParser.parsePlaylistShelf(response)
+            (shelf?.songs ?: InnertubeParser.collectSongsDeep(response)).forEach { out[it.videoId] = it }
+            val token = shelf?.continuation ?: InnertubeParser.continuationToken(response)
+            if (token == null || page++ >= MAX_PAGES) break
+            response = runCatching { Innertube.browseContinuation(token) }.getOrNull() ?: break
+        }
+        return out.values.toList()
+    }
+
+    const val MAX_PAGES = 10
+
+    /**
+     * Liked Music: the `LM` auto-playlist, addressed as a playlist browse id.
+     * Public because it is also the page a track has to disappear from the
+     * moment it stops being liked — see MainViewModel's `dropFromLikedLists`.
+     */
+    const val LIKED_MUSIC = "VLLM"
+
+    /** Songs explicitly added to the library — distinct from Liked Music. */
+    private const val LIBRARY_SONGS = "FEmusic_liked_videos"
+
+    /** Saved and own playlists; also what the "add to playlist" picker lists. */
+    private const val LIBRARY_PLAYLISTS = "FEmusic_liked_playlists"
+
+    /**
+     * What the playlists shelf is called in a [LibraryPage].
+     *
+     * Coined here, and named here rather than spelt out at each use, because it
+     * is the only shelf in the library anything else looks for by name: it is
+     * the one the create tile leads (see LibraryScreen) and the one a rename or
+     * a delete has to reach into (see MainViewModel's `editPlaylistShelf`).
+     * Three copies of a bare "Playlists" is three places a retitling silently
+     * turns those features off.
+     */
+    const val PLAYLISTS_SHELF = "Playlists"
+
+    private val LIBRARY_FEEDS = listOf(
+        PLAYLISTS_SHELF to LIBRARY_PLAYLISTS,
+        "Albums" to "FEmusic_liked_albums",
+        "Artists" to "FEmusic_library_corpus_track_artists",
+        "Subscriptions" to "FEmusic_library_corpus_artists",
+        "Podcasts" to "FEmusic_library_non_music_audio_list",
+    )
+
+    // ---- Writes -------------------------------------------------------------
+
+    /**
+     * The account's own state for one track — rating and library membership.
+     *
+     * Deliberately a lookup rather than something cached with the [Song]: a
+     * track reaching the player through the queue has been round-tripped
+     * through a MediaItem, which carries an id and little else, and the
+     * feedback tokens are per-row anyway. Fetched when a menu is opened, which
+     * is the only moment the answer is looked at.
+     */
+    suspend fun songMenu(videoId: String): Result<SongMenu> = call("menu:$videoId") {
+        InnertubeParser.parseSongMenu(Innertube.next(videoId), videoId)
+            ?: error("no menu for $videoId")
+    }
+
+    suspend fun rate(videoId: String, status: LikeStatus): Result<Unit> =
+        call("rate:$videoId") { Innertube.rate(videoId, status) }
+
+    /** Adds or removes a track from the library; [token] says which. */
+    suspend fun setLibraryStatus(token: String): Result<Unit> =
+        call("library:feedback") { Innertube.sendFeedback(token) }
+
+    /**
+     * Saves an album or playlist to the library, or removes it. [playlistId] is
+     * the one the page named — see [LibraryState].
+     */
+    suspend fun setSaved(playlistId: String, saved: Boolean): Result<Unit> =
+        call("library:$playlistId") { Innertube.ratePlaylist(playlistId, saved) }
+
+    /**
+     * The playlists a track can be added to. Not paged: an account with more
+     * than one page of playlists is rare, and the picker is a list to scroll
+     * rather than a feed to follow.
+     */
+    suspend fun userPlaylists(): Result<List<UserPlaylist>> = call("playlists") {
+        InnertubeParser.parseUserPlaylists(Innertube.browse(LIBRARY_PLAYLISTS))
+    }
+
+    /** Creates a playlist, optionally seeded with [videoIds]; returns its id. */
+    suspend fun createPlaylist(
+        title: String,
+        privacy: PlaylistPrivacy,
+        videoIds: List<String> = emptyList(),
+    ): Result<String> = call("playlist:create") {
+        Innertube.createPlaylist(title, privacy, videoIds = videoIds)
+    }
+
+    /**
+     * Adds tracks to a playlist. Succeeds with the per-entry ids YouTube minted
+     * for them — see [Innertube.addToPlaylist]. A caller with nothing on screen
+     * to update can ignore the map; one splicing the row into a playlist it is
+     * looking at needs it for the row's "remove".
+     */
+    suspend fun addToPlaylist(
+        playlistId: String,
+        videoIds: List<String>,
+    ): Result<Map<String, String>> =
+        call("playlist:add") { Innertube.addToPlaylist(playlistId, videoIds) }
+
+    /** [entries] are (setVideoId, videoId) pairs — see [Song.setVideoId]. */
+    suspend fun removeFromPlaylist(
+        playlistId: String,
+        entries: List<Pair<String, String>>,
+    ): Result<Unit> = call("playlist:remove") {
+        Innertube.removeFromPlaylist(playlistId, entries)
+    }
+
+    suspend fun renamePlaylist(playlistId: String, title: String): Result<Unit> =
+        call("playlist:rename") { Innertube.renamePlaylist(playlistId, title) }
+
+    suspend fun deletePlaylist(playlistId: String): Result<Unit> =
+        call("playlist:delete") { Innertube.deletePlaylist(playlistId) }
+
+    /**
+     * Artist page. The landing page only lists ~5 songs, so the linked
+     * "Top songs" playlist is fetched to fill the list out.
+     */
+    suspend fun artistPage(browseId: String): Result<ArtistPage> = call("artist:$browseId") {
+        val page = InnertubeParser.parseArtistPage(Innertube.browse(browseId))
+        val fullSongs = page.moreSongsBrowseId?.let { playlistId ->
+            runCatching { songsPaged(playlistId) }.getOrNull()
+        }
+        if (!fullSongs.isNullOrEmpty()) page.copy(songs = fullSongs) else page
+    }
+
+    private suspend fun <T> call(label: String, block: suspend () -> T): Result<T> =
+        withContext(Dispatchers.IO) {
+            runCatching { block() }
+                // runCatching catches Throwable, cancellation included, which
+                // would turn "the user typed another letter" into a failed
+                // Result and put the abandoned request's error on screen.
+                // Cancellation isn't this call's to answer for.
+                .onFailure { if (it is CancellationException) throw it }
+                .onSuccess { Log.d(TAG, "$label ok") }
+                .onFailure { Log.w(TAG, "$label failed: ${it.message}") }
+        }
+}
