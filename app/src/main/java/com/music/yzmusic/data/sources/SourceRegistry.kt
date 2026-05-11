@@ -209,3 +209,126 @@ object SourceRegistry {
     }
 
     /** The user's own module index, if they have set one. */
+    fun customModule(): SourceConfig? =
+        configs.value.firstOrNull { it.kind == SourceKind.CUSTOM_MODULE }
+
+    /**
+     * Points the custom module at [url], replacing whatever was there.
+     *
+     * Only ever one: a second index would be a second full search on every
+     * track for a feature whose whole purpose is "use mine instead", and the
+     * order between two of them would be arbitrary. So this replaces rather
+     * than appends, and a blank [url] clears it.
+     *
+     * The replacement is a *new* [SourceConfig] rather than an edit of the old
+     * one, so [publish] sees a different id and drops the warm [ModuleSource]
+     * built against the previous index — see [configuredBy].
+     */
+    fun setCustomModule(url: String, label: String = "") {
+        val trimmed = url.trim()
+        val without = configs.value.filterNot { it.kind == SourceKind.CUSTOM_MODULE }
+        if (trimmed.isEmpty()) {
+            publish(without)
+            return
+        }
+        publish(
+            without + SourceConfig(
+                kind = SourceKind.CUSTOM_MODULE,
+                label = label.trim(),
+                baseUrl = trimmed,
+                enabled = true,
+            ),
+        )
+    }
+
+    private fun publish(next: List<SourceConfig>, persist: Boolean = true) {
+        configs.value = next
+        // Rebuilt against the previous map so that an untouched source keeps
+        // the instance it already had, rather than being replaced by an
+        // identical-but-cold one every time an unrelated row is toggled.
+        val previous = instances
+        instances = next.associate { config ->
+            val existing = previous[config.id]?.takeIf { it.configuredBy(config) }
+            config.id to (existing ?: build(config))
+        }
+        if (persist && ::prefs.isInitialized) {
+            prefs.edit()
+                .putString(KEY_SOURCES, json.encodeToString(ListSerializer(SourceConfig.serializer()), next))
+                .apply()
+        }
+    }
+
+    /**
+     * Health-checks a config that hasn't been saved — what the editor's Test
+     * button asks.
+     *
+     * Built fresh and thrown away rather than routed through [instances],
+     * which hold the *stored* config: testing one of those would report on the
+     * old address, which is precisely the state the user is in the middle of
+     * correcting.
+     */
+    suspend fun probeCandidate(config: SourceConfig): SourceHealth = build(config).health()
+
+    private fun build(config: SourceConfig): MusicSource = when (config.kind) {
+        // Same protocol, same implementation — the kinds differ only in rank.
+        SourceKind.CUSTOM_MODULE -> ModuleSource(config)
+        SourceKind.MODULE -> ModuleSource(config)
+        SourceKind.JIOSAAVN -> JioSaavnSource(config)
+        SourceKind.YOUTUBE -> YouTubeSource(config)
+    }
+
+    /**
+     * Whether an already-built instance still matches its stored config —
+     * false after an edit that changes where it points, which is exactly when
+     * the warm instance must be thrown away.
+     */
+    private fun MusicSource.configuredBy(config: SourceConfig): Boolean =
+        this is ConfigBacked && this.config == config
+
+    /** Implemented by sources that carry their [SourceConfig], so [publish] can tell a real edit from a no-op. */
+    internal interface ConfigBacked {
+        val config: SourceConfig
+    }
+
+    // ── Track identity ──────────────────────────────────────────────────
+
+    /**
+     * A source-backed track's id, as it travels through the queue.
+     *
+     * Packed into the existing [Song.videoId][com.music.yzmusic.data.model.Song.videoId]
+     * rather than added beside it: that field is the app's media id everywhere —
+     * the queue, the notification, the history, the like state — and a second
+     * identity field would have to be threaded through every one of them, with
+     * each place that forgot silently falling back to treating the track as
+     * YouTube's.
+     */
+    fun trackKey(configId: String, trackId: String) = "$PREFIX$configId$SEPARATOR$trackId"
+
+    /** The `(configId, trackId)` inside a [trackKey], or null if this is an ordinary YouTube id. */
+    fun parseTrackKey(key: String): Pair<String, String>? {
+        if (!key.startsWith(PREFIX)) return null
+        val body = key.removePrefix(PREFIX)
+        val cut = body.indexOf(SEPARATOR)
+        if (cut <= 0) return null
+        return body.substring(0, cut) to body.substring(cut + SEPARATOR.length)
+    }
+
+    /** The playback URI for a source-backed track; [PlaybackService] resolves it at open time. */
+    fun trackUri(configId: String, trackId: String): String =
+        Uri.Builder()
+            .scheme("yzmusic")
+            .authority("source")
+            .appendQueryParameter("s", configId)
+            .appendQueryParameter("t", trackId)
+            .build()
+            .toString()
+
+    private val BUILT_IN_KINDS = listOf(SourceKind.JIOSAAVN, SourceKind.YOUTUBE)
+
+    /** What the build-time module index is called on screen, in place of its host. */
+    private const val ENV_MODULE_LABEL = "Ricky's Addon"
+
+    private const val KEY_SOURCES = "sources"
+    private const val PREFIX = "src:"
+    private const val SEPARATOR = "::"
+}
