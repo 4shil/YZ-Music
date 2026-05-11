@@ -164,3 +164,109 @@ object TrackMatcher {
      * reason to ask is that the check is the last thing standing between a
      * listener and the wrong recording.
      */
+    fun withinSeconds(candidate: Song, target: Target, seconds: Int): Boolean {
+        val wanted = target.durationSec ?: return false
+        val got = secondsOf(candidate.durationText) ?: return false
+        return abs(wanted - got) <= seconds
+    }
+
+    /**
+     * Kept for the callers that only want a yes or no — the YouTube seed
+     * lookup behind AutoPlay, and the tests.
+     */
+    fun matches(candidate: Song, title: String, artist: String, durationSec: Int? = null): Boolean =
+        score(candidate, Target(title, artist, durationSec)) != null
+
+    // ── Title ───────────────────────────────────────────────────────────────
+
+    /**
+     * A title split into the part that is the recording's identity and the
+     * parts that are the listing's.
+     */
+    internal data class TitleParts(
+        /** The title proper, lowercased, one entry per word. */
+        val words: List<String>,
+        /** [words] with everything but letters and digits removed — what identity is compared on. */
+        val core: String,
+        /** Markers that mean a different take of the same song: `remix`, `live`, `acoustic`. */
+        val versions: Set<String>,
+        /** Words dropped with the packaging. A hint for scoring, never a veto. */
+        val context: Set<String>,
+    )
+
+    internal fun parseTitle(raw: String, artist: String = ""): TitleParts {
+        val versions = sortedSetOf<String>()
+        val context = mutableSetOf<String>()
+        var text = raw.lowercase(Locale.ROOT).replace("&", " and ")
+
+        // Bracketed asides, innermost first: "(From "Satyamev Jayate")",
+        // "[Official Audio]", "(Live at Wembley)".
+        repeat(BRACKET_PASSES) {
+            if (!BRACKETED.containsMatchIn(text)) return@repeat
+            text = BRACKETED.replace(text) { match ->
+                classify(match.groupValues[1], versions, context)
+                " "
+            }
+        }
+        // An unbalanced bracket — a title truncated mid-aside — takes the rest
+        // of the line with it rather than leaving half an aside in the core.
+        text.indexOfFirst { it == '(' || it == '[' }.takeIf { it >= 0 }?.let { open ->
+            classify(text.substring(open), versions, context)
+            text = text.substring(0, open)
+        }
+
+        // Dash- and pipe-separated tails: "Paniyon Sa - Satyamev Jayate",
+        // "Song | Official Video". The head is normally the title, but the
+        // "Artist - Title" upload convention inverts that, so a head that is
+        // just the artist's name hands over to the tail instead of eating it.
+        repeat(DASH_PASSES) {
+            val dash = DASH.find(text) ?: return@repeat
+            val head = text.substring(0, dash.range.first)
+            val tail = text.substring(dash.range.last + 1)
+            text = if (isArtistName(head, artist)) {
+                classify(head, versions, context)
+                tail
+            } else {
+                classify(tail, versions, context)
+                head
+            }
+        }
+
+        // A feat. credit belongs to the artist field wherever a catalogue
+        // chooses to print it.
+        text = text.replace(FEATURING, " ")
+
+        var words = text.split(WORD_SPLIT)
+            .map { it.replace(NON_ALNUM, "") }
+            .filter { it.isNotEmpty() && it !in JOINING_WORDS }
+        // "Paniyon Sa Full Song", "Tum Hi Ho Audio" — an upload's trailing
+        // label, printed without brackets to hang it on. Never stripped down
+        // to nothing: a track really called "Song" keeps its name.
+        while (words.size > 1 && words.last() in TRAILING_NOISE) {
+            words = words.dropLast(1)
+        }
+
+        return TitleParts(
+            words = words,
+            core = words.joinToString(""),
+            versions = versions,
+            context = context,
+        )
+    }
+
+    /**
+     * Files one dropped segment under [versions] or [context].
+     *
+     * A segment naming a take — `Remix`, `Live at Wembley`, `Slowed + Reverb` —
+     * is identity and is kept. Everything else is packaging: the film, the
+     * label, `Official Video`, the remaster note. The phrases in
+     * [NEUTRAL_SEGMENTS] are the exceptions that read like takes and aren't:
+     * `Album Version` and `Radio Edit` describe the ordinary release, and
+     * treating them as versions would stop a module ever matching the plain
+     * listing of the same track.
+     */
+    private fun classify(
+        segment: String,
+        versions: MutableSet<String>,
+        context: MutableSet<String>,
+    ) {
