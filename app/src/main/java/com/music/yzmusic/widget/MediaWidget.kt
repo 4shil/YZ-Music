@@ -308,3 +308,100 @@ abstract class MediaWidget : AppWidgetProvider() {
          * `fitXY`, and a vertical stretch is the one that shows, because it slides
          * the baked blur out of line with the band drawn over it.
          */
+        private fun measure(
+            context: Context,
+            manager: AppWidgetManager,
+            id: Int,
+            fallbackWidthDp: Int,
+        ): WidgetSize {
+            val options = runCatching { manager.getAppWidgetOptions(id) }.getOrNull()
+            val landscape =
+                context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            val widthDp = options?.getInt(
+                if (landscape) {
+                    AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH
+                } else {
+                    AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH
+                },
+            )?.takeIf { it > 0 } ?: fallbackWidthDp
+            val heightDp = options?.getInt(
+                if (landscape) {
+                    AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT
+                } else {
+                    AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT
+                },
+            )?.takeIf { it > 0 } ?: FALLBACK_HEIGHT_DP
+
+            val wide = widthDp >= WIDE_LAYOUT_MIN_DP
+            val resources = context.resources
+            val density = resources.displayMetrics.density
+            val rawWidth = widthDp * density
+            val rawHeight = heightDp * density
+            // Every widget update parcels this bitmap to the host, which keeps it
+            // for as long as the widget is on screen. Bounded so a tablet-sized
+            // instance can't hand over something absurd; at phone sizes it never
+            // binds.
+            val longest = maxOf(rawWidth, rawHeight)
+            val scale = if (longest > MAX_BITMAP_PX) MAX_BITMAP_PX / longest else 1f
+            val band = resources.getDimensionPixelSize(
+                if (wide) R.dimen.widget_band_wide else R.dimen.widget_band_compact,
+            )
+            return WidgetSize(
+                wide = wide,
+                widthPx = (rawWidth * scale).roundToInt().coerceAtLeast(1),
+                heightPx = (rawHeight * scale).roundToInt().coerceAtLeast(1),
+                // Scaled by the same factor as the bitmap, or the blurred region
+                // would stop lining up with the band laid over it.
+                bandPx = (band * scale).roundToInt().coerceAtLeast(1),
+                cornerRadiusPx = resources.getDimension(R.dimen.widget_corner_radius) * scale,
+            )
+        }
+
+        // ---- constants ----
+
+        private val PROVIDERS = listOf(
+            MediaWidgetSquare::class.java to SQUARE_WIDTH_DP,
+            MediaWidgetWide::class.java to WIDE_WIDTH_DP,
+        )
+
+        private val TRANSPORT =
+            intArrayOf(R.id.widget_previous, R.id.widget_toggle, R.id.widget_next)
+
+        /**
+         * Renders run on a process-wide scope rather than one tied to a receiver:
+         * a provider instance lives only for the duration of one `onReceive`, and
+         * [refresh] is not called from a receiver at all.
+         */
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+        /** Comfortably inside the window a broadcast is allowed to stay open. */
+        private const val RENDER_TIMEOUT_MS = 8_000L
+
+        private const val MAX_BITMAP_PX = 1_200f
+
+        private const val ALPHA_ENABLED = 255
+        private const val ALPHA_DISABLED = 90
+
+        /** What the placeholder composite is remembered under. */
+        private const val KEY_NO_ARTWORK = "no-artwork"
+
+        private const val REQUEST_OPEN_PLAYER = 0
+    }
+}
+
+/** Grid spans, by the launcher's own arithmetic: a span of n cells is 70n − 30 dp. */
+private const val SQUARE_WIDTH_DP = 110
+
+private const val WIDE_WIDTH_DP = 250
+
+private const val FALLBACK_HEIGHT_DP = 110
+
+/** The 2×2 entry in the picker. See `res/xml/widget_media_square.xml`. */
+class MediaWidgetSquare : MediaWidget() {
+    override val fallbackWidthDp = SQUARE_WIDTH_DP
+}
+
+/** The 4×2 entry in the picker. See `res/xml/widget_media_wide.xml`. */
+class MediaWidgetWide : MediaWidget() {
+    override val fallbackWidthDp = WIDE_WIDTH_DP
+}
