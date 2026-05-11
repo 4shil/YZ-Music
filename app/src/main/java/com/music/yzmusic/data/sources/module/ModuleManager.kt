@@ -149,3 +149,143 @@ class ModuleManager {
             }
 
             TrackLog.d(TAG, "  Resolved download URL: $downloadUrl")
+            val request = Request.Builder().url(downloadUrl).build()
+            val jsCode = Http.client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    throw Exception("HTTP ${resp.code} downloading module ${module.id}")
+                }
+                resp.body?.string() ?: throw Exception("Empty body for module ${module.id}")
+            }
+            val baseUrl = downloadUrl.substringBeforeLast("/")
+
+            QuickJsExecutor.loadModule(module.id, jsCode, baseUrl).getOrThrow()
+
+            val loaded = LoadedModule(module = module, jsCode = jsCode, baseUrl = baseUrl)
+            loadedModules[module.id] = loaded
+            TrackLog.d(TAG, "  ✓ Loaded module ${module.id}: ${jsCode.length} chars, baseUrl=$baseUrl")
+            loaded
+        }.onFailure {
+            TrackLog.e(TAG, "  ✗ loadModule FAILED for ${module.id}: ${it.message}", it)
+        }
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────
+
+    suspend fun searchTracks(
+        loaded: LoadedModule,
+        query: String,
+        limit: Int = 50,
+        settings: Map<String, String> = emptyMap(),
+    ): Result<ModuleSearchResponse> = withContext(Dispatchers.IO) {
+        val contextArg = contextArg(settings)
+        TrackLog.d(TAG, "▶ searchTracks() module=${loaded.module.id} query=\"$query\" limit=$limit")
+        runCatching {
+            val result = QuickJsExecutor.callExport(
+                moduleId = loaded.module.id,
+                functionName = "searchTracks",
+                args = listOf("\"$query\"", limit.toString(), contextArg),
+            ).getOrThrow()
+            json.decodeFromString<ModuleSearchResponse>(result).also {
+                TrackLog.d(TAG, "  ✓ Parsed ${it.tracks.size} tracks (total=${it.total})")
+            }
+        }.onCancellation().onFailure {
+            TrackLog.e(TAG, "  ✗ searchTracks FAILED for ${loaded.module.id} query='$query': ${it.message}", it)
+        }
+    }
+
+    // ── Stream ────────────────────────────────────────────────────────────
+
+    /**
+     * @param quality the tier to ask for — `LOSSLESS`, `HIGH` or `LOW`.
+     *   Passed as the export's second argument *and* as a setting, because
+     *   modules read it from whichever of the two they were written against:
+     *   `getTrackStreamUrl(id, preferredQuality, context)` takes the argument,
+     *   while the multi-source ones prefer `context.settings.quality.value`
+     *   and treat the argument as a fallback. Sending only one of them left
+     *   the better-featured modules on their own default, which is how a
+     *   request for lossless arrived at the server as no request at all.
+     */
+    suspend fun getStreamUrl(
+        loaded: LoadedModule,
+        trackId: String,
+        quality: String = "",
+        settings: Map<String, String> = emptyMap(),
+    ): Result<ModuleStreamResponse> = withContext(Dispatchers.IO) {
+        val contextArg = contextArg(settings)
+        TrackLog.d(TAG, "▶ getStreamUrl() module=${loaded.module.id} trackId=$trackId quality=$quality")
+        runCatching {
+            val result = QuickJsExecutor.callExport(
+                moduleId = loaded.module.id,
+                functionName = "getTrackStreamUrl",
+                args = listOf("\"$trackId\"", "\"$quality\"", contextArg),
+            ).getOrThrow()
+            json.decodeFromString<ModuleStreamResponse>(result).also {
+                TrackLog.d(TAG, "  ✓ streamUrl=${it.streamUrl.take(100)} quality=${it.track?.audioQuality}")
+            }
+        }.onCancellation().onFailure {
+            TrackLog.e(TAG, "  ✗ getStreamUrl FAILED for ${loaded.module.id} trackId=$trackId: ${it.message}", it)
+        }
+    }
+
+    // ── Failure handling ──────────────────────────────────────────────────
+
+    /**
+     * Re-throws a cancellation that [runCatching] caught.
+     *
+     * `runCatching` catches `Throwable`, which includes the
+     * `CancellationException` a coroutine is cancelled with — so a caller
+     * giving up on a lookup came back through here as a *module failure*,
+     * logged with a stack trace as though somebody's server had misbehaved.
+     * It sent debugging in the wrong direction more than once: a lookup
+     * abandoned 66ms short of its answer reads identically to one the server
+     * refused. Worse, it lets the rest of the block carry on doing work for a
+     * coroutine that is already dead.
+     */
+    private fun <T> Result<T>.onCancellation(): Result<T> = also {
+        (exceptionOrNull() as? CancellationException)?.let { throw it }
+    }
+
+    // ── Context ───────────────────────────────────────────────────────────
+
+    /**
+     * The `context` argument every export takes.
+     *
+     * A module reads a setting as `context.settings.<key>.value` — the extra
+     * `value` wrapper is there because a module's own settings schema
+     * describes each key as an object with a type, a label and a current
+     * value, and the host hands back the same shape it was given. This was
+     * previously built as `{settings:{value:{…}}}`, one level short and with
+     * the wrapper on the wrong side, so *no* module could read *any* setting
+     * out of it: every lookup landed on undefined and fell through to the
+     * module's own default. Silent, and worth exactly one misplaced brace.
+     */
+    private fun contextArg(settings: Map<String, String>): String =
+        settings.entries.joinToString(
+            separator = ",",
+            prefix = "{settings:{",
+            postfix = "}}",
+        ) { (key, value) -> "\"$key\":{\"value\":\"$value\"}" }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────
+
+    fun unloadModule(moduleId: String) {
+        loadedModules.remove(moduleId)
+        QuickJsExecutor.unload(moduleId)
+    }
+
+    fun unloadAll() {
+        loadedModules.clear()
+        QuickJsExecutor.unloadAll()
+    }
+
+    private companion object {
+        const val TAG = "YZ Music"
+
+        /**
+         * How long a fetched index is trusted. Long enough that a run of
+         * tracks costs one fetch between them, short enough that a module
+         * published or pulled today is picked up without restarting the app.
+         */
+        const val INDEX_TTL_MS = 10 * 60 * 1000L
+    }
+}
