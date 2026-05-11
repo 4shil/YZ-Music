@@ -632,3 +632,366 @@ object SourceResolver {
      * [AudioCache][com.music.yzmusic.playback.AudioCache] decide how to treat
      * a YouTube id before anyone has asked a source for it.
      */
+    fun canSubstituteForYouTube(): Boolean =
+        SourceRegistry.active().indexOfFirst { it.kind == SourceKind.YOUTUBE } > 0
+
+    /**
+     * The sources ranked above [configId], in order.
+     *
+     * A config that isn't in [active] ranks last: it is disabled or incomplete,
+     * and everything that *is* enabled is worth trying ahead of it.
+     */
+    private fun rankedAbove(configId: String, active: List<MusicSource>): List<MusicSource> =
+        active.indexOfFirst { it.configId == configId }
+            .let { if (it < 0) active.size else it }
+            .let { active.take(it) }
+
+    /**
+     * The first stream any of [sources] can serve for [target] — **all of them
+     * asked at once** — or null if none of them has the recording.
+     *
+     * ### Why they race rather than queue
+     *
+     * Asking them in rank order is the obvious reading of an ordered list, and
+     * it is wrong here, because the sources differ in speed by nearly two orders
+     * of magnitude. Measured on '9:45':
+     *
+     * ```
+     *   JioSaavn        search 245ms + stream 131ms   ≈ 0.4s
+     *   Ricky's Addon   search → settled stream       ≈ 13.5s
+     * ```
+     *
+     * Queued behind the module, JioSaavn's answer arrives at ~14s. Nobody is
+     * waiting that long for a song to start, so YouTube wins the race in
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService]'s
+     * `resolveWithModulePriority` every single time and the listener gets
+     * 160kbps Opus — while a 320kbps copy sat four tenths of a second away.
+     * Raced, the same answer arrives before YouTube's own walk finishes and the
+     * track starts on it.
+     *
+     * ### What rank still decides, and what it no longer does
+     *
+     * Rank decides who is *asked* — [rankedAbove] is still what builds this list
+     * — and it breaks ties between answers that arrive together, since each
+     * sweep folds in everything that has already crossed the line and picks the
+     * best of them with [isBetter]. What it no longer does is let a slow
+     * favourite hold up a fast alternative.
+     *
+     * **A slow source is not thereby lost.** Whatever is returned here starts
+     * playing; if it is [SourceStream.belowRequest] the track is marked for a
+     * second look, and [upgradeFor] then asks *every* source again with no time
+     * limit and swaps up only if what comes back genuinely beats what is playing
+     * — see [worthSwapping]. So a module that needed thirteen seconds to find a
+     * FLAC still gets to serve it, mid-track, and one that needed thirteen
+     * seconds to find a 128kbps MP3 is correctly ignored. That is the trade this
+     * whole path exists to make: sound now, quality shortly after.
+     *
+     * Sources still running when an answer is taken are cancelled — the second
+     * look re-asks them properly, and leaving them running would spend a
+     * listener's radio on a result nothing is waiting for.
+     *
+     * @return the winning source alongside its stream, so callers can name it in
+     *   a log line without searching the list again.
+     */
+    internal suspend fun bestAcross(
+        sources: List<MusicSource>,
+        target: TrackMatcher.Target,
+        request: StreamRequest,
+        waitForAll: Boolean = false,
+        strictLength: Boolean = false,
+        accept: (MusicSource, SourceStream) -> Boolean = { _, _ -> true },
+    ): Pair<MusicSource, SourceStream>? = coroutineScope {
+        val running: MutableList<Deferred<Pair<MusicSource, SourceStream?>>> = sources
+            .map { source ->
+                async { source to matchAndStream(source, target, request, waitForAll, strictLength) }
+            }
+            .toMutableList()
+        var best: Pair<MusicSource, SourceStream>? = null
+        try {
+            while (running.isNotEmpty()) {
+                val first = select {
+                    running.forEach { candidate -> candidate.onAwait { candidate } }
+                }
+                // Anything that crossed the line while that one was being waited
+                // on is already sitting there. Folding those in costs no time at
+                // all and is what lets rank break a tie between two sources that
+                // both answered quickly.
+                val ready = listOf(first) + running.filter { it !== first && it.isCompleted }
+                running -= ready.toSet()
+                for (done in ready) {
+                    val (source, stream) = done.await()
+                    if (stream == null) continue
+                    if (!accept(source, stream)) continue
+                    if (isBetter(stream.format, best?.second?.format)) best = source to stream
+                }
+                // Something usable is in hand. Everything better than it is a
+                // maybe, and waiting for a maybe costs the listener a certainty.
+                if (best != null) break
+            }
+        } finally {
+            running.forEach { it.cancel() }
+        }
+        best
+    }
+
+    /**
+     * Searches [source] for the recording in [target] and streams it if one of
+     * the answers really is that recording — see [TrackMatcher].
+     *
+     * Each query the matcher offers is tried in turn, because the first one
+     * failing is usually the catalogue disagreeing about how a track is
+     * *filed*, not about whether it holds it. Stopping at the first empty
+     * answer is what made a source look like it was missing half of what it
+     * had. A source that *throws* still gets no second chance: that is its
+     * server having a problem, and asking it again differently won't fix it.
+     *
+     * @param waitForAll holds a multi-backend search open for every backend
+     *   instead of answering from whichever of them are quick — affordable only
+     *   when nobody is waiting on the first note.
+     * @param strictLength requires a candidate's runtime to agree with
+     *   [target]'s to within [UPGRADE_DRIFT_SEC]. Kept apart from [waitForAll]
+     *   because it is only meaningful when the target *has* a runtime:
+     *   [TrackMatcher.withinSeconds] answers false for every candidate against a
+     *   null one, so asking for this against a target that never carried a
+     *   duration is not a strict search but an empty one.
+     */
+    private suspend fun matchAndStream(
+        source: MusicSource,
+        target: TrackMatcher.Target,
+        request: StreamRequest,
+        waitForAll: Boolean = false,
+        strictLength: Boolean = false,
+    ): SourceStream? {
+        for (query in TrackMatcher.queries(target)) {
+            val candidates = attempt(source) {
+                source.search(query, limit = MATCH_CANDIDATES, waitForAll = waitForAll)
+            } ?: return null
+            var matches = TrackMatcher.ranked(candidates, target)
+            // The extra bar for standing in for one specific recording: the
+            // replacement has to be the same *length*, to the second or so. A
+            // title and an artist can agree across two different edits of a
+            // song; a runtime that agrees this closely is one recording, and
+            // nothing else is worth cutting a listener's audio for — or filing
+            // on their device under the name of the track they asked for.
+            if (strictLength) {
+                matches = matches.filter { TrackMatcher.withinSeconds(it, target, UPGRADE_DRIFT_SEC) }
+            }
+            if (matches.isEmpty()) continue
+            return streamBest(source, matches, target, request)
+        }
+        return null
+    }
+
+    /**
+     * Opens the best of [matches] that can actually serve [request].
+     *
+     * Two things happen here that a single "take the top match" cannot:
+     *
+     *  1. **Rows that advertise the tier asked for go first.** Every one of
+     *     these is genuinely the recording, so which one plays is a question
+     *     about quality, not identity — and a catalogue that has already said
+     *     it holds a FLAC is a better place to ask for one than a catalogue
+     *     that said nothing. Without this the order was confidence alone, and
+     *     a 16-bit FLAC lost to a Deezer row over how its artists were spelt.
+     *
+     *  2. **What comes back is checked against what was asked for.** A module
+     *     that cannot serve lossless does not always say so; some quietly walk
+     *     their own fallback chain and hand back a 128kbps MP3 with the right
+     *     title on it. Reading [StreamFormat] before accepting the URL is what
+     *     turns that into "this one can't, try the next" instead of into the
+     *     listener's evening.
+     *
+     * The under-quality stream is kept rather than dropped: if nothing better
+     * exists anywhere, playing the MP3 is still better than skipping the
+     * track. It is a floor, not a first choice.
+     */
+    /**
+     * The matching rows, in the order they are worth opening.
+     *
+     * Two rules, and the order of them is the point:
+     *
+     *  1. **Length decides which recording, first.** When any candidate agrees
+     *     with the runtime being asked for to within a couple of seconds, only
+     *     the candidates that agree are eligible at all. A catalogue holding
+     *     the track under its right title and right artist can still be
+     *     holding a different *cut* of it — a DJ edit on a compilation, an
+     *     extended mix — and the runtime is what separates those when nothing
+     *     in the title does. If nothing agrees, nothing is excluded: the
+     *     runtimes are simply not informative here and the score stands alone.
+     *
+     *  2. **Quality decides between equals, second.** Among rows that are the
+     *     same recording, one advertising a lossless copy is the better place
+     *     to ask. This was doing that job *first*, which is how a 185-second
+     *     "Punjabi Dj Holi songs" cut beat the 180-second album track on the
+     *     strength of the word `flac` in its listing. A declared tier is a
+     *     reason to prefer one copy of a recording over another; it is not a
+     *     reason to play a different recording.
+     */
+    internal fun preferred(
+        matches: List<Song>,
+        target: TrackMatcher.Target,
+        wantsLossless: Boolean,
+    ): List<Song> {
+        val sameLength = matches.filter { TrackMatcher.withinSeconds(it, target, SAME_RECORDING_SEC) }
+        val eligible = sameLength.ifEmpty { matches }
+        if (!wantsLossless) return eligible
+        // Stable, so the confidence order [TrackMatcher.ranked] produced
+        // survives inside each tier.
+        return eligible.sortedByDescending { it.sourceQuality == ModuleSource.LOSSLESS }
+    }
+
+    private suspend fun streamBest(
+        source: MusicSource,
+        matches: List<Song>,
+        target: TrackMatcher.Target,
+        request: StreamRequest,
+    ): SourceStream? {
+        val wantsLossless = request is StreamRequest.Lossless
+        val ordered = preferred(matches, target, wantsLossless)
+        var settleFor: SourceStream? = null
+        for (match in ordered.take(STREAM_ATTEMPTS)) {
+            val trackId = SourceRegistry.parseTrackKey(match.videoId)?.second ?: match.videoId
+            val opened = attempt(source) { source.stream(trackId, request) } ?: continue
+            // The row this URL came from knows how long the recording is; the
+            // URL itself doesn't. Carried along so a caller swapping this into
+            // a track already playing can check it — see [SourceStream.durationSec].
+            val stream = opened.copy(durationSec = TrackMatcher.secondsOf(match.durationText))
+            val served = stream.format
+            if (!wantsLossless || served.isLossless == true || served.statesNothingLossy) {
+                TrackLog.d(
+                    TAG,
+                    "${source.displayName} matched '${match.title}' by '${match.artist}' → ${served.summary}",
+                )
+                return stream
+            }
+            TrackLog.d(TAG, "${source.displayName} offered ${served.summary} for '${match.title}'; looking further")
+            // The floor is the *best* of what was refused, not the first of
+            // it. These arrive in match order, which has nothing to do with
+            // quality: a 320kbps AAC and a 128kbps MP3 are both rejections,
+            // and which one the listener ends up on if nothing better exists
+            // should not come down to which catalogue happened to be asked
+            // first.
+            settleFor = betterOf(settleFor, stream.copy(belowRequest = true))
+        }
+        return settleFor
+    }
+
+    /**
+     * Whether [candidate] is a better rendition than [current], by codec first
+     * and bitrate second. A null [current] is beaten by anything.
+     *
+     * The one rule for ranking two copies of the same recording, kept in one
+     * place because three different walks now need it: [streamBest] choosing
+     * between rows inside a source, [bestAcross] choosing between sources, and
+     * [upgradeFor] choosing what to cut into a track that is already playing.
+     *
+     * Note that this is *not* [worthSwapping]. This asks which of two streams is
+     * better; that one asks whether the difference is worth a break in the
+     * audio, which is a much higher bar and only meaningful mid-playback.
+     */
+    internal fun isBetter(candidate: StreamFormat, current: StreamFormat?): Boolean {
+        if (current == null) return true
+        if (candidate.isLossless != current.isLossless) return candidate.isLossless == true
+        return (candidate.kbps ?: 0) > (current.kbps ?: 0)
+    }
+
+    /** The higher-quality of two streams — see [isBetter]. */
+    private fun betterOf(current: SourceStream?, candidate: SourceStream): SourceStream =
+        if (current == null || isBetter(candidate.format, current.format)) candidate else current
+
+    /**
+     * Whether a format has said nothing that rules lossless out.
+     *
+     * Unknown is not the same as lossy, and a source that reports neither a
+     * codec nor a bitrate has not failed the request — it has declined to
+     * describe it, and the decoder will say soon enough. A stated bitrate is
+     * different: nothing states a bitrate for a FLAC.
+     */
+    private val StreamFormat.statesNothingLossy: Boolean
+        get() = isLossless == null && kbps == null
+
+    /**
+     * Runs [block], turning any failure into null and a log line.
+     *
+     * Every call into a source is a call to somebody else's server, and a
+     * source that throws must cost the *source* its turn, not the track its
+     * playback. Cancellation is re-thrown: that is the caller giving up, and
+     * swallowing it would keep walking sources for a track nobody is waiting
+     * for any more.
+     */
+    private suspend fun <T> attempt(source: MusicSource, block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        TrackLog.w(TAG, "${source.displayName} failed: ${e.javaClass.simpleName}: ${e.message}")
+        null
+    }
+
+    /**
+     * How many answers per query are worth weighing.
+     *
+     * Wider than it needs to be for a well-behaved catalogue, because
+     * [TrackMatcher.best] scores the whole list rather than taking the first
+     * acceptable row: a backend that ranks the karaoke version, three covers
+     * and a sped-up edit above the album cut still has the album cut in here
+     * somewhere, and the extra rows cost one response body, not one request.
+     */
+    private const val MATCH_CANDIDATES = 15
+
+    /**
+     * How many of the matching rows are worth actually opening.
+     *
+     * Each one is a round trip to a stream endpoint, so this is the budget for
+     * "the first copy wasn't the quality asked for" — enough to get past a
+     * module whose lossless backend is down, not enough to spend a listener's
+     * patience walking a whole result list.
+     */
+    private const val STREAM_ATTEMPTS = 3
+
+    /**
+     * How far a replacement's runtime may sit from the playing track's before
+     * it stops being the same recording.
+     *
+     * Far tighter than [TrackMatcher]'s own tolerance, and deliberately: that
+     * one is deciding what to play, this one is deciding whether to cut the
+     * audio a listener is in the middle of. Two seconds allows for a service
+     * rounding a runtime differently and nothing else.
+     */
+    private const val UPGRADE_DRIFT_SEC = 2
+
+    /**
+     * How close two runtimes have to be to be the same cut of a song.
+     *
+     * Wide enough for a catalogue rounding, or a second of lead-in trimmed
+     * differently. Narrow enough to separate the album track from the DJ edit
+     * sitting next to it in the same search results under the same name.
+     */
+    private const val SAME_RECORDING_SEC = 3
+
+    /**
+     * The top of YouTube's own AAC ladder, and so the bar a lossy source has to
+     * clear to be worth keeping as a file — see [forDownload].
+     *
+     * Not a measurement of any one track. Most of the catalogue offers itag 140
+     * at 128kbps and a signed-in account reaches itag 141 at 256, and which of
+     * those a given track has cannot be known without resolving it — a full
+     * player walk, spent to answer a question about a stream we may then not
+     * use. So the bar is the *best* YouTube could turn out to have: clearing it
+     * means the source's copy wins whichever rung was waiting, and failing it
+     * means YouTube might well be better and is certainly the more reliable
+     * fetch. JioSaavn's 320 clears it; its 160 does not, and neither does a
+     * module's 128kbps MP3 settle-for.
+     */
+    private const val YOUTUBE_BEST_AAC_KBPS = 256
+
+    /**
+     * How many kbps a lossy stream has to gain before it earns a seam in the
+     * audio — see [worthSwapping].
+     *
+     * Sized off the two rates this actually decides between: YouTube's Opus,
+     * which lands around 160, and a lossy module tier, which is 320. Anything
+     * much smaller would start firing on differences no one can hear.
+     */
+    private const val UPGRADE_MIN_GAIN_KBPS = 96
+}
