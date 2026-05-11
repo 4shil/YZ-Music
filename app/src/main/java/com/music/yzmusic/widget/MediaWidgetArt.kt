@@ -230,3 +230,101 @@ internal object MediaWidgetArt {
      * weaken on exactly the small widget where the region had to be clamped and
      * the blur matters most.
      */
+    private fun Canvas.blurBottom(source: Bitmap, regionPx: Int, bandPx: Int) {
+        val top = source.height - regionPx
+        val region = runCatching {
+            Bitmap.createBitmap(source, 0, top, source.width, regionPx)
+        }.getOrNull() ?: return
+
+        // Blurring at full size would be several hundred thousand pixels per
+        // pass for detail that is about to be thrown away regardless. Halved
+        // first, every radius below is a quarter of the work per halving and
+        // covers four times as much of the picture.
+        //
+        // How far down is set by the *weakest* level, not by a fixed size: what
+        // makes sampling the result back up invisible is that it holds no detail
+        // finer than its own pixels, and that is only true of a level whose blur
+        // is at least a pixel or so wide. Halve past that and the mildest level
+        // is a sharp thumbnail stretched over the widget — which is the blocky
+        // bilinear grid this whole approach exists to avoid, showing up in the
+        // one band where that level is the only one drawn.
+        val floorPx = regionPx * MIN_WORKING_SIGMA / (BLUR_SIGMAS.first() * bandPx)
+        val small = region.halvedTo(floorPx)
+        val w = small.width
+        val h = small.height
+        val pixels = IntArray(w * h)
+        if (w >= 2 && h >= 2) small.getPixels(pixels, 0, w, 0, 0, w, h)
+        if (small !== region) small.recycle()
+        // Not if it came back as [source] itself — which `createBitmap` is
+        // allowed to do when the subset is the whole bitmap, and which on a
+        // two-cell widget it is. Recycling that would destroy the very bitmap
+        // this canvas draws into.
+        if (region !== source) region.recycle()
+        if (w < 2 || h < 2) return
+
+        // Real pixels to working ones. The two axes are scaled alike, so one
+        // factor does for both.
+        val toWorking = h.toFloat() / regionPx
+
+        val scratch = IntArray(pixels.size)
+        // One working bitmap for all four levels, refilled before each. Safe
+        // because a canvas over a bitmap rasterises on the calling thread: the
+        // draw below has finished reading these pixels before the next level
+        // overwrites them.
+        val level = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val paint = Paint().apply { isFilterBitmap = true }
+
+        var applied = 0f
+        for (index in BLUR_SIGMAS.indices) {
+            // Each level carries on from the last rather than starting over.
+            // Blurs compose, and their sigmas add in quadrature, so reaching the
+            // next strength costs only the difference — which is why four levels
+            // are barely dearer than the strongest one alone.
+            val target = BLUR_SIGMAS[index] * bandPx * toWorking
+            val radius = boxRadiusFor(sqrt((target * target - applied * applied).coerceAtLeast(0f)))
+            if (radius >= 1) {
+                blurInPlace(pixels, scratch, w, h, radius)
+                val step = sigmaOf(radius)
+                applied = sqrt(applied * applied + step * step)
+            }
+            level.setPixels(pixels, 0, w, 0, 0, w, h)
+
+            // Sampled up by the shader rather than scaled into a region-sized
+            // bitmap first: four of those would be four full-size allocations
+            // for images that are only ever read once.
+            val soft = BitmapShader(level, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                setLocalMatrix(
+                    Matrix().apply {
+                        setScale(
+                            source.width.toFloat() / w,
+                            regionPx.toFloat() / h,
+                        )
+                        postTranslate(0f, top.toFloat())
+                    },
+                )
+            }
+            // Where this level fades in. Only the gradient's alpha matters —
+            // DST_IN keeps the blurred copy in proportion to it.
+            val start = top + STOPS[index] * regionPx
+            val end = top + (STOPS[index] + STOP_FEATHER).coerceAtMost(1f) * regionPx
+            val mask = LinearGradient(
+                0f, start, 0f, maxOf(end, start + 1f),
+                Color.TRANSPARENT, Color.WHITE, Shader.TileMode.CLAMP,
+            )
+            paint.shader = ComposeShader(soft, mask, PorterDuff.Mode.DST_IN)
+            drawRect(0f, top.toFloat(), source.width.toFloat(), source.height.toFloat(), paint)
+        }
+        level.recycle()
+    }
+
+    /**
+     * [this] halved until another halving would take it below [target] pixels
+     * tall — or [this] itself, if it is already that small.
+     *
+     * Halving is both the cheap way down and a real low-pass on the way: a
+     * bilinear downscale by exactly two averages each 2×2 block. Dropping
+     * straight to the target size in one step would still sample only 2×2, so
+     * most of the picture would never be looked at and the result would alias —
+     * which on a moving queue of covers is visible as the band flickering
+     * between tracks that ought to look alike.
+     */
