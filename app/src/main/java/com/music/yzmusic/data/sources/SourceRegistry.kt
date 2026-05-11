@@ -105,3 +105,107 @@ object SourceRegistry {
         // the user’s on/off choice survives an app update.
         val envUrl = BuildConfig.MODULE_INDEX_URL.trim()
         val withModule = if (envUrl.isNotEmpty()) {
+            val existingModule = seeded.firstOrNull { it.kind == SourceKind.MODULE }
+            if (existingModule == null) {
+                seeded + SourceConfig(
+                    kind = SourceKind.MODULE,
+                    label = ENV_MODULE_LABEL,
+                    baseUrl = envUrl,
+                    enabled = true,
+                )
+            } else if (existingModule.baseUrl != envUrl || existingModule.label.isBlank()) {
+                // The label is filled in as well as the URL, so the env-managed
+                // module is named rather than showing the bare index host —
+                // which is what [SourceConfig.displayName] falls back to.
+                seeded.map {
+                    if (it.kind == SourceKind.MODULE) {
+                        it.copy(baseUrl = envUrl, label = it.label.ifBlank { ENV_MODULE_LABEL })
+                    } else {
+                        it
+                    }
+                }
+            } else {
+                seeded
+            }
+        } else {
+            // No env URL: keep whatever the user had stored, but ensure there
+            // is no leftover env-managed module config lying around from a
+            // previous build that did have one.
+            seeded
+        }
+
+        // YouTube is not switchable — see [setEnabled] — so a config persisted
+        // as disabled by an earlier build would strand the app with no source
+        // it is allowed to turn back on.
+        val after = withModule.map {
+            if (it.kind == SourceKind.YOUTUBE && !it.enabled) it.copy(enabled = true) else it
+        }
+
+        publish(after, persist = after != stored)
+    }
+
+    /**
+     * Decodes a stored source list one entry at a time rather than as a
+     * single list, so one entry naming a kind this build no longer has —
+     * left over from before a kind was retired — doesn't take every other
+     * entry down with it. A strict `List<SourceConfig>` decode fails whole:
+     * one bad enum value and the user's real, working module config is
+     * silently gone along with it.
+     */
+    private fun decodeStored(raw: String): List<SourceConfig> {
+        val elements = runCatching { json.parseToJsonElement(raw).jsonArray }
+            .getOrElse { return emptyList() }
+        return elements.mapNotNull { element ->
+            runCatching { json.decodeFromJsonElement(SourceConfig.serializer(), element) }
+                .onFailure { TrackLog.w(TAG, "dropping unreadable stored source: ${it.message}") }
+                .getOrNull()
+        }
+    }
+
+    /** The enabled sources, module first and YouTube last, however they're stored. */
+    fun active(): List<MusicSource> =
+        configs.value
+            .filter { it.enabled && it.isComplete }
+            .sortedBy { it.kind.ordinal }
+            .mapNotNull { instances[it.id] }
+
+    fun instance(configId: String): MusicSource? = instances[configId]
+
+    fun config(configId: String): SourceConfig? = configs.value.firstOrNull { it.id == configId }
+
+    // ── Editing ─────────────────────────────────────────────────────────
+
+    fun add(config: SourceConfig) = publish(configs.value + config)
+
+    fun update(config: SourceConfig) =
+        publish(configs.value.map { if (it.id == config.id) config else it })
+
+    fun remove(configId: String) {
+        val target = config(configId) ?: return
+        if (target.kind in BUILT_IN_KINDS) return
+        publish(configs.value.filterNot { it.id == configId })
+    }
+
+    /**
+     * Turns one source on or off.
+     *
+     * YouTube is not switchable and silently ignores a request to disable it.
+     * It is the only source that can supply a home feed, radio or related
+     * tracks, and nothing else holds the full catalogue — switching it off
+     * doesn't even stop it being played, because a YouTube-queued track whose
+     * substitutes all miss still falls back to it. A switch that cannot honour
+     * its own off position is worse than no switch, so it isn't offered one:
+     * see [SourcesScreen][com.music.yzmusic.ui.screens.SourcesScreen].
+     */
+    fun setEnabled(configId: String, enabled: Boolean) {
+        if (!enabled && config(configId)?.kind == SourceKind.YOUTUBE) return
+        publish(configs.value.map { if (it.id == configId) it.copy(enabled = enabled) else it })
+    }
+
+    /** Toggle the MODULE source on or off by its config id. */
+    fun setModuleEnabled(enabled: Boolean) {
+        val module = configs.value.firstOrNull { it.kind == SourceKind.MODULE } ?: return
+        setEnabled(module.id, enabled)
+    }
+
+    /** The user's own module index, if they have set one. */
