@@ -270,3 +270,210 @@ object TrackMatcher {
         versions: MutableSet<String>,
         context: MutableSet<String>,
     ) {
+        val words = segment.split(WORD_SPLIT)
+            .map { it.replace(NON_ALNUM, "") }
+            .filter { it.isNotEmpty() }
+        if (words.isEmpty()) return
+        if (words.joinToString("") in NEUTRAL_SEGMENTS) return
+        val marks = words.filter { it in VERSION_WORDS }
+        if (marks.isNotEmpty()) {
+            versions += marks
+            return
+        }
+        context += words.filter { it.length > 2 && it !in NOISE_WORDS }
+    }
+
+    /** Whether [text] is nothing but (part of) [artist] — the "Artist - Title" upload shape. */
+    private fun isArtistName(text: String, artist: String): Boolean {
+        if (artist.isBlank()) return false
+        val words = text.split(WORD_SPLIT).map { it.replace(NON_ALNUM, "") }.filter { it.isNotEmpty() }
+        if (words.isEmpty()) return false
+        val credited = artist.lowercase(Locale.ROOT).split(WORD_SPLIT)
+            .map { it.replace(NON_ALNUM, "") }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        return words.all { it in credited }
+    }
+
+    // ── Artist ──────────────────────────────────────────────────────────────
+
+    /**
+     * Points for the credit agreeing, or null when it disagrees.
+     *
+     * The disagreement that matters is a cover: same title, different singer.
+     * The agreement that has to survive is a *partial* credit, because which
+     * of a duet's singers reaches the title is a formatting choice — YouTube's
+     * "Atif Aslam" and a module's "Atif Aslam, Tulsi Kumar" are one recording
+     * with two spellings of its credit, and refusing that pairing is what kept
+     * the module out of the way of the very tracks it held.
+     *
+     * A side with no credit at all scores zero rather than failing: there is
+     * nothing to disagree with, and the title has already had to match exactly.
+     */
+    private fun artistScore(wanted: String, got: String): Int? {
+        val want = artistNames(wanted)
+        val have = artistNames(got)
+        if (want.isEmpty() || have.isEmpty()) return 0
+        val shared = want.any { w -> have.any { h -> sameArtist(w, h) } }
+        if (!shared) return null
+        return if (want == have) ARTIST_EXACT else ARTIST_SHARED
+    }
+
+    /**
+     * The credited artists, each as its own list of words.
+     *
+     * Words rather than one run-together string, so that containment is
+     * checked on whole names: "Queen" is inside "Queensrÿche" as text and is
+     * not one of its artists, while "Atif Aslam" is genuinely one of
+     * "Atif Aslam, Tulsi Kumar". Single letters go — an initialled
+     * "A. R. Rahman" and a plain "AR Rahman" are the same person.
+     */
+    internal fun artistNames(value: String): Set<List<String>> = value
+        .lowercase(Locale.ROOT)
+        .split(ARTIST_SEPARATORS)
+        .map { name ->
+            name.split(WORD_SPLIT)
+                .map { it.replace(NON_ALNUM, "") }
+                .filter { it.length > 1 }
+        }
+        .filter { it.isNotEmpty() }
+        .toSet()
+
+    private fun sameArtist(a: List<String>, b: List<String>) = runOf(a, b) || runOf(b, a)
+
+    /** Whether [outer] contains [inner] as a run of whole words. */
+    private fun runOf(outer: List<String>, inner: List<String>): Boolean {
+        if (inner.isEmpty() || inner.size > outer.size) return false
+        return (0..outer.size - inner.size).any { at ->
+            outer.subList(at, at + inner.size) == inner
+        }
+    }
+
+    // ── Duration ────────────────────────────────────────────────────────────
+
+    /**
+     * Points for the runtimes agreeing, or null when they are too far apart to
+     * be the same recording.
+     *
+     * The strongest signal available, and the one that catches what titles
+     * cannot: the ten-minute loop, the album-side upload, the snippet. Only
+     * consulted when both sides state a runtime — most module rows do, and a
+     * queue row usually does.
+     */
+    private fun durationScore(wanted: Int?, got: Int?): Int? {
+        if (wanted == null || got == null) return 0
+        val drift = abs(wanted - got)
+        return when {
+            drift > DURATION_LIMIT_SEC -> null
+            drift <= DURATION_TIGHT_SEC -> DURATION_TIGHT
+            else -> DURATION_LOOSE
+        }
+    }
+
+    /** "3:45" or "1:02:03" as whole seconds; null for anything else. */
+    internal fun secondsOf(text: String?): Int? {
+        val parts = text?.trim()?.split(':')?.takeIf { it.size in 2..3 } ?: return null
+        val numbers = parts.map { it.trim().toIntOrNull() ?: return null }
+        return numbers.fold(0) { total, part -> total * 60 + part }.takeIf { it > 0 }
+    }
+
+    // ── Context ─────────────────────────────────────────────────────────────
+
+    /** A nudge when both listings mention the same film or album in their asides. */
+    private fun contextScore(wanted: TitleParts, got: TitleParts): Int =
+        if (wanted.context.any { it in got.context }) CONTEXT_SHARED else 0
+
+    // ── Weights ─────────────────────────────────────────────────────────────
+
+    /** Everything that reaches scoring has already matched on title and version. */
+    private const val BASE = 100
+    private const val ARTIST_EXACT = 25
+    private const val ARTIST_SHARED = 10
+
+    /**
+     * Carried by a match the runtime vouched for rather than the credit. A
+     * penalty, not a pass: any candidate whose credit genuinely agrees beats
+     * it by at least 25, so this only ever decides what plays when nothing
+     * properly credited exists.
+     */
+    private const val CREDITS_DISAGREE = -15
+
+    /**
+     * How exactly two runtimes must agree before that is allowed to stand in
+     * for a shared credit. To the second, near enough — this is the only
+     * evidence there is in that case, so it has to be the strong kind.
+     */
+    private const val CREDIT_OVERRIDE_SEC = 2
+    private const val DURATION_TIGHT = 40
+    private const val DURATION_LOOSE = 15
+    private const val CONTEXT_SHARED = 20
+
+    /** Within this many seconds is the same master, allowing for trimmed silence. */
+    private const val DURATION_TIGHT_SEC = 3
+
+    /**
+     * Past this, two tracks sharing a title are not sharing a recording.
+     * Wide enough for a fade or an intro a service trims differently, narrow
+     * enough to rule out an extended cut or a full-album upload.
+     */
+    private const val DURATION_LIMIT_SEC = 30
+
+    private const val BRACKET_PASSES = 3
+    private const val DASH_PASSES = 3
+
+    private val BRACKETED = Regex("""[(\[]([^()\[\]]*)[)\]]""")
+    private val DASH = Regex("""\s+[-–—|]+\s+""")
+    private val FEATURING = Regex("""\b(feat|ft|featuring|with)\b.*""")
+    private val WORD_SPLIT = Regex("""[\s.·]+""")
+    private val NON_ALNUM = Regex("""[^a-z0-9]""")
+    private val ARTIST_SEPARATORS =
+        Regex("""\s*(?:[,&/;·|]|\band\b|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b)\s*""")
+
+    /**
+     * What makes a listing a different recording rather than a different
+     * listing of the same one. A title carrying one of these on one side only
+     * is refused outright.
+     */
+    private val VERSION_WORDS = setOf(
+        "remix", "remixes", "rmx", "refix", "flip", "bootleg", "mashup", "medley",
+        "live", "concert", "unplugged", "acoustic", "instrumental", "karaoke",
+        // A stem is not the song. "Vocals Only", "Acapella", "Backing Track"
+        // and friends carry the right title and the right artist and are not
+        // remotely the recording anybody asked for.
+        "vocals", "vocal", "acapella", "acappella", "backing", "stems", "stem",
+        "cover", "demo", "reprise", "remake", "rework", "extended", "edit",
+        "version", "mix", "dub", "vip", "session", "sessions",
+        "sped", "slowed", "reverb", "nightcore", "lofi", "orchestral", "symphonic",
+        "part", "pt", "chapter",
+    )
+
+    /**
+     * Asides that read like a version and describe the ordinary release. The
+     * exception list to [VERSION_WORDS] — without it, "Song (Album Version)"
+     * and "Song" would be two different recordings.
+     */
+    private val NEUTRAL_SEGMENTS = setOf(
+        "albumversion", "originalversion", "originalmix", "singleversion",
+        "radioversion", "radioedit", "stereoversion", "monoversion",
+        "studioversion", "fullversion", "standardversion", "explicitversion",
+        "deluxeversion", "originaltrack",
+    )
+
+    /** Packaging words, worth nothing as a tie-break because everything has them. */
+    private val NOISE_WORDS = setOf(
+        "official", "video", "audio", "lyrics", "lyric", "lyrical", "visualizer",
+        "song", "songs", "full", "music", "the", "and", "from", "feat", "ft",
+        "featuring", "with", "new", "latest", "free", "download", "remaster",
+        "remastered", "explicit", "clean", "bonus", "track", "deluxe", "original",
+        "album", "single", "hd", "hq", "4k", "mp3",
+    )
+
+    /** Trailing labels an upload hangs on a title with no brackets to hold them. */
+    private val TRAILING_NOISE = setOf(
+        "song", "songs", "video", "audio", "lyrics", "lyric", "lyrical",
+        "official", "full", "hd", "hq", "4k", "mp3", "ost", "soundtrack",
+    )
+
+    /** Dropped from the core so that "Jack and Jill" and "Jack & Jill" are one title. */
+    private val JOINING_WORDS = setOf("and")
+}
