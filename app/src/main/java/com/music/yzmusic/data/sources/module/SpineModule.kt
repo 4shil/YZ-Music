@@ -48,3 +48,18 @@ data class SpineModule(
                 it.uppercase(Locale.ROOT).contains("FLAC")
         }
 
+    val hasHiRes: Boolean get() = tags.any { it.uppercase(Locale.ROOT).contains("HI-RES") }
+
+    val isDolbyAtmos: Boolean
+        get() = tags.any {
+            it.uppercase(Locale.ROOT).contains("ATMOS") || it.uppercase(Locale.ROOT).contains("DOLBY")
+        }
+}
+
+@Serializable
+data class SpineSource(
+    @SerialName("name") val name: String = "",
+    @SerialName("lang") val lang: String = "all",
+    @SerialName("id") val id: String = "",
+    @SerialName("baseUrl") val baseUrl: String = ".",
+)
