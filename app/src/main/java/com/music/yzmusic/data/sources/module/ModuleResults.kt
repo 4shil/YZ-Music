@@ -29,3 +29,26 @@ data class ModuleSearchResult(
 )
 
 /** The top-level response object from `searchTracks()`. */
+@Serializable
+data class ModuleSearchResponse(
+    @SerialName("tracks") val tracks: List<ModuleSearchResult> = emptyList(),
+    @SerialName("total") val total: Int = 0,
+)
+
+/** The top-level response object from `getTrackStreamUrl()`. */
+@Serializable
+data class ModuleStreamResponse(
+    @SerialName("streamUrl") val streamUrl: String = "",
+    @SerialName("track") val track: ModuleStreamTrack? = null,
+)
+
+/** Format metadata the module reports alongside the stream URL. */
+@Serializable
+data class ModuleStreamTrack(
+    @SerialName("id") val id: String = "",
+    @SerialName("audioQuality") val audioQuality: String = "",
+    @SerialName("mimeType") val mimeType: String? = null,
+    @SerialName("bitDepth") val bitDepth: Int? = null,
+    @SerialName("sampleRate") val sampleRate: Double? = null,
+    @SerialName("audioModes") val audioModes: List<String>? = null,
+)
