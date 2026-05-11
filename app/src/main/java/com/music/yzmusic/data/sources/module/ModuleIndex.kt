@@ -18,3 +18,14 @@ object ModuleIndex {
     private val excludedCategories = setOf("category:artworks", "category:testing")
     private val listSerializer = ListSerializer(SpineModule.serializer())
 
+    fun parseModules(json: Json, body: String): List<SpineModule> {
+        val obj = json.decodeFromString(JsonObject.serializer(), body)
+        return obj.entries
+            .filter { it.key.startsWith("category:") && it.key !in excludedCategories }
+            .flatMap { (_, value) ->
+                runCatching { json.decodeFromJsonElement(listSerializer, value) }
+                    .getOrElse { emptyList() }
+            }
+            .distinctBy { it.id }
+    }
+}
