@@ -316,3 +316,142 @@ public final class Utils {
     }
 
     /**
+     * Checks if a collection is null or empty.
+     *
+     * <p>
+     * This method can be also used for {@link com.grack.nanojson.JsonArray JsonArray}s.
+     * </p>
+     *
+     * @param collection the collection on which check if it's null or empty
+     * @return whether the collection is null or empty
+     */
+    public static boolean isNullOrEmpty(final Collection<?> collection) {
+        return collection == null || collection.isEmpty();
+    }
+
+    /**
+     * Checks if a {@link Map map} is null or empty.
+     *
+     * <p>
+     * This method can be also used for {@link com.grack.nanojson.JsonObject JsonObject}s.
+     * </p>
+     *
+     * @param map the {@link Map map} on which check if it's null or empty
+     * @return whether the {@link Map map} is null or empty
+     */
+    public static <K, V> boolean isNullOrEmpty(final Map<K, V> map) {
+        return map == null || map.isEmpty();
+    }
+
+    public static boolean isBlank(final String string) {
+        return string == null || string.isBlank();
+    }
+
+    @Nonnull
+    public static String join(
+            final String delimiter,
+            final String mapJoin,
+            @Nonnull final Map<? extends CharSequence, ? extends CharSequence> elements) {
+        return elements.entrySet().stream()
+                .map(entry -> entry.getKey() + mapJoin + entry.getValue())
+                .collect(Collectors.joining(delimiter));
+    }
+
+    /**
+     * Concatenate all non-null, non-empty and strings which are not equal to <code>"null"</code>.
+     */
+    @Nonnull
+    public static String nonEmptyAndNullJoin(final CharSequence delimiter,
+                                             final String... elements) {
+        return Arrays.stream(elements)
+                .filter(s -> !isNullOrEmpty(s) && !s.equals("null"))
+                .collect(Collectors.joining(delimiter));
+    }
+
+    /**
+     * Find the result of an array of string regular expressions inside an input on the first
+     * group ({@code 0}).
+     *
+     * @param input   the input on which using the regular expressions
+     * @param regexes the string array of regular expressions
+     * @return the result
+     * @throws Parser.RegexException if none of the patterns match the input
+     */
+    @Nonnull
+    public static String getStringResultFromRegexArray(@Nonnull final String input,
+                                                       @Nonnull final String[] regexes)
+            throws Parser.RegexException {
+        return getStringResultFromRegexArray(input, regexes, 0);
+    }
+
+    /**
+     * Find the result of an array of {@link Pattern}s inside an input on the first group
+     * ({@code 0}).
+     *
+     * @param input   the input on which using the regular expressions
+     * @param regexes the {@link Pattern} array
+     * @return the result
+     * @throws Parser.RegexException if none of the patterns match the input
+     */
+    @Nonnull
+    public static String getStringResultFromRegexArray(@Nonnull final String input,
+                                                       @Nonnull final Pattern[] regexes)
+            throws Parser.RegexException {
+        return getStringResultFromRegexArray(input, regexes, 0);
+    }
+
+    /**
+     * Find the result of an array of string regular expressions inside an input on a specific
+     * group.
+     *
+     * @param input   the input on which using the regular expressions
+     * @param regexes the string array of regular expressions
+     * @param group   the group to match
+     * @return the result
+     * @throws Parser.RegexException if none of the patterns match the input, or at least in the
+     * specified group
+     */
+    @Nonnull
+    public static String getStringResultFromRegexArray(@Nonnull final String input,
+                                                       @Nonnull final String[] regexes,
+                                                       final int group)
+            throws Parser.RegexException {
+        return getStringResultFromRegexArray(input,
+                Arrays.stream(regexes)
+                        .filter(Objects::nonNull)
+                        .map(Pattern::compile)
+                        .toArray(Pattern[]::new),
+                group);
+    }
+
+    /**
+     * Find the result of an array of {@link Pattern}s inside an input on a specific
+     * group.
+     *
+     * @param input   the input on which using the regular expressions
+     * @param regexes the {@link Pattern} array
+     * @param group   the group to match
+     * @return the result
+     * @throws Parser.RegexException if none of the patterns match the input, or at least in the
+     * specified group
+     */
+    @Nonnull
+    public static String getStringResultFromRegexArray(@Nonnull final String input,
+                                                       @Nonnull final Pattern[] regexes,
+                                                       final int group)
+            throws Parser.RegexException {
+        for (final Pattern regex : regexes) {
+            try {
+                final String result = Parser.matchGroup(regex, input, group);
+                if (result != null) {
+                    return result;
+                }
+
+                // Continue if the result is null
+            } catch (final Parser.RegexException ignored) {
+            }
+        }
+
+        throw new Parser.RegexException("No regex matched the input on group " + group);
+    }
+}
