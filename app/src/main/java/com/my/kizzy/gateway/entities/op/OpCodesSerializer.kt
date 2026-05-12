@@ -20,3 +20,11 @@ class OpCodeSerializer : KSerializer<OpCode> {
      * stop rich presence working until the app was updated.
      */
     override fun deserialize(decoder: Decoder): OpCode {
+        val opCode = decoder.decodeInt()
+        return OpCode.entries.firstOrNull { it.value == opCode } ?: OpCode.UNKNOWN
+    }
+
+    override fun serialize(encoder: Encoder, value: OpCode) {
+        encoder.encodeInt(value.value)
+    }
+}
