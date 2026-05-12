@@ -1,0 +1,19 @@
+<!--
+  Discord's mark drawn as a stroked outline rather than the filled brand glyph,
+  so it sits at the same weight as the Material Rounded icons every other row
+  in settings uses. Strokes are white and left to be tinted by Compose's Icon.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:pathData="M15.5008,17.75 L16.7942,19.5205 C16.9156,19.7127 17.1489,19.7985 17.3619,19.7224 C18.1657,19.4353 20.158,18.6572 21.7984,17.4725 C21.9263,17.3801 22.0002,17.2261 21.9992,17.0673 C21.9992,8.25 19.5008,5.75 19.5008,5.75 C19.5008,5.75 17.5008,4.60213 15.3547,4.25602 C15.1436,4.22196 14.9368,4.33509 14.8429,4.52891 L14.3979,5.44677 C14.3979,5.44677 13.2853,5.21397 12,5.21397 C10.7147,5.21397 9.6021,5.44677 9.6021,5.44677 L9.15711,4.52891 C9.06314,4.33509 8.85644,4.22196 8.64529,4.25602 C6.50079,4.60187 4.50079,5.75 4.50079,5.75 C4.50079,5.75 2.0008,8.25 2.0008,17.0673 C1.9998,17.2261 2.07365,17.3801 2.20159,17.4725 C3.84196,18.6572 5.8343,19.4353 6.63806,19.7224 C6.85105,19.7985 7.08437,19.7127 7.20582,19.5205 L8.50079,17.75"
+        android:strokeWidth="2.0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter" />
+
+    <path
