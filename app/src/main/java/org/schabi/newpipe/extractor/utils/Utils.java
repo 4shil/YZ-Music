@@ -175,3 +175,144 @@ public final class Utils {
 
     public static String replaceHttpWithHttps(final String url) {
         if (url == null) {
+            return null;
+        }
+
+        if (url.startsWith(HTTP)) {
+            return HTTPS + url.substring(HTTP.length());
+        }
+        return url;
+    }
+
+    /**
+     * Get the value of a URL-query by name.
+     *
+     * <p>
+     * If an url-query is give multiple times, only the value of the first query is returned.
+     * </p>
+     *
+     * @param url           the url to be used
+     * @param parameterName the pattern that will be used to check the url
+     * @return a string that contains the value of the query parameter or {@code null} if nothing
+     * was found
+     */
+    @Nullable
+    public static String getQueryValue(@Nonnull final URL url,
+                                       final String parameterName) {
+        final String urlQuery = url.getQuery();
+
+        if (urlQuery != null) {
+            for (final String param : urlQuery.split("&")) {
+                final String[] params = param.split("=", 2);
+                final String query = decodeUrlUtf8(params[0]);
+
+                if (query.equals(parameterName)) {
+                    return decodeUrlUtf8(params[1]);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Convert a string to a {@link URL URL object}.
+     *
+     * <p>
+     * Defaults to HTTP if no protocol is given.
+     * </p>
+     *
+     * @param url the string to be converted to a URL-Object
+     * @return a {@link URL URL object} containing the url
+     */
+    @Nonnull
+    public static URL stringToURL(final String url) throws MalformedURLException {
+        try {
+            return new URL(url);
+        } catch (final MalformedURLException e) {
+            // If no protocol is given try prepending "https://"
+            if (e.getMessage().equals("no protocol: " + url)) {
+                return new URL(HTTPS + url);
+            }
+
+            throw e;
+        }
+    }
+
+    public static boolean isHTTP(@Nonnull final URL url) {
+        // Make sure it's HTTP or HTTPS
+        final String protocol = url.getProtocol();
+        if (!protocol.equals("http") && !protocol.equals("https")) {
+            return false;
+        }
+
+        final boolean usesDefaultPort = url.getPort() == url.getDefaultPort();
+        final boolean setsNoPort = url.getPort() == -1;
+
+        return setsNoPort || usesDefaultPort;
+    }
+
+    public static String removeMAndWWWFromUrl(final String url) {
+        if (M_PATTERN.matcher(url).find()) {
+            return url.replace("m.", "");
+        }
+        if (WWW_PATTERN.matcher(url).find()) {
+            return url.replace("www.", "");
+        }
+        return url;
+    }
+
+    @Nonnull
+    public static String removeUTF8BOM(@Nonnull final String s) {
+        String result = s;
+        if (result.startsWith("\uFEFF")) {
+            result = result.substring(1);
+        }
+        if (result.endsWith("\uFEFF")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        return result;
+    }
+
+    @Nonnull
+    public static String getBaseUrl(final String url) throws ParsingException {
+        try {
+            final URL uri = stringToURL(url);
+            return uri.getProtocol() + "://" + uri.getAuthority();
+        } catch (final MalformedURLException e) {
+            final String message = e.getMessage();
+            if (message.startsWith("unknown protocol: ")) {
+                // Return just the protocol (e.g. vnd.youtube)
+                return message.substring("unknown protocol: ".length());
+            }
+
+            throw new ParsingException("Malformed url: " + url, e);
+        }
+    }
+
+    /**
+     * If the provided url is a Google search redirect, then the actual url is extracted from the
+     * {@code url=} query value and returned, otherwise the original url is returned.
+     *
+     * @param url the url which can possibly be a Google search redirect
+     * @return an url with no Google search redirects
+     */
+    public static String followGoogleRedirectIfNeeded(final String url) {
+        // If the url is a redirect from a Google search, extract the actual URL
+        try {
+            final URL decoded = stringToURL(url);
+            if (decoded.getHost().contains("google") && decoded.getPath().equals("/url")) {
+                return decodeUrlUtf8(Parser.matchGroup1("&url=([^&]+)(?:&|$)", url));
+            }
+        } catch (final Exception ignored) {
+        }
+
+        // URL is not a Google search redirect
+        return url;
+    }
+
+    public static boolean isNullOrEmpty(final String str) {
+        return str == null || str.isEmpty();
+    }
+
+    /**
