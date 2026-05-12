@@ -22,3 +22,21 @@ enum class OpCode(val value: Int) {
     /** Resume a previous session that was disconnected. */
     RESUME(6),
 
+    /** You should attempt to reconnect and resume immediately. */
+    RECONNECT(7),
+
+    /** Request information about offline guild members in a large guild. */
+    REQUEST_GUILD_MEMBERS(8),
+
+    /** The session has been invalidated. You should reconnect and identify/resume accordingly */
+    INVALID_SESSION(9),
+
+    /** Sent immediately after connecting, contains the heartbeat_interval to use. */
+    HELLO(10),
+
+    /** Sent in response to receiving a heartbeat to acknowledge that it has been received. */
+    HEARTBEAT_ACK(11),
+
+    /** For future use or unknown opcodes. */
+    UNKNOWN(-1);
+}
