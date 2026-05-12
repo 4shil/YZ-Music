@@ -328,3 +328,221 @@ internal object MediaWidgetArt {
      * which on a moving queue of covers is visible as the band flickering
      * between tracks that ought to look alike.
      */
+    private fun Bitmap.halvedTo(target: Float): Bitmap {
+        var current = this
+        while (current.height / 2 >= target && current.width / 2 >= 2) {
+            val next = Bitmap.createScaledBitmap(
+                current,
+                current.width / 2,
+                current.height / 2,
+                true,
+            )
+            if (current !== this) current.recycle()
+            current = next
+        }
+        return current
+    }
+
+    /**
+     * Blurs [pixels] in place, using [scratch] as the intermediate.
+     *
+     * A separable box filter run [BLUR_PASSES] times, which is the standard
+     * cheap stand-in for a Gaussian — three passes are within a percent of one,
+     * and this costs a handful of integer adds per pixel with no kernel to walk,
+     * because each output reuses the previous window's sum.
+     *
+     * The source is opaque (it was cut out of the fully painted cover), so only
+     * the three colour channels are carried through and alpha is written back
+     * solid.
+     */
+    private fun blurInPlace(pixels: IntArray, scratch: IntArray, w: Int, h: Int, radius: Int) {
+        val r = radius.coerceAtMost(maxOf(1, minOf(w, h) - 1))
+        repeat(BLUR_PASSES) {
+            boxPass(pixels, scratch, lines = h, lineStride = w, span = w, step = 1, radius = r)
+            boxPass(scratch, pixels, lines = w, lineStride = 1, span = h, step = w, radius = r)
+        }
+    }
+
+    /**
+     * One box-filter pass from [src] to [dst], along whichever axis the strides
+     * describe: rows are `lineStride = w, step = 1`, columns the reverse.
+     */
+    private fun boxPass(
+        src: IntArray,
+        dst: IntArray,
+        lines: Int,
+        lineStride: Int,
+        span: Int,
+        step: Int,
+        radius: Int,
+    ) {
+        val window = radius * 2 + 1
+        for (line in 0 until lines) {
+            val base = line * lineStride
+            var r = 0
+            var g = 0
+            var b = 0
+            for (i in -radius..radius) {
+                val c = src[base + i.coerceIn(0, span - 1) * step]
+                r += (c shr 16) and 0xFF
+                g += (c shr 8) and 0xFF
+                b += c and 0xFF
+            }
+            for (i in 0 until span) {
+                dst[base + i * step] =
+                    OPAQUE or ((r / window) shl 16) or ((g / window) shl 8) or (b / window)
+                // Slide the window on by one: drop what leaves the near end,
+                // take what enters the far one. Both ends clamp, so the edges
+                // hold their own colour instead of averaging in nothing and
+                // darkening — a blur that fades to black at the bottom of the
+                // artwork would be the band this whole thing exists to avoid.
+                val gone = src[base + (i - radius).coerceIn(0, span - 1) * step]
+                val come = src[base + (i + radius + 1).coerceIn(0, span - 1) * step]
+                r += ((come shr 16) and 0xFF) - ((gone shr 16) and 0xFF)
+                g += ((come shr 8) and 0xFF) - ((gone shr 8) and 0xFF)
+                b += (come and 0xFF) - (gone and 0xFF)
+            }
+        }
+    }
+
+    /** The Gaussian sigma that [BLUR_PASSES] box passes of this radius add up to. */
+    private fun sigmaOf(radius: Int): Float =
+        sqrt(BLUR_PASSES * (radius.toFloat() * radius + radius) / 3f)
+
+    /** [sigmaOf] backwards: the radius to pass to reach this sigma. */
+    private fun boxRadiusFor(sigma: Float): Int =
+        ((-1f + sqrt(1f + 12f * sigma * sigma / BLUR_PASSES)) / 2f).roundToInt()
+
+    // ---- scrim and corners ----
+
+    /**
+     * The darkening under the transport.
+     *
+     * The blur is what makes the band belong to the artwork; this is what makes
+     * the glyphs legible on top of it. Both are needed: blur alone leaves white
+     * icons invisible over a pale sleeve, and a scrim alone is the hard-edged
+     * panel being avoided. Weighted towards the very bottom so the artwork keeps
+     * as much of its own brightness as it can.
+     */
+    private fun Canvas.scrimBottom(bandPx: Int) {
+        val top = (height - bandPx * SCRIM_SCALE).coerceAtLeast(0f)
+        drawRect(
+            0f,
+            top,
+            width.toFloat(),
+            height.toFloat(),
+            Paint().apply {
+                shader = LinearGradient(
+                    0f, top, 0f, height.toFloat(),
+                    intArrayOf(Color.TRANSPARENT, 0x40000000, 0xB8000000.toInt()),
+                    floatArrayOf(0f, 0.45f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+            },
+        )
+    }
+
+    /**
+     * The same bitmap with its corners rounded off.
+     *
+     * A second bitmap rather than a mask applied in place: clearing the corners
+     * of the original means either an un-antialiased `clipPath` or a
+     * difference-of-paths draw in CLEAR mode, and both leave a visibly ragged
+     * arc. Drawn through a shader instead, the round rect's own antialiasing
+     * does the work.
+     */
+    private fun Bitmap.withRoundedCorners(radiusPx: Float): Bitmap {
+        if (radiusPx <= 0f) return this
+        val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawRoundRect(
+            RectF(0f, 0f, width.toFloat(), height.toFloat()),
+            radiusPx,
+            radiusPx,
+            Paint().apply {
+                isAntiAlias = true
+                shader = BitmapShader(this@withRoundedCorners, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            },
+        )
+        return out
+    }
+
+    // ---- tuning ----
+
+    /**
+     * How much taller than the transport band the blur runs. The band's own
+     * height would put the start of the ramp exactly on the band's top edge,
+     * which is a line; at twice it, the blur is already well established by the
+     * time it reaches the buttons and still imperceptible where it begins.
+     *
+     * On a two-cell widget the band is more than half the height, so the region
+     * hits the top of the widget and the ramp is compressed. That is the right
+     * trade at that size — the alternative is a shorter ramp with a visible start.
+     */
+    private const val BLUR_REGION_SCALE = 2
+
+    /**
+     * The four blur strengths, as Gaussian sigmas in fractions of the transport
+     * band's height — so they hold at any widget size rather than being tied to a
+     * pixel count, and hold across the two layouts, whose bands differ.
+     *
+     * The top of the range is about a sixth of the band, some 10dp, which is
+     * where `BottomFadeBlur` puts its own `PEAK`. Past roughly there a strip this
+     * shape has more average than picture left in it and the bottom edge starts
+     * reading as flat colour rather than as blurred artwork — the cap the class
+     * comment refers to.
+     */
+    private val BLUR_SIGMAS = floatArrayOf(0.035f, 0.070f, 0.110f, 0.155f)
+
+    /**
+     * The least sigma, in working-image pixels, the mildest level is allowed to
+     * come out at — and so how far [halvedTo] may go.
+     *
+     * A blur narrower than about this leaves detail in the working image finer
+     * than its own pixels, and stretching that back over the widget is bilinear
+     * interpolation between distant samples: the soft-rectangle grid. Above it
+     * the level has nothing left to alias. Set with a little margin over 1, since
+     * [boxRadiusFor] rounds and a radius that rounds to zero is no blur at all.
+     */
+    private const val MIN_WORKING_SIGMA = 1.6f
+
+    /**
+     * Box-filter passes per level. Three is where a box stops being
+     * distinguishable from a Gaussian; two leaves faint straight-edged
+     * shoulders around anything bright, which on album art means around every
+     * highlight.
+     */
+    private const val BLUR_PASSES = 3
+
+    /** Alpha channel for the opaque pixels [boxPass] writes. */
+    private const val OPAQUE = 0xFF shl 24
+
+    /**
+     * Where each level of [BLUR_SIGMAS] begins, as a fraction of the blur
+     * region.
+     *
+     * Front-loaded rather than evenly spread: the gaps narrow going down, so the
+     * blur accelerates. At the top of the region there is nothing at all; by the
+     * band's top edge the mildest level is fully in and the next is arriving; by
+     * the glyphs the middle two are both fully in. Only the last few pixels of
+     * the widget see the strongest.
+     */
+    private val STOPS = floatArrayOf(0.28f, 0.50f, 0.70f, 0.86f)
+
+    /** How far below its stop a level takes to arrive in full. */
+    private const val STOP_FEATHER = 0.26f
+
+    /** How far above the band the scrim starts, in bands. */
+    private const val SCRIM_SCALE = 1.2f
+
+    /**
+     * Finished composites, by track and size.
+     *
+     * Worth keeping because most widget updates do not change the picture at
+     * all: a play/pause tap swaps one glyph, and re-deriving the artwork for it
+     * would mean a cover decode and four scaling passes to draw the identical
+     * bitmap again. Sized for a handful of widgets' worth at phone resolutions.
+     */
+    private val composites = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
+    }
+}
