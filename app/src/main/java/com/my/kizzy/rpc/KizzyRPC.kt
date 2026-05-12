@@ -163,3 +163,26 @@ open class KizzyRPC(
             superPropertiesBase64: String? = null,
         ): Result<UserInfo> = runCatching {
             val client = HttpClient()
+            val response = client.get("https://discord.com/api/v9/users/@me") {
+                header("Authorization", token)
+                header("User-Agent", userAgent)
+                if (superPropertiesBase64 != null) {
+                    header("X-Super-Properties", superPropertiesBase64)
+                }
+            }.bodyAsText()
+            val json = JSONObject(response)
+            val id = json.getString("id")
+            val username = json.getString("username")
+            val name = json.optString("global_name", username)
+            val avatarHash = json.optString("avatar")
+            val avatar = if (avatarHash.isNotEmpty() && avatarHash != "null") {
+                "https://cdn.discordapp.com/avatars/$id/$avatarHash.png"
+            } else {
+                null
+            }
+            client.close()
+
+            UserInfo(id, username, name, avatar)
+        }
+    }
+}
