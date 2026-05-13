@@ -46,3 +46,48 @@
                 android:ellipsize="end"
                 android:fontFamily="@font/sf_pro_display_semibold"
                 android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/widget_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:fontFamily="@font/sf_pro_display_regular"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="#B3FFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/widget_previous"
+            android:layout_width="@dimen/widget_button_wide"
+            android:layout_height="@dimen/widget_button_wide"
+            android:background="@drawable/widget_transport_button"
+            android:contentDescription="@string/widget_previous"
+            android:padding="10dp"
+            android:src="@drawable/ic_widget_previous" />
+
+        <ImageView
+            android:id="@+id/widget_toggle"
+            android:layout_width="@dimen/widget_button_wide"
+            android:layout_height="@dimen/widget_button_wide"
+            android:background="@drawable/widget_transport_button"
+            android:contentDescription="@string/widget_play"
+            android:padding="10dp"
+            android:src="@drawable/ic_widget_play" />
+
+        <ImageView
+            android:id="@+id/widget_next"
+            android:layout_width="@dimen/widget_button_wide"
+            android:layout_height="@dimen/widget_button_wide"
+            android:background="@drawable/widget_transport_button"
+            android:contentDescription="@string/widget_next"
+            android:padding="10dp"
+            android:src="@drawable/ic_widget_next" />
+    </LinearLayout>
+</FrameLayout>
