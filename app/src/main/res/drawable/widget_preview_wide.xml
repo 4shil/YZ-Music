@@ -22,3 +22,24 @@
                 <item android:color="#FF2E3446" android:offset="0" />
                 <item android:color="#FF1B2130" android:offset="0.45" />
                 <item android:color="#FF07090E" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Title and artist. -->
+    <path android:pathData="M18,73L104,73" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="7" />
+    <path android:pathData="M18,89L74,89" android:strokeColor="#8CFFFFFF" android:strokeLineCap="round" android:strokeWidth="6" />
+
+    <!-- Transport, right-aligned in the band: previous, play, next. -->
+    <group android:translateX="160" android:translateY="68" android:scaleX="1" android:scaleY="1">
+        <path android:pathData="M7,7.4L7,16.6" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="2.4" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M16.6,7.7L16.6,16.3L10.7,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.4" />
+    </group>
+    <group android:translateX="188" android:translateY="68" android:scaleX="1" android:scaleY="1">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M8.4,6.4L8.4,17.6L17.6,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.6" />
+    </group>
+    <group android:translateX="216" android:translateY="68" android:scaleX="1" android:scaleY="1">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M7.4,7.7L7.4,16.3L13.3,12Z" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="2.4" />
+        <path android:pathData="M17,7.4L17,16.6" android:strokeColor="#FFFFFFFF" android:strokeLineCap="round" android:strokeWidth="2.4" />
+    </group>
+</vector>
