@@ -18,3 +18,21 @@
 
   previewLayout points at a copy of the real layout carrying stand-in text, for
   the same reason the 4×2's does: widget_art holds no bitmap until a provider
+  fills one in, so the root's gradient shows through and the picker sees a cover
+  with the transport on it — but the title would be blank. previewImage is the
+  fallback for hosts below API 31, which don't inflate previewLayout at all.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_square_description"
+    android:initialLayout="@layout/widget_media_compact"
+    android:maxResizeWidth="288dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minWidth="110dp"
+    android:previewImage="@drawable/widget_preview_square"
+    android:previewLayout="@layout/widget_media_compact_preview"
+    android:resizeMode="horizontal"
+    android:targetCellHeight="2"
+    android:targetCellWidth="2"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />
