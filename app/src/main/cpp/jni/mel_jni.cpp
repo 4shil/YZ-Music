@@ -114,3 +114,8 @@ Java_com_music_yzmusic_playback_smart_MelSpectrogram_nativeSampleRate(
 JNIEXPORT jint JNICALL
 Java_com_music_yzmusic_playback_smart_MelSpectrogram_nativeHop(
     JNIEnv* /* env */,
+    jclass /* clazz */) {
+  return static_cast<jint>(yzmusic::smart::kBeatSpectrogramHop);
+}
+
+}  // extern "C"
