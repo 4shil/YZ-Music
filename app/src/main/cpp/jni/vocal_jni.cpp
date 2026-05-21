@@ -58,3 +58,11 @@ Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeCompute(
 
   const jsize produced = static_cast<jsize>(spectrogram.values.size());
   jfloatArray result = env->NewFloatArray(produced);
+  if (result == nullptr) return nullptr;
+  if (produced > 0) {
+    env->SetFloatArrayRegion(result, 0, produced, spectrogram.values.data());
+  }
+  return result;
+}
+
+JNIEXPORT jint JNICALL
