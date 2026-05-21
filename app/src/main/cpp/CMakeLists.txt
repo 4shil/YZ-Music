@@ -34,3 +34,11 @@ add_library(yzmusic_analysis SHARED
 target_include_directories(yzmusic_analysis PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${YZMUSIC_NATIVE_DIR}
+)
+
+# -ffast-math is deliberately NOT enabled: the analyzer's log/mel-adjacent
+# arithmetic (see audio_analysis.cpp) is tuned against exact IEEE behaviour.
+target_compile_options(yzmusic_analysis PRIVATE -O3 -fvisibility=hidden)
+
+find_library(log-lib log)
+target_link_libraries(yzmusic_analysis ${log-lib})
