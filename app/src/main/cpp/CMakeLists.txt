@@ -14,3 +14,8 @@ cmake_minimum_required(VERSION 3.22.1)
 project(yzmusic_analysis LANGUAGES CXX)
 
 get_filename_component(YZMUSIC_NATIVE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native"
+    ABSOLUTE)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
