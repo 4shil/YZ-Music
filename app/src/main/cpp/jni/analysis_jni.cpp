@@ -74,3 +74,45 @@ void AppendDoubles(std::string& out, const std::vector<double>& values) {
     if (index > 0) out += ',';
     AppendNumber(out, values[index]);
   }
+  out += ']';
+}
+
+void AppendEnergyCurve(std::string& out, const std::vector<yzmusic::smart::EnergyPoint>& points) {
+  out += '[';
+  for (size_t index = 0; index < points.size(); ++index) {
+    if (index > 0) out += ',';
+    out += "{\"t\":";
+    AppendNumber(out, points[index].time);
+    out += ",\"e\":";
+    AppendNumber(out, points[index].energy);
+    out += '}';
+  }
+  out += ']';
+}
+
+void AppendCuePoints(std::string& out, const std::vector<yzmusic::smart::MixCuePoint>& points) {
+  out += '[';
+  for (size_t index = 0; index < points.size(); ++index) {
+    if (index > 0) out += ',';
+    out += "{\"t\":";
+    AppendNumber(out, points[index].time);
+    out += ",\"s\":";
+    AppendNumber(out, points[index].score);
+    out += ",\"y\":";
+    AppendString(out, points[index].type);
+    out += '}';
+  }
+  out += ']';
+}
+
+void AppendField(std::string& out, const char* name, double value, bool first = false) {
+  if (!first) out += ',';
+  out += '"';
+  out += name;
+  out += "\":";
+  AppendNumber(out, value);
+}
+
+}  // namespace
+
+extern "C" {
