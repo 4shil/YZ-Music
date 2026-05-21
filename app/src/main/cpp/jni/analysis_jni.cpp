@@ -53,3 +53,24 @@ void AppendString(std::string& out, const std::string& value) {
       out += character;
     }
   }
+  out += '"';
+}
+
+void AppendNumber(std::string& out, double value) {
+  // Not finite means the field never got a defensible value; null reads as
+  // absent on the Kotlin side, which is what every consumer already handles.
+  if (!(value == value) || value > 1e308 || value < -1e308) {
+    out += "null";
+    return;
+  }
+  char buffer[32];
+  snprintf(buffer, sizeof(buffer), "%.6g", value);
+  out += buffer;
+}
+
+void AppendDoubles(std::string& out, const std::vector<double>& values) {
+  out += '[';
+  for (size_t index = 0; index < values.size(); ++index) {
+    if (index > 0) out += ',';
+    AppendNumber(out, values[index]);
+  }
