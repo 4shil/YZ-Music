@@ -200,3 +200,17 @@ Java_com_music_yzmusic_playback_smart_TrackFeatures_nativeResample(
   }
 
   const std::vector<float> resampled =
+      yzmusic::smart::Resample(input, input_rate, output_rate);
+
+  const jsize produced = static_cast<jsize>(resampled.size());
+  jfloatArray result = env->NewFloatArray(produced);
+  if (result == nullptr) {
+    return nullptr;  // OOM; the exception is already pending.
+  }
+  if (produced > 0) {
+    env->SetFloatArrayRegion(result, 0, produced, resampled.data());
+  }
+  return result;
+}
+
+}  // extern "C"
