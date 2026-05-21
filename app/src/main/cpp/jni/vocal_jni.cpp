@@ -50,3 +50,11 @@ Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeCompute(
   std::vector<std::vector<float>> channels(2);
   channels[0].resize(static_cast<size_t>(left_count));
   channels[1].resize(static_cast<size_t>(right_count));
+  if (left_count > 0) env->GetFloatArrayRegion(left, 0, left_count, channels[0].data());
+  if (right_count > 0) env->GetFloatArrayRegion(right, 0, right_count, channels[1].data());
+
+  const yzmusic::smart::VocalSpectrogram spectrogram =
+      yzmusic::smart::ComputeVocalSpectrogram(channels, sample_rate);
+
+  const jsize produced = static_cast<jsize>(spectrogram.values.size());
+  jfloatArray result = env->NewFloatArray(produced);
