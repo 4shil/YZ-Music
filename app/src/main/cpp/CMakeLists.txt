@@ -19,3 +19,8 @@ get_filename_component(YZMUSIC_NATIVE_DIR
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_library(yzmusic_analysis SHARED
+    ${YZMUSIC_NATIVE_DIR}/analyzer/audio_analysis.cpp
+    ${YZMUSIC_NATIVE_DIR}/analyzer/tempo_analysis.cpp
+    ${YZMUSIC_NATIVE_DIR}/analyzer/resampler.cpp
