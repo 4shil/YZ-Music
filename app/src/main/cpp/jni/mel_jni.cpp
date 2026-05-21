@@ -37,3 +37,25 @@ extern "C" {
 
 // Converts mono float PCM to the model's rate. Separate from nativeCompute
 // because the caller decodes at whatever rate the container carries and only
+// then knows what conversion is needed.
+JNIEXPORT jfloatArray JNICALL
+Java_com_music_yzmusic_playback_smart_MelSpectrogram_nativeResample(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jfloatArray samples,
+    jdouble input_rate,
+    jdouble output_rate) {
+  const jsize count = env->GetArrayLength(samples);
+  std::vector<float> input(static_cast<size_t>(count));
+  if (count > 0) {
+    env->GetFloatArrayRegion(samples, 0, count, input.data());
+  }
+
+  const std::vector<float> resampled =
+      yzmusic::smart::Resample(input, input_rate, output_rate);
+
+  const jsize produced = static_cast<jsize>(resampled.size());
+  jfloatArray result = env->NewFloatArray(produced);
+  if (result == nullptr) {
+    return nullptr;
+  }
