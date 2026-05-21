@@ -95,3 +95,45 @@ void AppendCuePoints(std::string& out, const std::vector<yzmusic::smart::MixCueP
   for (size_t index = 0; index < points.size(); ++index) {
     if (index > 0) out += ',';
     out += "{\"t\":";
+    AppendNumber(out, points[index].time);
+    out += ",\"s\":";
+    AppendNumber(out, points[index].score);
+    out += ",\"y\":";
+    AppendString(out, points[index].type);
+    out += '}';
+  }
+  out += ']';
+}
+
+void AppendField(std::string& out, const char* name, double value, bool first = false) {
+  if (!first) out += ',';
+  out += '"';
+  out += name;
+  out += "\":";
+  AppendNumber(out, value);
+}
+
+}  // namespace
+
+extern "C" {
+
+JNIEXPORT jstring JNICALL
+Java_com_music_yzmusic_playback_smart_TrackFeatures_nativeAnalyze(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jfloatArray samples,
+    jdouble sample_rate,
+    jdouble duration) {
+  const jsize count = env->GetArrayLength(samples);
+  std::vector<float> input(static_cast<size_t>(count));
+  if (count > 0) {
+    env->GetFloatArrayRegion(samples, 0, count, input.data());
+  }
+
+  const yzmusic::smart::AnalysisResult result =
+      yzmusic::smart::AnalyzeAudio(input, sample_rate, duration);
+
+  std::string json;
+  // A whole-track energy curve dominates the output; reserving up front keeps
+  // this from repeatedly reallocating a string that reaches tens of kilobytes.
+  json.reserve(8192 + result.energy_curve.size() * 24);
