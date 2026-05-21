@@ -24,3 +24,13 @@ add_library(yzmusic_analysis SHARED
     ${YZMUSIC_NATIVE_DIR}/analyzer/audio_analysis.cpp
     ${YZMUSIC_NATIVE_DIR}/analyzer/tempo_analysis.cpp
     ${YZMUSIC_NATIVE_DIR}/analyzer/resampler.cpp
+    ${YZMUSIC_NATIVE_DIR}/analyzer/mel_spectrogram.cpp
+    ${YZMUSIC_NATIVE_DIR}/analyzer/vocal_spectrogram.cpp
+    jni/analysis_jni.cpp
+    jni/mel_jni.cpp
+    jni/vocal_jni.cpp
+)
+
+target_include_directories(yzmusic_analysis PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${YZMUSIC_NATIVE_DIR}
