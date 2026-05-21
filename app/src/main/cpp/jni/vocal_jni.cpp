@@ -34,3 +34,19 @@
 
 extern "C" {
 
+// Takes the two channels as separate arrays rather than one interleaved one,
+// mirroring the planar layout the front end wants and avoiding a deinterleave
+// on either side of the boundary.
+JNIEXPORT jfloatArray JNICALL
+Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeCompute(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jfloatArray left,
+    jfloatArray right,
+    jdouble sample_rate) {
+  const jsize left_count = env->GetArrayLength(left);
+  const jsize right_count = env->GetArrayLength(right);
+
+  std::vector<std::vector<float>> channels(2);
+  channels[0].resize(static_cast<size_t>(left_count));
+  channels[1].resize(static_cast<size_t>(right_count));
