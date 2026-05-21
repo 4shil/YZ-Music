@@ -158,3 +158,45 @@ Java_com_music_yzmusic_playback_smart_TrackFeatures_nativeAnalyze(
   AppendString(json, result.key);
   json += ",\"downbeats\":";
   AppendDoubles(json, result.downbeats);
+  json += ",\"phraseBoundaries\":";
+  AppendDoubles(json, result.phrase_boundaries);
+  json += ",\"vocalActivityMask\":";
+  AppendDoubles(json, result.vocal_activity_mask);
+  json += ",\"energyCurve\":";
+  AppendEnergyCurve(json, result.energy_curve);
+  json += ",\"lowEnergyCurve\":";
+  AppendEnergyCurve(json, result.low_energy_curve);
+  json += ",\"mixInCandidates\":";
+  AppendCuePoints(json, result.mix_in_candidates);
+  json += ",\"mixOutCandidates\":";
+  AppendCuePoints(json, result.mix_out_candidates);
+  json += '}';
+
+  return env->NewStringUTF(json.c_str());
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_music_yzmusic_playback_smart_TrackFeatures_nativeSampleRate(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+  // The rate the analyzer's window and hop constants assume.
+  return 11025.0;
+}
+
+// Converts mono float PCM to the analyzer's rate. Separate from nativeAnalyze
+// because the caller decodes at whatever rate the container carries and only
+// then knows what conversion is needed.
+JNIEXPORT jfloatArray JNICALL
+Java_com_music_yzmusic_playback_smart_TrackFeatures_nativeResample(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jfloatArray samples,
+    jdouble input_rate,
+    jdouble output_rate) {
+  const jsize count = env->GetArrayLength(samples);
+  std::vector<float> input(static_cast<size_t>(count));
+  if (count > 0) {
+    env->GetFloatArrayRegion(samples, 0, count, input.data());
+  }
+
+  const std::vector<float> resampled =
