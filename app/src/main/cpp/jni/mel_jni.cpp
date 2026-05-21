@@ -103,3 +103,19 @@ Java_com_music_yzmusic_playback_smart_MelSpectrogram_nativeMelCount(
     jclass /* clazz */) {
   return static_cast<jint>(yzmusic::smart::kBeatSpectrogramMels);
 }
+
+JNIEXPORT jdouble JNICALL
+Java_com_music_yzmusic_playback_smart_MelSpectrogram_nativeSampleRate(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+  return yzmusic::smart::kBeatSpectrogramSampleRate;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_music_yzmusic_playback_smart_MelSpectrogram_nativeHop(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+  return static_cast<jint>(yzmusic::smart::kBeatSpectrogramHop);
+}
+
+}  // extern "C"
