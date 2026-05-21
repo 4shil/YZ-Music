@@ -92,3 +92,14 @@ Java_com_music_yzmusic_playback_smart_MelSpectrogram_nativeCompute(
   if (produced > 0) {
     env->SetFloatArrayRegion(result, 0, produced, spectrogram.values.data());
   }
+  return result;
+}
+
+// The mel band count is part of the model contract rather than a choice, so
+// it is read from the header instead of being duplicated in Kotlin.
+JNIEXPORT jint JNICALL
+Java_com_music_yzmusic_playback_smart_MelSpectrogram_nativeMelCount(
+    JNIEnv* /* env */,
+    jclass /* clazz */) {
+  return static_cast<jint>(yzmusic::smart::kBeatSpectrogramMels);
+}
