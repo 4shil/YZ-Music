@@ -9,3 +9,8 @@
 # sources live under the repo's root `native/` tree rather than here, so a
 # later phase adding a Rubber Band-based transition renderer can add sources
 # to that same tree without duplicating this module.
+
+cmake_minimum_required(VERSION 3.22.1)
+project(yzmusic_analysis LANGUAGES CXX)
+
+get_filename_component(YZMUSIC_NATIVE_DIR
