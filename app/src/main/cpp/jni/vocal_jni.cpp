@@ -66,3 +66,19 @@ Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeCompute(
 }
 
 JNIEXPORT jint JNICALL
+Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeBins(
+    JNIEnv* /* env */, jclass /* clazz */) {
+  return static_cast<jint>(yzmusic::smart::kVocalSpectrogramBins);
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeSampleRate(
+    JNIEnv* /* env */, jclass /* clazz */) {
+  return yzmusic::smart::kVocalSpectrogramSampleRate;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeHop(
+    JNIEnv* /* env */, jclass /* clazz */) {
+  return static_cast<jint>(yzmusic::smart::kVocalSpectrogramHop);
+}
