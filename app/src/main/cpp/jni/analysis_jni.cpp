@@ -116,3 +116,45 @@ void AppendField(std::string& out, const char* name, double value, bool first = 
 }  // namespace
 
 extern "C" {
+
+JNIEXPORT jstring JNICALL
+Java_com_music_yzmusic_playback_smart_TrackFeatures_nativeAnalyze(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jfloatArray samples,
+    jdouble sample_rate,
+    jdouble duration) {
+  const jsize count = env->GetArrayLength(samples);
+  std::vector<float> input(static_cast<size_t>(count));
+  if (count > 0) {
+    env->GetFloatArrayRegion(samples, 0, count, input.data());
+  }
+
+  const yzmusic::smart::AnalysisResult result =
+      yzmusic::smart::AnalyzeAudio(input, sample_rate, duration);
+
+  std::string json;
+  // A whole-track energy curve dominates the output; reserving up front keeps
+  // this from repeatedly reallocating a string that reaches tens of kilobytes.
+  json.reserve(8192 + result.energy_curve.size() * 24);
+
+  json += '{';
+  AppendField(json, "duration", result.duration, true);
+  AppendField(json, "bpm", result.bpm);
+  AppendField(json, "beatInterval", result.beat_interval);
+  AppendField(json, "firstBeat", result.first_beat);
+  AppendField(json, "beatConfidence", result.beat_confidence);
+  AppendField(json, "keyConfidence", result.key_confidence);
+  AppendField(json, "audibleStartTime", result.audible_start_time);
+  AppendField(json, "pickupTime", result.pickup_time);
+  AppendField(json, "introEndTime", result.intro_end_time);
+  AppendField(json, "outroStartTime", result.outro_start_time);
+  AppendField(json, "contentEndTime", result.content_end_time);
+  AppendField(json, "mixInTime", result.mix_in_time);
+  AppendField(json, "mixOutTime", result.mix_out_time);
+  AppendField(json, "vocalProbability", result.vocal_probability);
+
+  json += ",\"key\":";
+  AppendString(json, result.key);
+  json += ",\"downbeats\":";
+  AppendDoubles(json, result.downbeats);
