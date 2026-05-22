@@ -204,3 +204,16 @@ object DownloadStore {
      */
     class Pending internal constructor(
         private val context: Context,
+        val uri: Uri,
+        val name: String,
+        /** Set on the legacy path only: the `.part` file being written. */
+        private val part: File?,
+        /** Set on the legacy path only: what [part] is renamed to. */
+        private val target: File?,
+    ) {
+        fun openStream(): OutputStream =
+            part?.outputStream()
+                ?: context.contentResolver.openOutputStream(uri)
+                ?: error("Could not open $name for writing")
+
+        /** @return the uri the finished file can be reached at. */
