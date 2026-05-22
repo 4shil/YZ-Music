@@ -143,3 +143,50 @@ object DownloadSession {
      */
     fun queued(song: Song, from: String? = null) {
         update { state ->
+            val existing = state.items.indexOfFirst { it.videoId == song.videoId }
+            val item = Item(
+                videoId = song.videoId,
+                song = song,
+                progress = DownloadProgress.Queued,
+                from = from ?: state.items.getOrNull(existing)?.from,
+                sequence = if (existing >= 0) state.items[existing].sequence else tick(),
+            )
+            val items = if (existing >= 0) {
+                state.items.toMutableList().also { it[existing] = item }
+            } else {
+                state.items + item
+            }
+            // Not settledAt: nothing has settled. But a new ask does mean the
+            // batch the user last signed off on is no longer the batch in hand.
+            state.copy(items = items)
+        }
+    }
+
+    fun running(videoId: String, fraction: Float) =
+        set(videoId, DownloadProgress.Running(fraction))
+
+    fun done(videoId: String) = set(videoId, DownloadProgress.Done)
+
+    fun failed(videoId: String, reason: String) = set(videoId, DownloadProgress.Failed(reason))
+
+    /**
+     * Swap in the track that is actually being fetched.
+     *
+     * A music-video row is replaced by the catalogue track behind it on the way
+     * down (see [Downloads.run]), and that changes the title and the cover but
+     * not the id this list is keyed by — so this is a correction to a row, not a
+     * new one.
+     */
+    fun retitle(videoId: String, song: Song) {
+        update { state ->
+            val index = state.items.indexOfFirst { it.videoId == videoId }
+            if (index < 0) return@update state
+            state.copy(
+                items = state.items.toMutableList().also {
+                    it[index] = it[index].copy(song = song)
+                },
+            )
+        }
+    }
+
+    /** Drop a row entirely — a download the user called off. */
