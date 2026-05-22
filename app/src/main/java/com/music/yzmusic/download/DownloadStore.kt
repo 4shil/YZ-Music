@@ -83,3 +83,50 @@ object DownloadStore {
      * else — no tags to group by — so leading with the artist is the only thing
      * that puts an album back together in the listing.
      */
+    fun fileNameFor(song: Song, extension: String): String {
+        val artist = sanitise(song.artist)
+        val title = sanitise(song.title)
+        val stem = when {
+            artist.isEmpty() -> title
+            title.isEmpty() -> artist
+            else -> "$artist - $title"
+        }.ifEmpty { song.videoId }
+        return "${stem.take(MAX_STEM_CHARS).trimEnd()}.$extension"
+    }
+
+    /**
+     * Everything a FAT32 volume, the media store or a shell would each object
+     * to for its own reasons, plus the whitespace that survives them.
+     */
+    private fun sanitise(raw: String): String = raw
+        .replace(ILLEGAL, " ")
+        .replace(WHITESPACE, " ")
+        .trim()
+        .trim('.')
+
+    private val ILLEGAL = Regex("""[\\/:*?"<>|\x00-\x1F]""")
+    private val WHITESPACE = Regex("""\s+""")
+
+    /** Long enough for anything real, short of the 255-byte filename ceiling. */
+    private const val MAX_STEM_CHARS = 120
+
+    /** What a file of some codec is called and what the store is told it is. */
+    class Storable(val extension: String, val mimeType: String)
+
+    /**
+     * How to file a track of [codec], or null if this device won't have it.
+     *
+     * A source that can serve lossless does not thereby serve something Android
+     * will keep: the media store's audio collection accepts a closed list of
+     * MIME types, and one it doesn't recognise is refused outright at [begin] —
+     * which is a download that cannot start rather than one that sounds worse
+     * than hoped. Anything not answered for here falls the caller back to
+     * YouTube's AAC, so an unfamiliar codec costs quality and not the download.
+     *
+     * Kept as a table rather than derived from the codec string because two of
+     * these are not the identity mapping they look like. WAV's registered type
+     * is `audio/x-wav` on Android, and ALAC ships inside an MP4 container, so an
+     * ALAC file is an `.m4a` as far as both the store and [Mp4Tagger] are
+     * concerned — the tagger works on the box tree and never asks what the
+     * samples inside are.
+     */
