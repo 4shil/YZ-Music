@@ -217,3 +217,63 @@ object DownloadStore {
                 ?: error("Could not open $name for writing")
 
         /** @return the uri the finished file can be reached at. */
+        fun commit(): Uri {
+            if (part != null && target != null) {
+                if (!part.renameTo(target)) error("Could not finish writing $name")
+                // Nothing indexes a file that simply appeared; without this it
+                // is on disk and invisible to every app that lists media.
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(target.absolutePath),
+                    null,
+                    null,
+                )
+                return Uri.fromFile(target)
+            }
+            context.contentResolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                null,
+                null,
+            )
+            return uri
+        }
+
+        fun abort() {
+            part?.delete()
+            if (part == null) runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+    }
+
+    /**
+     * Reserve [name] and return somewhere to write it.
+     *
+     * @throws IllegalStateException if the folder or the store row can't be
+     *   made — a failure worth surfacing, since every one of them means the
+     *   download cannot start rather than that it might not finish.
+     */
+    fun begin(context: Context, name: String, mimeType: String): Pending {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            // A MIME type the audio collection doesn't recognise is not a null
+            // return but an IllegalArgumentException thrown from inside the
+            // resolver, several frames away from anything that names the
+            // download it belongs to. Every type written here came from
+            // [storable] or from the stream resolver, so landing in this branch
+            // means one of those two is wrong about this device — worth saying
+            // in those words the first time it happens again.
+            val uri = runCatching {
+                context.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+            }.getOrElse { cause ->
+                Log.w(TAG, "the media store refused $mimeType for $name: ${cause.message}")
+                error("Android won't store ${name.substringAfterLast('.', mimeType)} files in Music")
+            } ?: error("Could not create $name in Music")
+            return Pending(context, uri, name, part = null, target = null)
+        }
+
+        val target = legacyFile(name)
