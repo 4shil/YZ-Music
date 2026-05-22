@@ -180,3 +180,40 @@ object DownloadStore {
      * claiming a download that no longer exists. Cheap to ask, and the answer
      * is what stops the menu offering to delete nothing.
      */
+    fun exists(context: Context, uri: Uri): Boolean = runCatching {
+        if (uri.scheme == "file") return uri.path?.let { File(it).exists() } == true
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { true } == true
+    }.getOrDefault(false)
+
+    fun delete(context: Context, uri: Uri): Boolean = runCatching {
+        if (uri.scheme == "file") {
+            uri.path?.let { File(it).delete() } == true
+        } else {
+            context.contentResolver.delete(uri, null, null) > 0
+        }
+    }.onFailure { Log.w(TAG, "could not delete $uri: ${it.message}") }.getOrDefault(false)
+
+    // ---- Writing ------------------------------------------------------------
+
+    /**
+     * A destination that exists but is not yet a file anyone else can see.
+     *
+     * Every path out of here is either [commit] or [abort]; there is no third
+     * option, because the thing being protected against is a partial file
+     * surviving a failure and looking like a whole one.
+     */
+    class Pending internal constructor(
+        private val context: Context,
+        val uri: Uri,
+        val name: String,
+        /** Set on the legacy path only: the `.part` file being written. */
+        private val part: File?,
+        /** Set on the legacy path only: what [part] is renamed to. */
+        private val target: File?,
+    ) {
+        fun openStream(): OutputStream =
+            part?.outputStream()
+                ?: context.contentResolver.openOutputStream(uri)
+                ?: error("Could not open $name for writing")
+
+        /** @return the uri the finished file can be reached at. */
