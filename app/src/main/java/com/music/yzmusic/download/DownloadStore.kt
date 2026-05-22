@@ -130,3 +130,53 @@ object DownloadStore {
      * concerned — the tagger works on the box tree and never asks what the
      * samples inside are.
      */
+    fun storable(codec: String?): Storable? = when (codec?.lowercase(Locale.ROOT)?.trim()) {
+        "flac", "x-flac" -> Storable("flac", "audio/flac")
+        "wav", "x-wav", "wave" -> Storable("wav", "audio/x-wav")
+        "alac", "m4a", "mp4" -> Storable("m4a", "audio/mp4")
+        else -> null
+    }
+
+    // ---- Lookup -------------------------------------------------------------
+
+    /**
+     * The uri of a file already saved under this name, or null.
+     *
+     * Worth asking before every download because the media store does not
+     * refuse a duplicate — it silently renames it to `… (1)`, and a user who
+     * taps download twice gets two copies rather than being told they already
+     * have one.
+     */
+    fun existing(context: Context, name: String): Uri? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            mediaStoreEntry(context, name)
+        } else {
+            legacyFile(name).takeIf { it.exists() }?.let(Uri::fromFile)
+        }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun mediaStoreEntry(context: Context, name: String): Uri? = runCatching {
+        context.contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND " +
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+            arrayOf(name, "%$FOLDER%"),
+            null,
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI.buildUpon()
+                .appendPath(cursor.getLong(0).toString())
+                .build()
+        }
+    }.onFailure { Log.w(TAG, "media store lookup failed for $name: ${it.message}") }.getOrNull()
+
+    /**
+     * Whether [uri] still names a file that is there.
+     *
+     * The record of what has been downloaded is kept by this app, but the files
+     * are not this app's to keep: they sit in a folder built for the user to
+     * manage, and one deleted from a file manager leaves the record behind
+     * claiming a download that no longer exists. Cheap to ask, and the answer
+     * is what stops the menu offering to delete nothing.
+     */
