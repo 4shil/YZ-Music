@@ -116,3 +116,52 @@ class DownloadService : Service() {
     private suspend fun work() {
         var idleFor = 0L
         while (true) {
+            val song = Downloads.takeNext()
+            if (song == null) {
+                // Nothing to take, but something may still be arriving — or
+                // another worker may fail a track back into view. Only a queue
+                // that stays empty, with nothing else in flight, is finished.
+                if (idleFor >= IDLE_GRACE_MS && !Downloads.busy()) return
+                delay(IDLE_POLL_MS)
+                idleFor += IDLE_POLL_MS
+                continue
+            }
+            idleFor = 0L
+            current = song
+            postNotification()
+
+            // Its own job, so one track can be cancelled out from under the
+            // loop without taking the rest of the queue with it.
+            val job = scope.launch { Downloads.run(this@DownloadService, song) }
+            Downloads.onRunning(song.videoId, job)
+            job.join()
+            Downloads.onIdle(song.videoId)
+        }
+    }
+
+    /** Repost as the running track advances, slowly enough not to thrash the shade. */
+    private suspend fun reflectProgress() {
+        Downloads.active.collect {
+            postNotification()
+            delay(PROGRESS_REFRESH_MS)
+        }
+    }
+
+    private fun shutdown(stopWork: Boolean) {
+        if (stopWork) drain?.cancel()
+        notifier?.cancel()
+        drain = null
+        notifier = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        Downloads.onStopped()
+        super.onDestroy()
+    }
+
+    // ---- Notification -------------------------------------------------------
+
+    private fun promote() {
