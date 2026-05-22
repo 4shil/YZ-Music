@@ -209,3 +209,80 @@ class DownloadService : Service() {
             else -> song.artist
         }
 
+        val cancel = PendingIntent.getService(
+            this,
+            0,
+            Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL_ALL),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification_logo)
+            .setContentTitle(title)
+            .setContentText(text)
+            // Indeterminate until something has a length to measure against.
+            .setProgress(100, percent, runningStates.isEmpty())
+            .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .addAction(0, "Cancel", cancel)
+            .build()
+    }
+
+    private fun createChannel() {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                "Downloads",
+                // Progress, not news. It belongs in the shade without a sound
+                // or a heads-up every time a track finishes.
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "Songs being saved to your Music folder"
+                setShowBadge(false)
+            },
+        )
+    }
+
+    private companion object {
+        const val CHANNEL_ID = "downloads"
+
+        /** Distinct from playback's, which Media3 owns. */
+        const val NOTIFICATION_ID = 0x8175
+
+        const val ACTION_CANCEL_ALL = "com.music.yzmusic.download.CANCEL_ALL"
+
+        /** Four updates a second is smooth; the shade coalesces anything faster anyway. */
+        const val PROGRESS_REFRESH_MS = 250L
+
+        /**
+         * How many tracks are fetched at once.
+         *
+         * Sized against what is actually scarce. Bandwidth is not: four
+         * lossless tracks at once is comfortably inside a home connection, and
+         * the transfers were never the bottleneck. Lookup latency is, and four
+         * is where the module engines stop being the limit — the pool behind
+         * them is three deep per module, so a fifth worker would mostly be
+         * queueing for an interpreter rather than resolving anything. It is
+         * also the point past which a failure gets hard to read: eight rows
+         * moving at once is a wall of text, not a download.
+         */
+        const val WORKERS = 4
+
+        /**
+         * How long a worker keeps looking at an empty queue before it accepts
+         * the queue is empty.
+         *
+         * The window this covers is the start: the first [Downloads.enqueue] is
+         * what starts this service, and the other 371 land over the following
+         * moments. Workers that spun up in that gap and took an empty queue for
+         * a finished one would leave the whole batch to whoever won the race.
+         */
+        const val IDLE_GRACE_MS = 2_000L
+
+        const val IDLE_POLL_MS = 100L
+    }
+}
