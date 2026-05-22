@@ -143,3 +143,25 @@ object DownloadSession {
      */
     fun queued(song: Song, from: String? = null) {
         update { state ->
+            val existing = state.items.indexOfFirst { it.videoId == song.videoId }
+            val item = Item(
+                videoId = song.videoId,
+                song = song,
+                progress = DownloadProgress.Queued,
+                from = from ?: state.items.getOrNull(existing)?.from,
+                sequence = if (existing >= 0) state.items[existing].sequence else tick(),
+            )
+            val items = if (existing >= 0) {
+                state.items.toMutableList().also { it[existing] = item }
+            } else {
+                state.items + item
+            }
+            // Not settledAt: nothing has settled. But a new ask does mean the
+            // batch the user last signed off on is no longer the batch in hand.
+            state.copy(items = items)
+        }
+    }
+
+    fun running(videoId: String, fraction: Float) =
+        set(videoId, DownloadProgress.Running(fraction))
+
