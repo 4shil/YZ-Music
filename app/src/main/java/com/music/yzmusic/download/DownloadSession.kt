@@ -104,3 +104,42 @@ object DownloadSession {
             }
 
         /** See the class comment: not "is downloading" but "is unaccounted for". */
+        val visible: Boolean get() = items.isNotEmpty() && (busy || seenAt < settledAt)
+    }
+
+    private val _state = MutableStateFlow(State())
+    val state: StateFlow<State> = _state.asStateFlow()
+
+    /**
+     * A logical clock, shared by the ask order and the two timestamps.
+     *
+     * Not a wall clock, and not [System.nanoTime] either. These values are only
+     * ever compared with each other, and both real clocks can produce a
+     * comparison that lies: the wall clock can be set backwards by the user or
+     * by an NTP correction, and `nanoTime`'s origin is arbitrary and may be
+     * negative — which would put a first completion *before* the zero that means
+     * "never seen" and leave the indicator hidden for the one batch it most
+     * needed to report. A counter starting at zero has neither problem.
+     *
+     * Atomic because there is no single-writer discipline left to lean on:
+     * several downloads run at once now, so several threads are in [update] at
+     * the same time and [update] retries its block on contention — which means
+     * this can be called more than once for one logical event. Skipped values
+     * cost nothing, since every one of these is only ever compared with another
+     * for order.
+     */
+    private val clock = AtomicLong(0L)
+
+    private fun tick(): Long = clock.incrementAndGet()
+
+    /**
+     * A track has been accepted into the queue — or refused before it got there,
+     * which is still something the user asked for and is owed an answer about.
+     *
+     * Re-asking for a track already in the list resets it rather than adding a
+     * second row: a failed download retried from the manager is the same errand,
+     * and two rows for one song would leave the failure on screen next to its
+     * own retry.
+     */
+    fun queued(song: Song, from: String? = null) {
+        update { state ->
