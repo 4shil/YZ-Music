@@ -66,3 +66,13 @@ object Downloader {
         onProgress: (written: Long, total: Long) -> Unit,
     ): Long = withContext(Dispatchers.IO) {
         var url = stream.url
+        val total = contentLength(url) ?: error("Track unavailable: no length to fetch")
+
+        var position = 0L
+        var reresolved = false
+        val buffer = ByteArray(BUFFER_BYTES)
+
+        while (position < total) {
+            coroutineContext.ensureActive()
+            val length = minOf(CHUNK_BYTES, total - position)
+
