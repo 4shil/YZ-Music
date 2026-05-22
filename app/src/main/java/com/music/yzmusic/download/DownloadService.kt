@@ -196,3 +196,16 @@ class DownloadService : Service() {
             ?.times(100)?.toInt()
             ?: 0
 
+        val song = current
+        val title = when {
+            runningStates.size > 1 -> "Downloading ${runningStates.size} songs"
+            else -> song?.title ?: "Downloading"
+        }
+        val text = when {
+            runningStates.size > 1 && waiting > 0 -> "$waiting more queued"
+            runningStates.size > 1 -> song?.title.orEmpty()
+            song == null -> "Starting"
+            waiting > 0 -> "${song.artist} · $waiting more queued"
+            else -> song.artist
+        }
+
