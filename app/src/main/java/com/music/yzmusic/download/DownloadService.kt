@@ -185,3 +185,14 @@ class DownloadService : Service() {
     private fun buildNotification(): Notification {
         val active = Downloads.active.value
         val runningStates = active.values.filterIsInstance<DownloadState.Running>()
+        val waiting = active.count { it.value is DownloadState.Queued }
+
+        // Several tracks are in flight, so the bar is the average across them
+        // rather than any one track's — a bar that jumped backwards every time
+        // a different worker happened to report last would be worse than no bar.
+        val percent = runningStates
+            .takeIf { it.isNotEmpty() }
+            ?.let { states -> states.sumOf { it.fraction.toDouble() } / states.size }
+            ?.times(100)?.toInt()
+            ?: 0
+
