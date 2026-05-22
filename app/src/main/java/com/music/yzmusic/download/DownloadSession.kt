@@ -190,3 +190,60 @@ object DownloadSession {
     }
 
     /** Drop a row entirely — a download the user called off. */
+    fun forget(videoId: String) {
+        update { state ->
+            val items = state.items.filterNot { it.videoId == videoId }
+            if (items.size == state.items.size) return@update state
+            // Removing the last unsettled row is the queue going quiet, and it
+            // has to count as such or the indicator would linger over a list
+            // that no longer has anything in it to report.
+            state.copy(
+                items = items,
+                settledAt = if (items.none { !it.progress.settled }) tick() else state.settledAt,
+            )
+        }
+    }
+
+    /** The user has the manager open — see [State.visible]. */
+    fun markSeen() {
+        _state.update { it.copy(seenAt = tick()) }
+    }
+
+    /** Empty the list outright, at the user's request. */
+    fun clear() {
+        _state.value = State()
+    }
+
+    private fun set(videoId: String, progress: DownloadProgress) {
+        update { state ->
+            val index = state.items.indexOfFirst { it.videoId == videoId }
+            if (index < 0) return@update state
+            val items = state.items.toMutableList().also {
+                it[index] = it[index].copy(progress = progress)
+            }
+            // Only the *last* one settling closes the batch off. Marking each
+            // one would have a forty-track album go quiet thirty-nine times,
+            // and the indicator is meant to report on the batch rather than on
+            // whichever track happened to finish while nobody was looking.
+            val quiet = items.none { !it.progress.settled }
+            state.copy(
+                items = items,
+                settledAt = if (progress.settled && quiet) tick() else state.settledAt,
+            )
+        }
+    }
+
+    /**
+     * Read-modify-write on [_state], atomically.
+     *
+     * A plain `_state.value = block(_state.value)` was safe while one download
+     * ran at a time. With several in flight it is a lost-update race between
+     * four workers each posting progress a few times a second, and what gets
+     * lost is whole rows: two tracks reporting at once, and one of them stays
+     * on screen at whatever it last managed to write. [MutableStateFlow.update]
+     * is the compare-and-set version of the same line.
+     */
+    private inline fun update(block: (State) -> State) {
+        _state.update(block)
+    }
+}
