@@ -217,3 +217,40 @@ object DownloadStore {
                 ?: error("Could not open $name for writing")
 
         /** @return the uri the finished file can be reached at. */
+        fun commit(): Uri {
+            if (part != null && target != null) {
+                if (!part.renameTo(target)) error("Could not finish writing $name")
+                // Nothing indexes a file that simply appeared; without this it
+                // is on disk and invisible to every app that lists media.
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(target.absolutePath),
+                    null,
+                    null,
+                )
+                return Uri.fromFile(target)
+            }
+            context.contentResolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                null,
+                null,
+            )
+            return uri
+        }
+
+        fun abort() {
+            part?.delete()
+            if (part == null) runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+    }
+
+    /**
+     * Reserve [name] and return somewhere to write it.
+     *
+     * @throws IllegalStateException if the folder or the store row can't be
+     *   made — a failure worth surfacing, since every one of them means the
+     *   download cannot start rather than that it might not finish.
+     */
+    fun begin(context: Context, name: String, mimeType: String): Pending {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
