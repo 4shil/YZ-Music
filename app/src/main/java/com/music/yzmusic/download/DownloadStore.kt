@@ -277,3 +277,16 @@ object DownloadStore {
         }
 
         val target = legacyFile(name)
+        val folder = target.parentFile ?: error("No Music folder on this device")
+        if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
+        val part = File(folder, "$name.part")
+        part.delete()
+        return Pending(context, Uri.fromFile(target), name, part = part, target = target)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun legacyFile(name: String) = File(
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER),
+        name,
+    )
+}
