@@ -82,3 +82,11 @@ Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeHop(
     JNIEnv* /* env */, jclass /* clazz */) {
   return static_cast<jint>(yzmusic::smart::kVocalSpectrogramHop);
 }
+
+JNIEXPORT jint JNICALL
+Java_com_music_yzmusic_playback_smart_VocalSpectrogram_nativeFftSize(
+    JNIEnv* /* env */, jclass /* clazz */) {
+  return static_cast<jint>(yzmusic::smart::kVocalSpectrogramFft);
+}
+
+}  // extern "C"
