@@ -83,3 +83,6 @@ object DownloadStore {
      * else — no tags to group by — so leading with the artist is the only thing
      * that puts an album back together in the listing.
      */
+    fun fileNameFor(song: Song, extension: String): String {
+        val artist = sanitise(song.artist)
+        val title = sanitise(song.title)
