@@ -165,3 +165,28 @@ object DownloadSession {
     fun running(videoId: String, fraction: Float) =
         set(videoId, DownloadProgress.Running(fraction))
 
+    fun done(videoId: String) = set(videoId, DownloadProgress.Done)
+
+    fun failed(videoId: String, reason: String) = set(videoId, DownloadProgress.Failed(reason))
+
+    /**
+     * Swap in the track that is actually being fetched.
+     *
+     * A music-video row is replaced by the catalogue track behind it on the way
+     * down (see [Downloads.run]), and that changes the title and the cover but
+     * not the id this list is keyed by — so this is a correction to a row, not a
+     * new one.
+     */
+    fun retitle(videoId: String, song: Song) {
+        update { state ->
+            val index = state.items.indexOfFirst { it.videoId == videoId }
+            if (index < 0) return@update state
+            state.copy(
+                items = state.items.toMutableList().also {
+                    it[index] = it[index].copy(song = song)
+                },
+            )
+        }
+    }
+
+    /** Drop a row entirely — a download the user called off. */
