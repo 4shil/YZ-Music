@@ -165,3 +165,23 @@ class DownloadService : Service() {
     // ---- Notification -------------------------------------------------------
 
     private fun promote() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun postNotification() {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        runCatching { manager.notify(NOTIFICATION_ID, buildNotification()) }
+    }
+
+    private fun buildNotification(): Notification {
+        val active = Downloads.active.value
+        val runningStates = active.values.filterIsInstance<DownloadState.Running>()
