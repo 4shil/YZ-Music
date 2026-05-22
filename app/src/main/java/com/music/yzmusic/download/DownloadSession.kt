@@ -79,3 +79,28 @@ object DownloadSession {
     ) {
         val waiting: Int get() = items.count { !it.progress.settled }
         val finished: Int get() = items.count { it.progress is DownloadProgress.Done }
+        val failed: Int get() = items.count { it.progress is DownloadProgress.Failed }
+
+        /** Whether anything is still queued or running. */
+        val busy: Boolean get() = waiting > 0
+
+        /**
+         * How far through the whole batch this is, counting a settled track as
+         * a whole one whichever way it settled — a failure is not progress, but
+         * it is finished, and a bar that can never fill because one track died
+         * reads as a download that is still going.
+         */
+        val fraction: Float
+            get() {
+                if (items.isEmpty()) return 0f
+                val total = items.sumOf { item ->
+                    when (val progress = item.progress) {
+                        is DownloadProgress.Running -> progress.fraction.toDouble()
+                        DownloadProgress.Queued -> 0.0
+                        else -> 1.0
+                    }
+                }
+                return (total / items.size).toFloat().coerceIn(0f, 1f)
+            }
+
+        /** See the class comment: not "is downloading" but "is unaccounted for". */
