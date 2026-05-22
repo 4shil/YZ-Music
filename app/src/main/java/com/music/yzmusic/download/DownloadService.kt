@@ -156,3 +156,12 @@ class DownloadService : Service() {
         stopSelf()
     }
 
+    override fun onDestroy() {
+        scope.cancel()
+        Downloads.onStopped()
+        super.onDestroy()
+    }
+
+    // ---- Notification -------------------------------------------------------
+
+    private fun promote() {
