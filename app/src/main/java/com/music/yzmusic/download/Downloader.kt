@@ -76,3 +76,35 @@ object Downloader {
             coroutineContext.ensureActive()
             val length = minOf(CHUNK_BYTES, total - position)
 
+            val response = try {
+                open(url, position, length)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "range at $position failed for $videoId: ${e.message}")
+                throw e
+            }
+
+            // A URL that served its opening and then refuses is the one failure
+            // worth a second attempt: it means the identity behind it has been
+            // stood down mid-download, not that the track is gone. Telling the
+            // resolver is what stops the next track failing the same way.
+            if (response.code in REFUSAL_CODES) {
+                response.close()
+                StreamResolver.onPlaybackRefused(url, response.code)
+                if (reresolved) error("Download refused after ${position}B (HTTP ${response.code})")
+                reresolved = true
+                Log.w(TAG, "re-resolving $videoId after HTTP ${response.code} at $position")
+                url = StreamResolver.resolveForDownload(videoId, maxKbps).url
+                // Resolving again re-runs the whole client walk, and a
+                // different client can answer with a different format. Resuming
+                // one stream into the middle of another produces a file that is
+                // the right length and unplayable, so a length that has moved
+                // is a failure rather than something to work around.
+                if (contentLength(url) != total) error("The stream changed mid-download — try again")
+                continue
+            }
+
+            response.use {
+                if (it.code !in 200..299) error("Download failed (HTTP ${it.code})")
+                val body = it.body ?: error("Download failed: empty response")
