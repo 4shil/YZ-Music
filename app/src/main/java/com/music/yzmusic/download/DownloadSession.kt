@@ -63,3 +63,19 @@ object DownloadSession {
         /** The id the *tap* used, which is what everything else here is keyed by. */
         val videoId: String,
         val song: Song,
+        val progress: DownloadProgress,
+        /** What release this was part of, when it was part of one. */
+        val from: String? = null,
+        /** Ask order, so the list reads the way the queue drains. */
+        val sequence: Long,
+    )
+
+    data class State(
+        val items: List<Item> = emptyList(),
+        /** When the user last had the manager open, on [tick]'s clock. */
+        val seenAt: Long = 0L,
+        /** When the last thing in the queue stopped moving, on [tick]'s clock. */
+        val settledAt: Long = 0L,
+    ) {
+        val waiting: Int get() = items.count { !it.progress.settled }
+        val finished: Int get() = items.count { it.progress is DownloadProgress.Done }
