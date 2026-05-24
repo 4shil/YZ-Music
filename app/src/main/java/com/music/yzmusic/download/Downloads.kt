@@ -573,3 +573,59 @@ object Downloads {
         val seenUris = mutableSetOf<String>()
 
         for ((videoId, meta) in metaMap) {
+            val uri = meta.uri.toUri()
+            if (DownloadStore.exists(context, uri)) {
+                if (seenUris.add(meta.uri)) {
+                    result.add(
+                        Song(
+                            videoId = meta.videoId,
+                            title = meta.title,
+                            artist = meta.artist,
+                            thumbnailUrl = meta.thumbnailUrl,
+                            durationText = meta.durationText,
+                            albumName = meta.albumName,
+                            localUri = meta.uri,
+                        )
+                    )
+                }
+            } else {
+                forget(videoId)
+            }
+        }
+        result
+    }
+
+    private fun String.toUri(): Uri = Uri.parse(this)
+
+    // ---- Driven by DownloadService -----------------------------------------
+
+    /**
+     * The next track to fetch, or null when the queue is empty.
+     *
+     * Claims it as running under the same lock that removed it, so there is no
+     * instant where a track is in neither the queue nor the running slot and a
+     * [cancel] for it would quietly do nothing.
+     */
+    internal fun takeNext(): Song? = synchronized(lock) {
+        val entry = pending.entries.firstOrNull() ?: return null
+        pending.remove(entry.key)
+        running[entry.key] = null
+        entry.value
+    }
+
+    /** Attach the job fetching [videoId], unless it has been cancelled meanwhile. */
+    internal fun onRunning(videoId: String, job: Job) {
+        val cancelled = synchronized(lock) {
+            if (videoId !in running) return@synchronized true
+            running[videoId] = job
+            false
+        }
+        if (cancelled) job.cancel()
+    }
+
+    /** [videoId] is finished, one way or another, and no longer holds a worker. */
+    internal fun onIdle(videoId: String) {
+        synchronized(lock) { running.remove(videoId) }
+    }
+
+    /** Whether anything is still queued or in flight — see [DownloadService]'s workers. */
