@@ -549,3 +549,27 @@ object Downloads {
      * updated compare-and-set, and the persist is serialised so the copy that
      * reaches disk is never older than one already written.
      */
+    private fun record(
+        saved: (Map<String, String>) -> Map<String, String>,
+        meta: (Map<String, SavedSongMetadata>) -> Map<String, SavedSongMetadata>,
+    ) {
+        val savedMap = _saved.updateAndGet(saved)
+        val metaMap = _savedMetadata.updateAndGet(meta)
+        if (!::prefs.isInitialized) return
+        synchronized(recordLock) {
+            prefs.edit()
+                .putString(KEY_SAVED, json.encodeToString(serializer, savedMap))
+                .putString(KEY_SAVED_METADATA, json.encodeToString(metadataSerializer, metaMap))
+                .apply()
+        }
+    }
+
+    private val recordLock = Any()
+
+    /** Returns all downloaded songs whose files still exist on disk. */
+    suspend fun getDownloadedSongs(context: Context): List<Song> = withContext(Dispatchers.IO) {
+        val metaMap = _savedMetadata.value
+        val result = mutableListOf<Song>()
+        val seenUris = mutableSetOf<String>()
+
+        for ((videoId, meta) in metaMap) {
