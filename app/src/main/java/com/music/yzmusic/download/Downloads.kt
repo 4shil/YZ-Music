@@ -1038,3 +1038,46 @@ internal data class SavedSongMetadata(
      * still decodes — those entries come back with a null album and are filled
      * in from the file's own tags instead, see LocalMediaRepository.
      */
+    val albumName: String? = null,
+    val uri: String,
+)
+
+/**
+ * What a batch download was asked for as a whole.
+ *
+ * Built by whichever surface the tap came from — a release page's own download
+ * button, a shelf card's menu — because that surface is the only thing that
+ * knows the answer, and by the time the tracks reach the queue they are forty
+ * unrelated rows. Null everywhere a single track is downloaded on its own,
+ * which is the honest answer there: one song off an album is not the album.
+ */
+data class DownloadTarget(
+    /**
+     * What this release is filed under: its browse id where it has one, so the
+     * same album downloaded twice is one entry rather than two.
+     */
+    val id: String,
+    val title: String,
+    val subtitle: String = "",
+    val thumbnailUrl: String? = null,
+    /** Playlists and albums are grouped alike but not billed alike. */
+    val playlist: Boolean = false,
+)
+
+/**
+ * A release the record says was downloaded whole, as it is written down.
+ *
+ * Only the tracks' ids, not the tracks: a [Song] is a wide row full of things
+ * that go stale — like state, autoplay provenance, a resolved local path — and
+ * a second copy of one per release is a second copy to keep in step. The songs
+ * are looked up out of what the Downloads page already read off disk instead;
+ * see [Downloads.collectionsAmong].
+ */
+@kotlinx.serialization.Serializable
+data class SavedCollection(
+    val id: String,
+    val title: String,
+    val subtitle: String = "",
+    val thumbnailUrl: String? = null,
+    val playlist: Boolean = false,
+    /** In the order the page listed them, which is the order to play them in. */
