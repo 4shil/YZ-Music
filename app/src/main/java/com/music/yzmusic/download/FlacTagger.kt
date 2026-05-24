@@ -70,3 +70,24 @@ object FlacTagger {
             val length = ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
                 ((bytes[offset + 2].toInt() and 0xFF) shl 8) or
                 (bytes[offset + 3].toInt() and 0xFF)
+            val start = offset + BLOCK_HEADER
+            if (start + length > bytes.size) return bytes
+            blocks += Block(flags and 0x7F, start, length)
+            offset = start + length
+            if (flags and 0x80 != 0) break
+        }
+        // Required to be first by the format itself; a file that doesn't have it
+        // there is not one to guess at.
+        if (blocks.firstOrNull()?.type != TYPE_STREAMINFO) return bytes
+
+        val additions = listOfNotNull(
+            vorbisComment(title, artist, album, lyrics, wordLyrics)?.let { TYPE_VORBIS_COMMENT to it },
+            cover?.takeIf { it.isNotEmpty() }?.let { TYPE_PICTURE to picture(it, coverMime) },
+        )
+            // A payload past what three bytes of length can describe costs that
+            // one block and nothing else. Only a cover could realistically reach
+            // 16MB — `LyricsTag` caps what it hands over at a small fraction of
+            // it — and losing the cover is a better outcome than losing the tags.
+            .filter { it.second.size <= MAX_BLOCK_BYTES }
+        if (additions.isEmpty()) return bytes
+
