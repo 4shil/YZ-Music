@@ -739,3 +739,35 @@ object Downloads {
             }
         }
 
+        val route = routeFor(track, quality)
+        Log.d(TAG, "downloading ${song.videoId} as .${route.extension} (${route.describe}, ${quality.label})")
+        Prepared(song.videoId, track, route = route, alreadyAt = null)
+    }
+
+    /**
+     * What [prepare] worked out, ready for a transfer to be run against it.
+     *
+     * [videoId] rides along so a look-ahead can be checked against the track
+     * actually taken off the queue: the two diverge whenever something is
+     * cancelled while its route is being resolved, and a plan applied to the
+     * wrong track would write one song's bytes under another's name.
+     */
+    internal class Prepared(
+        val videoId: String,
+        /** The catalogue track behind the row, which may not be the row. */
+        val track: Song,
+        /** Null when [alreadyAt] answered the question instead. */
+        val route: Route?,
+        /** A file already in Music that is this download, if there is one. */
+        val alreadyAt: Uri?,
+    )
+
+    /**
+     * Fetch the bytes [plan] points at and publish them.
+     *
+     * Owns the destination from end to end: every exit out of here either
+     * commits or aborts, so a caller is free to call it a second time with a
+     * freshly resolved plan without the first attempt leaving anything behind.
+     */
+    private suspend fun transfer(context: Context, song: Song, plan: Prepared) {
+        val id = song.videoId
