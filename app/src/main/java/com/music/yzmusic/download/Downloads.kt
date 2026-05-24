@@ -771,3 +771,50 @@ object Downloads {
      */
     private suspend fun transfer(context: Context, song: Song, plan: Prepared) {
         val id = song.videoId
+        val track = plan.track
+
+        // Already there from a previous run the record lost track of — adopt it
+        // rather than writing a second copy beside it.
+        plan.alreadyAt?.let { uri ->
+            remember(song, track, uri)
+            DownloadSession.done(id)
+            clear(id)
+            return
+        }
+        val route = plan.route ?: error("Nothing to download")
+
+        var pending: DownloadStore.Pending? = null
+        var lyrics: Deferred<LyricsTag.Embeddable?>? = null
+        try {
+            coroutineScope {
+                // Started before the transfer rather than after it, so four lyric
+                // services are being raced while the bytes are already moving. Done
+                // after the commit instead, every download would pay the slowest of
+                // them in dead time — and it is a *suspending* wait, so it would sit
+                // in the one stretch of this function that has no way back: past the
+                // commit, [pending] is null and a cancellation there would abandon a
+                // finished file that nothing has recorded yet. Awaited below while
+                // there is still a pending destination to abort.
+                //
+                // [LyricsTag.forTrack] is contracted not to throw for anything but
+                // cancellation, and that contract is load-bearing here: this is a
+                // plain child of the scope, so a failure inside it would cancel the
+                // download it was only meant to decorate.
+                if (MediaTagger.carriesTags(route.extension)) {
+                    lyrics = async { LyricsTag.forTrack(track) }
+                }
+
+                val name = DownloadStore.fileNameFor(track, route.extension)
+                val alreadyThere = DownloadStore.existing(context, name)
+                if (alreadyThere != null) {
+                    Log.d(TAG, "$name is already in Music; adopting it")
+                    remember(song, track, alreadyThere)
+                    DownloadSession.done(id)
+                    clear(id)
+                    return@coroutineScope
+                }
+
+                val destination = DownloadStore.begin(context, name, route.mimeType)
+                pending = destination
+                destination.openStream().use { sink ->
+                    route.write(sink) { written, total ->
