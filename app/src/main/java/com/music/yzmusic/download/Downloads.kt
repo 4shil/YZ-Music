@@ -357,3 +357,63 @@ object Downloads {
     fun rememberCollection(target: DownloadTarget, songs: List<Song>) {
         if (songs.isEmpty()) return
         val existing = _collections.value[target.id]
+        val ids = songs.map { it.videoId }.distinct()
+        val record = SavedCollection(
+            id = target.id,
+            title = target.title,
+            subtitle = target.subtitle,
+            thumbnailUrl = target.thumbnailUrl ?: existing?.thumbnailUrl,
+            playlist = target.playlist,
+            // A release fetched in pages can be downloaded twice from two
+            // different depths of the same page, so the two asks are merged
+            // rather than the second replacing the first — but the new order
+            // leads, since it is the one just seen on screen.
+            videoIds = (ids + (existing?.videoIds ?: emptyList())).distinct(),
+        )
+        recordCollections(_collections.value + (target.id to record))
+    }
+
+    /** Drop a release from the record without touching the files under it. */
+    fun forgetCollection(id: String) {
+        if (id !in _collections.value) return
+        recordCollections(_collections.value - id)
+    }
+
+    /**
+     * Delete every file downloaded for release [id] and drop the record of it.
+     *
+     * The counterpart to [forgetCollection]: that one is for a record whose
+     * files are already gone, this one is what actually takes them off the
+     * device — the "delete download" a whole album or playlist card offers,
+     * where a single track only ever offers [delete].
+     */
+    suspend fun deleteCollection(context: Context, id: String): Boolean {
+        val record = _collections.value[id] ?: return false
+        var any = false
+        record.videoIds.forEach { videoId -> if (delete(context, videoId)) any = true }
+        forgetCollection(id)
+        return any
+    }
+
+    /**
+     * How one downloaded playlist is addressed as a page of its own.
+     *
+     * Under `local:` deliberately: that prefix is how the rest of the app asks
+     * "is this already on the device?", and it is what keeps the download button
+     * off such a page's header and out of its menu. What it must not be taken
+     * for is one of the two device *folders* — `local:downloads` and `local:all`
+     * open the tabbed Songs / Artists / Albums view, and this opens a plain
+     * track listing — so it gets a segment of its own rather than an id in the
+     * same namespace.
+     *
+     * Playlists only, which is why the word is in the prefix. A downloaded album
+     * stamps its name onto each of its tracks, so the Albums tab groups it back
+     * up without being told; a playlist's tracks are off forty different releases
+     * and no tag on any of them names it, so it is the one that needs a page.
+     */
+    const val PLAYLIST_PREFIX = "local:playlist:"
+
+    /** The page id for the release recorded under [id]. */
+    fun pageIdFor(id: String): String = PLAYLIST_PREFIX + id
+
+    /** The release [pageIdFor] built [browseId] from, or null if it didn't. */
