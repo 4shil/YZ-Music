@@ -218,3 +218,83 @@ object Downloads {
      * told to run is no longer wanted, and stops it on arrival.
      */
     fun cancel(videoId: String) {
+        val job = synchronized(lock) {
+            pending.remove(videoId)
+            if (videoId !in running) return@synchronized null
+            running.remove(videoId)
+        }
+        job?.cancel()
+        clear(videoId)
+        // A download the user called off is not something they need reminding to
+        // check on, so it leaves the manager rather than sitting in it as a
+        // permanent "cancelled" row.
+        DownloadSession.forget(videoId)
+    }
+
+    // ---- The record ---------------------------------------------------------
+
+    /**
+     * The file saved for [videoId], or null — pruning the record if the file
+     * has been deleted from under it.
+     *
+     * Touches the filesystem, so call it off the main thread.
+     */
+    suspend fun savedUri(context: Context, videoId: String): Uri? = withContext(Dispatchers.IO) {
+        val recorded = _saved.value[videoId] ?: return@withContext null
+        val uri = recorded.toUri()
+        if (DownloadStore.exists(context, uri)) return@withContext uri
+        Log.d(TAG, "$videoId was downloaded but the file is gone; forgetting it")
+        forget(videoId)
+        null
+    }
+
+    /**
+     * True when [uriString] names a `file://` path that is not there.
+     *
+     * Deliberately answers only for `file://`, and deliberately cheaply: this is
+     * called from [Song.toMediaItem], which runs on the main thread once per
+     * item for a whole queue. A `stat` is a few microseconds and safe at that
+     * rate; the `openFileDescriptor` a `content://` uri would need is a binder
+     * round trip, and three hundred of those while building a queue is a frame
+     * budget gone. Stale `content://` records are left to
+     * [PlaybackService.recoverFrom], which catches every scheme at the moment a
+     * read actually fails and costs nothing until then.
+     *
+     * False for anything unparseable, which keeps "I could not tell" out of the
+     * "the file is missing" answer — the caller drops a uri on a true here.
+     */
+    fun isMissingLocalFile(uriString: String): Boolean {
+        if (!uriString.startsWith("file://")) return false
+        val path = runCatching { uriString.toUri().path }.getOrNull() ?: return false
+        return !File(path).exists()
+    }
+
+    /**
+     * As [savedUri], but synchronous and without a [Context] parameter — for
+     * [Song.toMediaItem], which builds a [MediaItem] on whatever thread that
+     * happens to run on and has neither a suspend context nor a [Context] in
+     * hand to reach [DownloadStore.exists] with.
+     *
+     * Without this, a record surviving the file it names — deleted by a file
+     * manager, or a folder wiped out from under the app — sent the player a
+     * `file://` uri to a path that is simply not there. Nothing downstream
+     * checks that either: [AudioCache.playbackFactory] hands `file://` and
+     * `content://` uris straight to [androidx.media3.datasource.FileDataSource],
+     * which fails with `ERROR_CODE_IO_FILE_NOT_FOUND` — retried a handful of
+     * times and then given up on, so the track just refuses to play, with
+     * nothing to say why.
+     *
+     * Prunes the record on the way past, the same as [savedUri]: a claim that
+     * has just been shown to be false is not worth keeping to be shown false
+     * again on the next play.
+     */
+    fun verifiedSavedUri(videoId: String): String? {
+        val recorded = _saved.value[videoId] ?: return null
+        if (!isMissingLocalFile(recorded)) return recorded
+        Log.d(TAG, "$videoId was downloaded but the file is gone; forgetting it")
+        forget(videoId)
+        return null
+    }
+
+    /** Delete the file saved for [videoId] and forget it. */
+    suspend fun delete(context: Context, videoId: String): Boolean = withContext(Dispatchers.IO) {
