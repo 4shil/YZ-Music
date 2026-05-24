@@ -133,3 +133,37 @@ object FlacTagger {
         lyrics: String?,
         wordLyrics: String?,
     ): ByteArray? {
+        val fields = buildList {
+            if (title.isNotBlank()) add("TITLE=$title")
+            if (artist.isNotBlank()) add("ARTIST=$artist")
+            if (!album.isNullOrBlank()) add("ALBUM=$album")
+            if (!lyrics.isNullOrBlank()) add("LYRICS=$lyrics")
+            // Beside `LYRICS`, never instead of it: an unknown name is skipped
+            // by every reader, so the portable field stays exactly as it was.
+            if (!wordLyrics.isNullOrBlank()) add("$WORD_LYRICS_FIELD=$wordLyrics")
+        }
+        if (fields.isEmpty()) return null
+
+        val out = ByteArrayOutputStream()
+        val vendor = VENDOR.toByteArray(Charsets.UTF_8)
+        out.writeLe(vendor.size)
+        out.write(vendor)
+        out.writeLe(fields.size)
+        for (field in fields) {
+            val encoded = field.toByteArray(Charsets.UTF_8)
+            out.writeLe(encoded.size)
+            out.write(encoded)
+        }
+        return out.toByteArray()
+    }
+
+    /**
+     * A `PICTURE` payload holding [cover] as the front cover.
+     *
+     * Big-endian throughout, unlike the comment block above. The dimensions and
+     * colour fields are all written as zero, which the format defines as
+     * "unstated" rather than as a claim about a 0x0 image — decoding the JPEG
+     * here to fill them in would buy nothing, since every player that draws the
+     * image has to decode it anyway.
+     */
+    private fun picture(cover: ByteArray, mime: String): ByteArray {
