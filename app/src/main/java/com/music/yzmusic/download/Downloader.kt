@@ -108,3 +108,66 @@ object Downloader {
             response.use {
                 if (it.code !in 200..299) error("Download failed (HTTP ${it.code})")
                 val body = it.body ?: error("Download failed: empty response")
+                val source = body.byteStream()
+                var readForChunk = 0L
+                while (readForChunk < length) {
+                    coroutineContext.ensureActive()
+                    val wanted = minOf(buffer.size.toLong(), length - readForChunk).toInt()
+                    val read = source.read(buffer, 0, wanted)
+                    if (read == -1) break
+                    sink.write(buffer, 0, read)
+                    readForChunk += read
+                    position += read
+                    onProgress(position, total)
+                }
+                // A range that stops short is not fatal on its own — the next
+                // pass simply asks for what is left — but one that yields
+                // nothing at all would loop here forever.
+                if (readForChunk == 0L) error("Download stalled at ${position}B")
+            }
+        }
+
+        sink.flush()
+        position
+    }
+
+    /**
+     * Fetch all of [url] into [sink], for a stream that isn't googlevideo's.
+     *
+     * Deliberately not a parameterised [fetch], on two counts that both matter:
+     *
+     *  - **One GET, not ranges.** The chunk loop above exists to defeat
+     *    googlevideo's pacing, and nothing else paces bytes that way. Worse, a
+     *    server that ignores `Range` answers 200 with the whole file rather
+     *    than 206 with the slice asked for — and that loop would then write the
+     *    opening of the file into the middle of the output and commit something
+     *    the right length and unplayable.
+     *  - **The source's own headers.** A source hands them over alongside the
+     *    URL — see [SourceStream.headers][com.music.yzmusic.data.sources.SourceStream.headers]
+     *    — and they are whatever that server binds its links to. The
+     *    [PlayerClient] identity [fetch] recovers from a googlevideo URL means
+     *    nothing here.
+     *
+     * There is no re-resolve on a refusal either. [fetch] has one because a
+     * googlevideo URL is minted against a session that can be stood down
+     * mid-download; a source's URL that stops working has a server behind it
+     * with its own reasons, and the caller falling back to YouTube is a better
+     * answer than asking again.
+     *
+     * @param onProgress called as bytes land, and only when the response stated
+     *   a length to measure against — an unstated one leaves the progress
+     *   indeterminate rather than dividing by zero.
+     * @return how many bytes were written.
+     */
+    suspend fun fetchDirect(
+        url: String,
+        headers: Map<String, String>,
+        sink: OutputStream,
+        onProgress: (written: Long, total: Long) -> Unit,
+    ): Long = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url)
+            .apply { headers.forEach { (name, value) -> header(name, value) } }
+            .build()
+
+        Http.client.newCall(request).execute().use { response ->
+            if (response.code !in 200..299) error("Download failed (HTTP ${response.code})")
