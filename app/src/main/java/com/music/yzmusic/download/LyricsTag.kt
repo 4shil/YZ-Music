@@ -74,3 +74,31 @@ internal object LyricsTag {
             return null
         }
 
+        val found = try {
+            withTimeoutOrNull(LOOKUP_MS) {
+                LyricsRepository.lyrics(
+                    videoId = track.videoId,
+                    title = track.title,
+                    artist = track.artist,
+                    durationMs = durationMs,
+                    album = track.albumName,
+                    sources = sources,
+                    order = AppSettings.lyricsSourceOrder.value,
+                    prioritizeSyllableSync = AppSettings.prioritizeSyllableSync.value,
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d(TAG, "no lyrics for ${track.videoId}: ${e.message}")
+            return null
+        } ?: return null
+
+        // A result made only of blank lines is what an instrumental, or a
+        // provider that answered with timing and no words, comes back as. Those
+        // convert to a column of bare timestamps, which is not lyrics — and is
+        // not blank either, so the length check below would let it through.
+        if (found.lines.none { it.text.isNotBlank() }) return null
+
+        val lrc = found.lines.toLrc()
+        if (lrc.length > MAX_LRC_CHARS) {
