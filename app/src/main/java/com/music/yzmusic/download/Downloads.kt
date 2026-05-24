@@ -629,3 +629,113 @@ object Downloads {
     }
 
     /** Whether anything is still queued or in flight — see [DownloadService]'s workers. */
+    internal fun busy(): Boolean = synchronized(lock) { pending.isNotEmpty() || running.isNotEmpty() }
+
+    /**
+     * The service is gone, so nothing is running any more.
+     *
+     * Distinct from [onIdle], which is one worker reporting one finished track.
+     * This is the whole drain going away at once — every claim in [running] is
+     * void, and leaving one behind would have [enqueue] refuse that track
+     * forever as already in flight.
+     */
+    internal fun onStopped() {
+        synchronized(lock) { running.clear() }
+    }
+
+    /**
+     * Fetch one track, start to finish.
+     *
+     * Two halves, and the split is what lets a queue go at any speed: [prepare]
+     * decides where the bytes come from and [transfer] moves them. Everything
+     * that can go wrong past the point of reserving a destination has to
+     * unreserve it — a cancelled or failed download must not leave a partial
+     * file behind pretending to be a whole one, which is what
+     * [DownloadStore.Pending] exists to make hard to get wrong.
+     *
+     * Pinned to [Dispatchers.IO] here rather than trusted to arrive on it.
+     * Resolving a stream blocks on HTTP and runs YouTube's player JavaScript
+     * through Rhino, and [DownloadService] drives this from a main-thread scope
+     * so its notification work stays where it belongs — inheriting that would
+     * put every network call in the resolve on the main thread, where they
+     * don't fail loudly so much as fail *uniformly*: `NetworkOnMainThreadException`
+     * is caught by the same per-client `runCatching` that exists to tolerate a
+     * client being turned away, so every client appears to be refused and the
+     * whole thing reads as a network outage.
+     *
+     * Several of these run at once — see [DownloadService]. Nothing in here is
+     * shared between them but the two state flows, and both are written through
+     * atomic updates for exactly that reason.
+     */
+    internal suspend fun run(context: Context, song: Song) = withContext(Dispatchers.IO) {
+        val id = song.videoId
+        // Set before the lookup, not after it. Resolving where a lossless track
+        // comes from is the long part of a download, and leaving the row on
+        // "Queued" for all of it reads as a queue that has stopped rather than
+        // one that is working.
+        _active.update { it + (id to DownloadState.Running(0f)) }
+        DownloadSession.running(id, 0f)
+
+        try {
+            val plan = prepare(context, song)
+            // The manager is showing the row that was tapped, which for a music
+            // video is the wrong title and the wrong cover for the file actually
+            // being written. Corrected here rather than left to disagree with
+            // the notification and with the Downloads page afterwards.
+            DownloadSession.retitle(id, plan.track)
+            transfer(context, song, plan)
+        } catch (e: CancellationException) {
+            clear(id)
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "download failed for $id: ${e.message}", e)
+            fail(id, e.friendly())
+        }
+    }
+
+    /**
+     * Everything that has to be known before a byte can be asked for, and
+     * nothing that touches the destination.
+     *
+     * Split out of [run] so it can be done *ahead* of time — see [peekNext].
+     * On a lossless queue this is the expensive half by a wide margin: a module
+     * search fans out across a whole index and then a stream endpoint is
+     * opened, tens of seconds against the few the transfer itself takes on a
+     * fast connection. Run between transfers, as it used to be, that time was
+     * simply the connection standing idle once per track, which is what a long
+     * queue spent most of its life doing.
+     *
+     * Nothing here writes to [_active] or to [DownloadSession]. It may be
+     * running for a track that is still queued — or for one that gets cancelled
+     * before its turn — and a preparation is not a download.
+     */
+    internal suspend fun prepare(context: Context, song: Song): Prepared = withContext(Dispatchers.IO) {
+        // A music-video entry is swapped for the catalogue track behind it,
+        // the same way queueing one is. It matters more here: the video's
+        // title is where "(Official Video)" lives, and that would be baked
+        // into a filename this app never gets to correct.
+        val track = runCatching { YtMusicRepository.resolveAudio(song) }.getOrDefault(song)
+        // Read once, here, for the whole of this track. Both routes below
+        // and the re-resolve inside [Downloader.fetch] have to agree on
+        // which rung they are fetching, and re-reading the setting per call
+        // would let a change made mid-download splice two renditions into
+        // one file.
+        val quality = AppSettings.downloadQuality.value
+
+        // Asked before the lookup rather than after it, unlike the check on the
+        // route's own filename below. A file already sitting in Music under a
+        // lossless extension is the answer to the whole question, and spending
+        // a twenty-second module search to arrive at a name we could have
+        // guessed is the difference between re-running a 300-track queue in
+        // seconds and re-running it in hours. Only the extensions that can only
+        // be lossless are worth guessing at: an `.m4a` may be this app's ALAC
+        // or its AAC, and adopting the wrong one would quietly answer a request
+        // for lossless with a transcode.
+        if (quality.keepsLossless) {
+            LOSSLESS_EXTENSIONS.firstNotNullOfOrNull { extension ->
+                DownloadStore.existing(context, DownloadStore.fileNameFor(track, extension))
+            }?.let { uri ->
+                return@withContext Prepared(song.videoId, track, route = null, alreadyAt = uri)
+            }
+        }
+
