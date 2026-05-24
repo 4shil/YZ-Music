@@ -63,3 +63,10 @@ object FlacTagger {
         // last block, bits 0-6 are the type — and three big-endian bytes of
         // payload length.
         val blocks = mutableListOf<Block>()
+        var offset = MAGIC.size
+        while (true) {
+            if (offset + BLOCK_HEADER > bytes.size) return bytes
+            val flags = bytes[offset].toInt() and 0xFF
+            val length = ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
+                ((bytes[offset + 2].toInt() and 0xFF) shl 8) or
+                (bytes[offset + 3].toInt() and 0xFF)
