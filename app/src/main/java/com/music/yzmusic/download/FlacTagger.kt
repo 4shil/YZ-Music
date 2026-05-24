@@ -167,3 +167,61 @@ object FlacTagger {
      * image has to decode it anyway.
      */
     private fun picture(cover: ByteArray, mime: String): ByteArray {
+        val out = ByteArrayOutputStream(cover.size + 64)
+        val mimeBytes = mime.toByteArray(Charsets.US_ASCII)
+        out.writeBe(PICTURE_FRONT_COVER)
+        out.writeBe(mimeBytes.size)
+        out.write(mimeBytes)
+        out.writeBe(0) // description length; the picture type already says it
+        out.writeBe(0) // width
+        out.writeBe(0) // height
+        out.writeBe(0) // colour depth
+        out.writeBe(0) // colours used — zero for anything that isn't paletted
+        out.writeBe(cover.size)
+        out.write(cover)
+        return out.toByteArray()
+    }
+
+    private class Block(val type: Int, val start: Int, val length: Int)
+
+    private fun ByteArrayOutputStream.writeLe(value: Int) {
+        write(value and 0xFF)
+        write((value ushr 8) and 0xFF)
+        write((value ushr 16) and 0xFF)
+        write((value ushr 24) and 0xFF)
+    }
+
+    private fun ByteArrayOutputStream.writeBe(value: Int) {
+        write((value ushr 24) and 0xFF)
+        write((value ushr 16) and 0xFF)
+        write((value ushr 8) and 0xFF)
+        write(value and 0xFF)
+    }
+
+    private fun ByteArray.regionMatches(offset: Int, other: ByteArray): Boolean {
+        if (offset < 0 || offset + other.size > size) return false
+        for (i in other.indices) if (this[offset + i] != other[i]) return false
+        return true
+    }
+
+    private val MAGIC = "fLaC".toByteArray(Charsets.US_ASCII)
+
+    /** One byte of flags plus three of length, before every block's payload. */
+    private const val BLOCK_HEADER = 4
+
+    private const val TYPE_STREAMINFO = 0
+    private const val TYPE_PADDING = 1
+    private const val TYPE_VORBIS_COMMENT = 4
+    private const val TYPE_PICTURE = 6
+
+    /** Blocks this rewrites or spends, rather than carrying across. */
+    private val REPLACED = setOf(TYPE_PADDING, TYPE_VORBIS_COMMENT, TYPE_PICTURE)
+
+    /** The most a three-byte length field can describe. */
+    private const val MAX_BLOCK_BYTES = (1 shl 24) - 1
+
+    /** The `PICTURE` type for a front cover, which is the only one written here. */
+    private const val PICTURE_FRONT_COVER = 3
+
+    private const val VENDOR = "YZ Music"
+}
