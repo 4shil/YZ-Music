@@ -174,3 +174,8 @@ object Downloader {
             val body = response.body ?: error("Download failed: empty response")
             val total = response.header("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
             val source = body.byteStream()
+            val buffer = ByteArray(BUFFER_BYTES)
+            var written = 0L
+
+            while (true) {
+                coroutineContext.ensureActive()
