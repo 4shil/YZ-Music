@@ -218,3 +218,142 @@ object Downloads {
      * told to run is no longer wanted, and stops it on arrival.
      */
     fun cancel(videoId: String) {
+        val job = synchronized(lock) {
+            pending.remove(videoId)
+            if (videoId !in running) return@synchronized null
+            running.remove(videoId)
+        }
+        job?.cancel()
+        clear(videoId)
+        // A download the user called off is not something they need reminding to
+        // check on, so it leaves the manager rather than sitting in it as a
+        // permanent "cancelled" row.
+        DownloadSession.forget(videoId)
+    }
+
+    // ---- The record ---------------------------------------------------------
+
+    /**
+     * The file saved for [videoId], or null — pruning the record if the file
+     * has been deleted from under it.
+     *
+     * Touches the filesystem, so call it off the main thread.
+     */
+    suspend fun savedUri(context: Context, videoId: String): Uri? = withContext(Dispatchers.IO) {
+        val recorded = _saved.value[videoId] ?: return@withContext null
+        val uri = recorded.toUri()
+        if (DownloadStore.exists(context, uri)) return@withContext uri
+        Log.d(TAG, "$videoId was downloaded but the file is gone; forgetting it")
+        forget(videoId)
+        null
+    }
+
+    /**
+     * True when [uriString] names a `file://` path that is not there.
+     *
+     * Deliberately answers only for `file://`, and deliberately cheaply: this is
+     * called from [Song.toMediaItem], which runs on the main thread once per
+     * item for a whole queue. A `stat` is a few microseconds and safe at that
+     * rate; the `openFileDescriptor` a `content://` uri would need is a binder
+     * round trip, and three hundred of those while building a queue is a frame
+     * budget gone. Stale `content://` records are left to
+     * [PlaybackService.recoverFrom], which catches every scheme at the moment a
+     * read actually fails and costs nothing until then.
+     *
+     * False for anything unparseable, which keeps "I could not tell" out of the
+     * "the file is missing" answer — the caller drops a uri on a true here.
+     */
+    fun isMissingLocalFile(uriString: String): Boolean {
+        if (!uriString.startsWith("file://")) return false
+        val path = runCatching { uriString.toUri().path }.getOrNull() ?: return false
+        return !File(path).exists()
+    }
+
+    /**
+     * As [savedUri], but synchronous and without a [Context] parameter — for
+     * [Song.toMediaItem], which builds a [MediaItem] on whatever thread that
+     * happens to run on and has neither a suspend context nor a [Context] in
+     * hand to reach [DownloadStore.exists] with.
+     *
+     * Without this, a record surviving the file it names — deleted by a file
+     * manager, or a folder wiped out from under the app — sent the player a
+     * `file://` uri to a path that is simply not there. Nothing downstream
+     * checks that either: [AudioCache.playbackFactory] hands `file://` and
+     * `content://` uris straight to [androidx.media3.datasource.FileDataSource],
+     * which fails with `ERROR_CODE_IO_FILE_NOT_FOUND` — retried a handful of
+     * times and then given up on, so the track just refuses to play, with
+     * nothing to say why.
+     *
+     * Prunes the record on the way past, the same as [savedUri]: a claim that
+     * has just been shown to be false is not worth keeping to be shown false
+     * again on the next play.
+     */
+    fun verifiedSavedUri(videoId: String): String? {
+        val recorded = _saved.value[videoId] ?: return null
+        if (!isMissingLocalFile(recorded)) return recorded
+        Log.d(TAG, "$videoId was downloaded but the file is gone; forgetting it")
+        forget(videoId)
+        return null
+    }
+
+    /** Delete the file saved for [videoId] and forget it. */
+    suspend fun delete(context: Context, videoId: String): Boolean = withContext(Dispatchers.IO) {
+        val uri = _saved.value[videoId]?.toUri() ?: return@withContext false
+        val deleted = DownloadStore.delete(context, uri)
+        forget(videoId)
+        deleted
+    }
+
+    private fun forget(videoId: String) {
+        record(saved = { it - videoId }, meta = { it - videoId })
+    }
+
+    /**
+     * Drop the record for [videoId] because a read of the file it names has
+     * just failed.
+     *
+     * The public counterpart to [forget], for [PlaybackService.recoverFrom] —
+     * the one caller that does not need to check anything first, because the
+     * player has already done better than a check: it opened the file and got
+     * `ENOENT`. That covers the `content://` records [isMissingLocalFile]
+     * deliberately declines to answer for, which is the whole reason this is
+     * reachable from outside.
+     *
+     * Named for what it asserts rather than what it does, so a caller that has
+     * *not* established the file is missing has no business calling it.
+     */
+    fun forgetMissing(videoId: String) {
+        if (videoId !in _saved.value) return
+        Log.d(TAG, "$videoId could not be opened; forgetting the download")
+        forget(videoId)
+    }
+
+    // ---- Releases -----------------------------------------------------------
+
+    /**
+     * Remember that [songs] were asked for as one release rather than one at a
+     * time.
+     *
+     * The reason this exists at all: a batch download used to be indistinguishable
+     * from forty separate ones the moment it finished. What reached the Downloads
+     * page was forty rows, and the only thing that could group them back up was
+     * whatever album tag each row happened to carry — which an album page's rows
+     * don't carry at all (the release is billed once, in the header) and a
+     * playlist's rows *never* can, because a playlist is not an album and its
+     * tracks are off forty different ones. So the thing the user tapped was the
+     * one thing not written down anywhere.
+     *
+     * Recorded at the tap rather than on completion, and keyed by the id that
+     * was tapped, so re-downloading the same release updates one entry instead
+     * of accumulating near-duplicates. The order is the running order the page
+     * had, which is what makes the entry read back as the release rather than as
+     * a bag of tracks.
+     *
+     * Nothing here asserts the files exist. That is deliberate and matches
+     * [saved]: this is a record of what was *asked* for, and which of those
+     * tracks is actually on disk is answered where it is read — see
+     * [collectionsAmong].
+     */
+    fun rememberCollection(target: DownloadTarget, songs: List<Song>) {
+        if (songs.isEmpty()) return
+        val existing = _collections.value[target.id]
