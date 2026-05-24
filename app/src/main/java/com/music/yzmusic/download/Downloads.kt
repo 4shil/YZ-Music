@@ -971,3 +971,70 @@ object Downloads {
      * `Unsupported MIME type audio/webm` at least sends someone looking in the
      * right direction.
      */
+    private fun Exception.friendly(): String = when {
+        (this is IllegalStateException || this is IllegalArgumentException) &&
+            !message.isNullOrBlank() -> message!!
+        else -> "Download failed — check your connection"
+    }
+
+    /**
+     * How long the source lookup may hold a download up before it goes to
+     * YouTube regardless.
+     *
+     * Matched to `PlaybackService.SUBSTITUTE_TIMEOUT_MS`, which bounds the same
+     * search on the playback side. Generous, because nothing is waiting on the
+     * first note here and a found FLAC is worth some patience — but finite,
+     * because the alternative is the queue stalled per track on modules that
+     * simply do not have it.
+     *
+     * It bounds the lossy half of that lookup too, which is why
+     * [SourceResolver.forDownload] runs both halves at once rather than in
+     * turn: a fast source queued behind a slow one would spend this budget
+     * waiting for a module and never be asked.
+     */
+    private const val SOURCE_LOOKUP_MS = 20_000L
+
+    /**
+     * The extensions a file in Music can carry that say, on their own, that a
+     * lossless request has already been answered.
+     *
+     * `m4a` is deliberately absent even though [DownloadStore.storable] files
+     * ALAC as one: an `.m4a` in this folder is just as likely to be the AAC a
+     * download at the High rung wrote, and there is nothing in the name to
+     * separate them. Guessing wrong there would answer a request for lossless
+     * with a transcode and never fetch the real thing.
+     */
+    private val LOSSLESS_EXTENSIONS = listOf("flac", "wav")
+
+    /**
+     * Why a download didn't start, when the reason is a setting rather than a
+     * fault.
+     *
+     * Names the switch, because a refusal that only says no leaves the user
+     * looking for a network problem that isn't there. Shared with the callers
+     * that show it as a toast so the two cannot drift apart.
+     */
+    internal const val WIFI_ONLY_REFUSAL = "Downloads are set to Wi-Fi only"
+
+    /** Dropped when the sheet is reopened; a failure is worth showing once. */
+    fun dismissFailure(videoId: String) {
+        if (_active.value[videoId] is DownloadState.Failed) clear(videoId)
+    }
+
+    private const val KEY_SAVED = "downloaded_tracks"
+}
+
+@kotlinx.serialization.Serializable
+internal data class SavedSongMetadata(
+    val videoId: String,
+    val title: String,
+    val artist: String,
+    val thumbnailUrl: String? = null,
+    val durationText: String? = null,
+    /**
+     * What release this track is off, when the row it was downloaded from knew.
+     *
+     * Added after the fact and defaulted, so a record written before it existed
+     * still decodes — those entries come back with a null album and are filled
+     * in from the file's own tags instead, see LocalMediaRepository.
+     */
