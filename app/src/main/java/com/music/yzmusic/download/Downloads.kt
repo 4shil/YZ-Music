@@ -298,3 +298,62 @@ object Downloads {
 
     /** Delete the file saved for [videoId] and forget it. */
     suspend fun delete(context: Context, videoId: String): Boolean = withContext(Dispatchers.IO) {
+        val uri = _saved.value[videoId]?.toUri() ?: return@withContext false
+        val deleted = DownloadStore.delete(context, uri)
+        forget(videoId)
+        deleted
+    }
+
+    private fun forget(videoId: String) {
+        record(saved = { it - videoId }, meta = { it - videoId })
+    }
+
+    /**
+     * Drop the record for [videoId] because a read of the file it names has
+     * just failed.
+     *
+     * The public counterpart to [forget], for [PlaybackService.recoverFrom] —
+     * the one caller that does not need to check anything first, because the
+     * player has already done better than a check: it opened the file and got
+     * `ENOENT`. That covers the `content://` records [isMissingLocalFile]
+     * deliberately declines to answer for, which is the whole reason this is
+     * reachable from outside.
+     *
+     * Named for what it asserts rather than what it does, so a caller that has
+     * *not* established the file is missing has no business calling it.
+     */
+    fun forgetMissing(videoId: String) {
+        if (videoId !in _saved.value) return
+        Log.d(TAG, "$videoId could not be opened; forgetting the download")
+        forget(videoId)
+    }
+
+    // ---- Releases -----------------------------------------------------------
+
+    /**
+     * Remember that [songs] were asked for as one release rather than one at a
+     * time.
+     *
+     * The reason this exists at all: a batch download used to be indistinguishable
+     * from forty separate ones the moment it finished. What reached the Downloads
+     * page was forty rows, and the only thing that could group them back up was
+     * whatever album tag each row happened to carry — which an album page's rows
+     * don't carry at all (the release is billed once, in the header) and a
+     * playlist's rows *never* can, because a playlist is not an album and its
+     * tracks are off forty different ones. So the thing the user tapped was the
+     * one thing not written down anywhere.
+     *
+     * Recorded at the tap rather than on completion, and keyed by the id that
+     * was tapped, so re-downloading the same release updates one entry instead
+     * of accumulating near-duplicates. The order is the running order the page
+     * had, which is what makes the entry read back as the release rather than as
+     * a bag of tracks.
+     *
+     * Nothing here asserts the files exist. That is deliberate and matches
+     * [saved]: this is a record of what was *asked* for, and which of those
+     * tracks is actually on disk is answered where it is read — see
+     * [collectionsAmong].
+     */
+    fun rememberCollection(target: DownloadTarget, songs: List<Song>) {
+        if (songs.isEmpty()) return
+        val existing = _collections.value[target.id]
