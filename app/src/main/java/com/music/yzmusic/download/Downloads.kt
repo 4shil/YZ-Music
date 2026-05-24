@@ -417,3 +417,73 @@ object Downloads {
     fun pageIdFor(id: String): String = PLAYLIST_PREFIX + id
 
     /** The release [pageIdFor] built [browseId] from, or null if it didn't. */
+    fun recordIdOf(browseId: String): String? =
+        browseId.removePrefix(PLAYLIST_PREFIX).takeIf { it != browseId && it.isNotEmpty() }
+
+    /**
+     * The playlists downloaded whole, in name order, without their tracks.
+     *
+     * What the Library page's On Device shelf draws a card from. Unlike
+     * [collectionsAmong] there is no track list here to prune against — that
+     * page never reads the folder — so this prunes against [onDisk] instead,
+     * which drops a playlist once the last file recorded for it has been deleted
+     * *through this app* and keeps the rest. That is the same claim [saved] makes
+     * everywhere else, and opening the card is what settles it either way.
+     *
+     * It is also what keeps a playlist off the shelf between the tap that queues
+     * it and the first track landing: [rememberCollection] writes the record at
+     * the tap, and a playlist with nothing downloaded yet is not on the device.
+     *
+     * [onDisk] is a parameter for the same reason [collectionsAmong] takes its
+     * songs: the rule is worth stating on a known folder rather than only on
+     * whatever this process happens to have recorded.
+     */
+    fun savedPlaylists(onDisk: Map<String, String> = _saved.value): List<SavedCollection> {
+        if (_collections.value.isEmpty()) return emptyList()
+        return _collections.value.values
+            .filter { record -> record.playlist && record.videoIds.any { it in onDisk } }
+            .sortedBy { it.title.lowercase(Locale.ROOT) }
+    }
+
+    /**
+     * The releases at least one of [songs] belongs to, each with its own tracks
+     * picked out of that list.
+     *
+     * Given the page's own songs rather than reading the disk itself, because
+     * the page has already done that work — every row in it is a file that was
+     * there when it was taken — and a release is only worth drawing for the
+     * tracks that survived. A release whose files have all been deleted from a
+     * file manager therefore disappears from the page without anything having to
+     * notice it went.
+     *
+     * The lookup goes through [saved] as well as by id because one file answers
+     * to two of them: a music video is swapped for its catalogue track on the
+     * way down (see [remember]) and the page keeps whichever of the pair it
+     * listed first, which is not necessarily the id the release named.
+     */
+    fun collectionsAmong(songs: List<Song>): List<DownloadedCollection> {
+        if (songs.isEmpty() || _collections.value.isEmpty()) return emptyList()
+        val byId = songs.associateBy { it.videoId }
+        val byUri = songs.mapNotNull { song -> song.localUri?.let { it to song } }.toMap()
+        val uris = _saved.value
+        return _collections.value.values
+            .mapNotNull { record ->
+                val tracks = record.videoIds
+                    .mapNotNull { id -> byId[id] ?: uris[id]?.let(byUri::get) }
+                    .distinctBy { it.localUri ?: it.videoId }
+                if (tracks.isEmpty()) {
+                    null
+                } else {
+                    DownloadedCollection(
+                        id = record.id,
+                        title = record.title,
+                        subtitle = record.subtitle,
+                        thumbnailUrl = record.thumbnailUrl ?: tracks.firstNotNullOfOrNull { it.thumbnailUrl },
+                        playlist = record.playlist,
+                        songs = tracks,
+                    )
+                }
+            }
+            .sortedBy { it.title.lowercase(Locale.ROOT) }
+    }
+
