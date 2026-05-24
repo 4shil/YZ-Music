@@ -179,3 +179,62 @@ object Downloader {
 
             while (true) {
                 coroutineContext.ensureActive()
+                val read = source.read(buffer)
+                if (read == -1) break
+                sink.write(buffer, 0, read)
+                written += read
+                if (total != null) onProgress(written, total)
+            }
+            sink.flush()
+
+            // A stated length that didn't all arrive is the one failure the
+            // pending-row dance cannot catch on its own: nothing threw, so
+            // committing would publish a file that looks whole and stops
+            // halfway through the song.
+            if (total != null && written < total) {
+                error("Download stopped at ${written}B of $total — try again")
+            }
+            if (written == 0L) error("Download failed: nothing was sent")
+            Log.d(TAG, "fetched ${written}B directly")
+            written
+        }
+    }
+
+    private fun open(url: String, position: Long, length: Long) = Http.client
+        .newCall(
+            Request.Builder()
+                .url(url)
+                .header("Range", "bytes=$position-${position + length - 1}")
+                .apply {
+                    PlayerClient.forStreamUrl(url).mediaHeaders()
+                        .forEach { (name, value) -> header(name, value) }
+                }
+                .build(),
+        )
+        .execute()
+
+    /**
+     * How many bytes the whole track is.
+     *
+     * Every progressive googlevideo URL carries it as `clen`, which costs no
+     * request at all. The `bytes=0-0` probe behind it is for the URLs that
+     * don't — the extraction failsafe can produce one — and reads the total out
+     * of the `Content-Range` header of a one-byte response.
+     */
+    private fun contentLength(url: String): Long? {
+        url.toHttpUrlOrNull()?.queryParameter("clen")?.toLongOrNull()
+            ?.takeIf { it > 0 }
+            ?.let { return it }
+
+        return runCatching {
+            open(url, 0, 1).use { response ->
+                response.header("Content-Range")
+                    ?.substringAfter('/', "")
+                    ?.toLongOrNull()
+                    ?.takeIf { it > 0 }
+            }
+        }.onFailure { Log.w(TAG, "could not measure the track: ${it.message}") }.getOrNull()
+    }
+
+    private val REFUSAL_CODES = setOf(403, 404, 410)
+}
