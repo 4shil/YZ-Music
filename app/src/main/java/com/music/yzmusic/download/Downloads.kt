@@ -1081,3 +1081,15 @@ data class SavedCollection(
     val thumbnailUrl: String? = null,
     val playlist: Boolean = false,
     /** In the order the page listed them, which is the order to play them in. */
+    val videoIds: List<String> = emptyList(),
+)
+
+/** A [SavedCollection] with its surviving tracks attached, ready to draw. */
+data class DownloadedCollection(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val thumbnailUrl: String?,
+    val playlist: Boolean,
+    val songs: List<Song>,
+)
