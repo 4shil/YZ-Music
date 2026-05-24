@@ -108,3 +108,8 @@ object Downloader {
             response.use {
                 if (it.code !in 200..299) error("Download failed (HTTP ${it.code})")
                 val body = it.body ?: error("Download failed: empty response")
+                val source = body.byteStream()
+                var readForChunk = 0L
+                while (readForChunk < length) {
+                    coroutineContext.ensureActive()
+                    val wanted = minOf(buffer.size.toLong(), length - readForChunk).toInt()
