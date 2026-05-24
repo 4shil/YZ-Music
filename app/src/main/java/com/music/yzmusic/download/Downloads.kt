@@ -739,3 +739,82 @@ object Downloads {
             }
         }
 
+        val route = routeFor(track, quality)
+        Log.d(TAG, "downloading ${song.videoId} as .${route.extension} (${route.describe}, ${quality.label})")
+        Prepared(song.videoId, track, route = route, alreadyAt = null)
+    }
+
+    /**
+     * What [prepare] worked out, ready for a transfer to be run against it.
+     *
+     * [videoId] rides along so a look-ahead can be checked against the track
+     * actually taken off the queue: the two diverge whenever something is
+     * cancelled while its route is being resolved, and a plan applied to the
+     * wrong track would write one song's bytes under another's name.
+     */
+    internal class Prepared(
+        val videoId: String,
+        /** The catalogue track behind the row, which may not be the row. */
+        val track: Song,
+        /** Null when [alreadyAt] answered the question instead. */
+        val route: Route?,
+        /** A file already in Music that is this download, if there is one. */
+        val alreadyAt: Uri?,
+    )
+
+    /**
+     * Fetch the bytes [plan] points at and publish them.
+     *
+     * Owns the destination from end to end: every exit out of here either
+     * commits or aborts, so a caller is free to call it a second time with a
+     * freshly resolved plan without the first attempt leaving anything behind.
+     */
+    private suspend fun transfer(context: Context, song: Song, plan: Prepared) {
+        val id = song.videoId
+        val track = plan.track
+
+        // Already there from a previous run the record lost track of — adopt it
+        // rather than writing a second copy beside it.
+        plan.alreadyAt?.let { uri ->
+            remember(song, track, uri)
+            DownloadSession.done(id)
+            clear(id)
+            return
+        }
+        val route = plan.route ?: error("Nothing to download")
+
+        var pending: DownloadStore.Pending? = null
+        var lyrics: Deferred<LyricsTag.Embeddable?>? = null
+        try {
+            coroutineScope {
+                // Started before the transfer rather than after it, so four lyric
+                // services are being raced while the bytes are already moving. Done
+                // after the commit instead, every download would pay the slowest of
+                // them in dead time — and it is a *suspending* wait, so it would sit
+                // in the one stretch of this function that has no way back: past the
+                // commit, [pending] is null and a cancellation there would abandon a
+                // finished file that nothing has recorded yet. Awaited below while
+                // there is still a pending destination to abort.
+                //
+                // [LyricsTag.forTrack] is contracted not to throw for anything but
+                // cancellation, and that contract is load-bearing here: this is a
+                // plain child of the scope, so a failure inside it would cancel the
+                // download it was only meant to decorate.
+                if (MediaTagger.carriesTags(route.extension)) {
+                    lyrics = async { LyricsTag.forTrack(track) }
+                }
+
+                val name = DownloadStore.fileNameFor(track, route.extension)
+                val alreadyThere = DownloadStore.existing(context, name)
+                if (alreadyThere != null) {
+                    Log.d(TAG, "$name is already in Music; adopting it")
+                    remember(song, track, alreadyThere)
+                    DownloadSession.done(id)
+                    clear(id)
+                    return@coroutineScope
+                }
+
+                val destination = DownloadStore.begin(context, name, route.mimeType)
+                pending = destination
+                destination.openStream().use { sink ->
+                    route.write(sink) { written, total ->
