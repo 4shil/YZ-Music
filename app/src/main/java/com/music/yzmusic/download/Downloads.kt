@@ -487,3 +487,65 @@ object Downloads {
             .sortedBy { it.title.lowercase(Locale.ROOT) }
     }
 
+    private fun recordCollections(map: Map<String, SavedCollection>) {
+        _collections.value = map
+        if (::prefs.isInitialized) {
+            prefs.edit()
+                .putString(KEY_SAVED_COLLECTIONS, json.encodeToString(collectionSerializer, map))
+                .apply()
+        }
+    }
+
+    /**
+     * Record one file under every id it could be asked about.
+     *
+     * [asked] is the row the user tapped and [fetched] is what was actually
+     * downloaded, and for a music video those are two different tracks. Filing
+     * it under both is what lets the same song, found later through search,
+     * still know it is already on the device. A stale id costs nothing: the
+     * verification in [savedUri] prunes whichever one stops resolving.
+     */
+    private fun remember(asked: Song, fetched: Song, uri: Uri) {
+        val ids = setOf(asked.videoId, fetched.videoId)
+        // Either row may be the one that knew the release: a music video is
+        // swapped for the catalogue track before this, and it is the catalogue
+        // row that usually carries the album — but a search hit tapped directly
+        // is both, and an album page's rows are neither.
+        val album = fetched.albumName?.takeIf { it.isNotBlank() }
+            ?: asked.albumName?.takeIf { it.isNotBlank() }
+        val metaAsked = SavedSongMetadata(
+            videoId = asked.videoId,
+            title = asked.title,
+            artist = asked.artist,
+            thumbnailUrl = asked.thumbnailUrl,
+            durationText = asked.durationText,
+            albumName = album,
+            uri = uri.toString(),
+        )
+        val metaFetched = SavedSongMetadata(
+            videoId = fetched.videoId,
+            title = fetched.title,
+            artist = fetched.artist,
+            thumbnailUrl = fetched.thumbnailUrl,
+            durationText = fetched.durationText,
+            albumName = album,
+            uri = uri.toString(),
+        )
+        record(
+            saved = { it + ids.associateWith { id -> uri.toString() } },
+            meta = {
+                it + mapOf(asked.videoId to metaAsked, fetched.videoId to metaFetched)
+            },
+        )
+    }
+
+    /**
+     * Apply [saved] and [meta] to the two records and write the result down.
+     *
+     * Takes transforms rather than finished maps because several downloads
+     * finish at once now, and "read the map, add my track, store it back" run
+     * from two threads loses one of the two tracks — silently, and permanently,
+     * since this is the only record that a file was written. Both flows are
+     * updated compare-and-set, and the persist is serialised so the copy that
+     * reaches disk is never older than one already written.
+     */
