@@ -171,3 +171,6 @@ object Downloader {
 
         Http.client.newCall(request).execute().use { response ->
             if (response.code !in 200..299) error("Download failed (HTTP ${response.code})")
+            val body = response.body ?: error("Download failed: empty response")
+            val total = response.header("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
+            val source = body.byteStream()
