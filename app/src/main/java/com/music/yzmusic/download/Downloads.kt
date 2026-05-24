@@ -818,3 +818,156 @@ object Downloads {
                 pending = destination
                 destination.openStream().use { sink ->
                     route.write(sink) { written, total ->
+                        val fraction = written.toFloat() / total
+                        _active.update { it + (id to DownloadState.Running(fraction)) }
+                        DownloadSession.running(id, fraction)
+                    }
+                }
+                val words = lyrics?.await()
+                val savedUri = destination.commit()
+                pending = null
+                MediaTagger.embed(context, savedUri, track, route.extension, words)
+                remember(song, track, savedUri)
+                DownloadSession.done(id)
+                clear(id)
+                Log.d(TAG, "saved $name")
+            }
+        } catch (e: Throwable) {
+            pending?.abort()
+            throw e
+        } finally {
+            // Every exit needs this, not just the failing ones: the adopt-it
+            // path above returns with the lookup still in flight, and
+            // [coroutineScope] does not return while a child of it is running —
+            // so an unwaited job would hold the whole queue up for the length of
+            // a lyrics search per already-downloaded track.
+            lyrics?.cancel()
+        }
+    }
+
+    /**
+     * One resolved download: what to call the file, what to tell the store it
+     * is, and how to fill it.
+     *
+     * Exists so [run] has one linear body rather than two nearly-identical
+     * ones. Everything after the bytes are chosen — the duplicate check, the
+     * pending row, the commit, the tagging, the abort on failure — is the same
+     * work whichever server the audio came from, and the two routes differ only
+     * in these four answers.
+     */
+    internal class Route(
+        val extension: String,
+        val mimeType: String,
+        /** For the log line, so a download's provenance is on the record. */
+        val describe: String,
+        val write: suspend (OutputStream, (written: Long, total: Long) -> Unit) -> Unit,
+    )
+
+    /**
+     * Where this download's bytes are coming from.
+     *
+     * A configured source gets asked first, and YouTube is what happens when
+     * none of them can serve it — see [SourceResolver.forDownload] for what
+     * "can" means, which is narrower here than it is for playback.
+     *
+     * @param quality read once by the caller and passed down, so that a setting
+     *   changed while this track is in the queue applies to the next one rather
+     *   than to the middle of this one. [Downloader.fetch] resolves again after
+     *   a mid-download refusal and has to ask for the same rung it started on.
+     */
+    private suspend fun routeFor(track: Song, quality: DownloadQuality): Route {
+        fromSources(track, quality)?.let { (stream, storable) ->
+            return Route(
+                extension = storable.extension,
+                mimeType = storable.mimeType,
+                describe = stream.format.summary,
+                write = { sink, onProgress ->
+                    Downloader.fetchDirect(stream.url, stream.headers, sink, onProgress)
+                },
+            )
+        }
+        val stream = StreamResolver.resolveForDownload(track.videoId, quality.maxKbps)
+        return Route(
+            extension = stream.downloadExtension,
+            mimeType = stream.downloadMimeType,
+            describe = "${stream.kbps}kbps ${stream.mimeType}",
+            write = { sink, onProgress ->
+                Downloader.fetch(track.videoId, stream, quality.maxKbps, sink, onProgress)
+            },
+        )
+    }
+
+    /**
+     * The stream to keep for [track] from a configured source, with how to file
+     * it — or null, which is not a failure, just YouTube's turn.
+     *
+     * Usually a bit-exact one; not always. [SourceResolver.forDownload] falls
+     * back to the best lossy copy any enabled source holds when nothing has the
+     * recording losslessly, and only gives up on the sources entirely when what
+     * they offer would not beat YouTube's own AAC. Which of those happened is
+     * the resolver's business — from here it is a URL and a codec either way.
+     *
+     * Bounded, because a module search waits on every backend it has (see
+     * `ModuleSource.SEARCH_PATIENT_MS`) and does that once per query the matcher
+     * offers. For a track no module holds, that is the whole queue stopped for
+     * the better part of a minute on the way to a download that was always
+     * going to be YouTube's. `PlaybackService.SUBSTITUTE_TIMEOUT_MS` bounds the
+     * same search for the same reason.
+     *
+     * The [DownloadStore.storable] check belongs here rather than inside the
+     * resolver: the resolver's job is finding the best audio, and whether this
+     * device will keep a file of that codec is a question about Android.
+     *
+     * @param quality pinned by [run] for the whole of this track. Passed on to
+     *   the resolver rather than left to it, so that the twenty seconds this may
+     *   spend searching cannot be a window in which the setting changes and the
+     *   two halves of one decision disagree.
+     */
+    private suspend fun fromSources(
+        track: Song,
+        quality: DownloadQuality,
+    ): Pair<SourceStream, DownloadStore.Storable>? {
+        val stream = withTimeoutOrNull(SOURCE_LOOKUP_MS) {
+            try {
+                SourceResolver.forDownload(
+                    TrackMatcher.targetOf(track),
+                    SourceResolver.requestForDownload(quality),
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "source lookup failed for ${track.videoId}: ${e.message}")
+                null
+            }
+        } ?: return null
+
+        val storable = DownloadStore.storable(stream.format.codec)
+        if (storable == null) {
+            Log.d(TAG, "nothing to file a '${stream.format.codec}' as; taking YouTube for ${track.videoId}")
+            return null
+        }
+        return stream to storable
+    }
+
+    /** Back to "not downloaded" — used for success, where [saved] takes over, and for cancellation. */
+    private fun clear(videoId: String) {
+        _active.update { it - videoId }
+    }
+
+    private fun fail(videoId: String, reason: String) {
+        _active.update { it + (videoId to DownloadState.Failed(reason)) }
+        DownloadSession.failed(videoId, reason)
+    }
+
+    /**
+     * A failure a user can read. The message on an [error] raised in this
+     * package is already written for them; anything else is a network fault
+     * with a class name for a message.
+     *
+     * [IllegalArgumentException] is in here because of one that wasn't: the
+     * media store throws it for a MIME type it won't accept, and for a while
+     * every download on this device failed that way and reported itself as a
+     * connection problem. The message it carries is not written for a user, but
+     * `Unsupported MIME type audio/webm` at least sends someone looking in the
+     * right direction.
+     */
