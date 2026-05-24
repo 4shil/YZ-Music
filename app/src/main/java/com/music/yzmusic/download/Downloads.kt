@@ -141,3 +141,80 @@ object Downloads {
      */
     private val running = LinkedHashMap<String, Job?>()
 
+    fun init(context: Context) {
+        prefs = context.getSharedPreferences("yzmusic_settings", Context.MODE_PRIVATE)
+        _saved.value = runCatching {
+            json.decodeFromString(serializer, prefs.getString(KEY_SAVED, null) ?: "{}")
+        }.getOrDefault(emptyMap())
+        _savedMetadata.value = runCatching {
+            json.decodeFromString(metadataSerializer, prefs.getString(KEY_SAVED_METADATA, null) ?: "{}")
+        }.getOrDefault(emptyMap())
+        _collections.value = runCatching {
+            json.decodeFromString(collectionSerializer, prefs.getString(KEY_SAVED_COLLECTIONS, null) ?: "{}")
+        }.getOrDefault(emptyMap())
+    }
+
+    // ---- Asking -------------------------------------------------------------
+
+    /**
+     * Queue [song], and make sure something is draining the queue.
+     *
+     * A track already saved, queued or running is left alone rather than
+     * doubled — the menu row shows which of those it is, but a second tap
+     * before the sheet updates should still be a no-op.
+     *
+     * The Wi-Fi-only check is here rather than only at the tap because this is
+     * the one door into the queue, and a setting that can be bypassed by a
+     * caller that forgot about it is not a setting. Callers that can say
+     * something better than a failed row — a single toast for a whole album, say
+     * — check [AppSettings.downloadsAllowedNow] themselves first; this is what
+     * catches the rest.
+     *
+     * @param from what release this track was asked for as part of, when it was
+     *   one of many. Carried no further than [DownloadSession], which is the
+     *   only thing that has to say *why* forty tracks are in the queue.
+     */
+    fun enqueue(context: Context, song: Song, from: String? = null) {
+        val id = song.videoId
+        if (!AppSettings.downloadsAllowedNow) {
+            // Distinct from the duplicate-tap no-op below: nothing is in flight
+            // here to leave alone, and a refusal nobody is told about reads as a
+            // dead button. A download already queued or running started on a
+            // connection that allowed it and is none of this check's business.
+            val inFlight = _active.value[id]
+            if (inFlight !is DownloadState.Queued && inFlight !is DownloadState.Running) {
+                DownloadSession.queued(song, from)
+                fail(id, WIFI_ONLY_REFUSAL)
+            }
+            return
+        }
+        synchronized(lock) {
+            if (id in pending || id in running) return
+            pending[id] = song
+        }
+        _active.update { it + (id to DownloadState.Queued) }
+        DownloadSession.queued(song, from)
+
+        val app = context.applicationContext
+        runCatching {
+            ContextCompat.startForegroundService(app, Intent(app, DownloadService::class.java))
+        }.onFailure {
+            // Refused only when the app has no window and no exemption, which
+            // means the queue has nothing to drain it and would sit there
+            // looking accepted forever.
+            Log.w(TAG, "could not start the download service: ${it.message}")
+            synchronized(lock) { pending.remove(id) }
+            fail(id, "Downloads can't start right now")
+        }
+    }
+
+    /**
+     * Drop [videoId] from the queue, or stop it if it is one of the ones
+     * running.
+     *
+     * Dropping it from [running] is what makes this safe in the gap between a
+     * track being dequeued and its job existing: a cancel landing in that
+     * window finds no job to stop, but [onRunning] then finds the id it was
+     * told to run is no longer wanted, and stops it on arrival.
+     */
+    fun cancel(videoId: String) {
