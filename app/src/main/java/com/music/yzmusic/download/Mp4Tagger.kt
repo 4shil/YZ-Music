@@ -210,3 +210,37 @@ object Mp4Tagger {
         box(fourCc, dataAtom(1, text.toByteArray(Charsets.UTF_8)))
 
     /** Type indicator 13 = JPEG, 14 = PNG. */
+    private fun coverItem(image: ByteArray, isPng: Boolean): ByteArray =
+        box("covr", dataAtom(if (isPng) 14 else 13, image))
+
+    /**
+     * A `----` item: iTunes' escape hatch for a field it has no four-byte code
+     * for, named by a `mean`/`name` pair in front of the value.
+     *
+     * This is where the word timings go, and the reason they go somewhere of
+     * their own is the one [LrcWriter] documents: `©lyr` is read by every other
+     * player, and a reader without the A2 extension shows `<00:01.00>` rather
+     * than skipping it. A player that doesn't know this item ignores it whole,
+     * so the standard field stays clean and the timings still survive in the
+     * file — see [EmbeddedLyrics][com.music.yzmusic.data.lyrics.EmbeddedLyrics],
+     * which reads them back.
+     */
+    private fun freeformItem(name: String, text: String): ByteArray {
+        // Both are FullBoxes: four bytes of version/flags, then the string.
+        val mean = box("mean", ByteArray(4) + MEAN.toByteArray(Charsets.UTF_8))
+        val label = box("name", ByteArray(4) + name.toByteArray(Charsets.UTF_8))
+        return box("----", mean + label + dataAtom(1, text.toByteArray(Charsets.UTF_8)))
+    }
+
+    /** The reverse-DNS owner of [freeformItem], which is what keeps the name ours. */
+    private const val MEAN = "com.music.yzmusic"
+
+
+    /** A minimal handler box declaring this `meta` as iTunes-style metadata. */
+    private fun hdlrAtom(): ByteArray {
+        // version/flags(4) + pre_defined(4) + handler_type(4) + reserved(12) + name(1, empty cstring)
+        val body = ByteArray(25)
+        "mdir".toByteArray(Charsets.ISO_8859_1).copyInto(body, 8)
+        return box("hdlr", body)
+    }
+
