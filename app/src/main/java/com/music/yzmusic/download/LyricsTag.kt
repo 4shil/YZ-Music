@@ -130,3 +130,17 @@ internal object LyricsTag {
      * A long song's stamped sheet runs to a few thousand characters, so this is
      * an order of magnitude clear of anything genuine — it is a ceiling on a
      * malformed or hostile response, not a judgement about songs.
+     */
+    private const val MAX_LRC_CHARS = 64_000
+
+    /**
+     * How long the lookup may hold a finished download up.
+     *
+     * Usually nothing: [Downloads] starts this before the transfer, so by the
+     * time there are bytes to tag the answer has normally been waiting a while.
+     * This is the ceiling for the case where it hasn't — a short track on a fast
+     * connection, or a service that has stopped answering — and it is finite
+     * because the alternative is a saved file the user can see in the queue,
+     * complete, held back on a lyric server.
+     *
+     * Note that it bounds the *wait*, not the request. Cancelling a download
