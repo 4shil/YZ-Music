@@ -119,3 +119,9 @@ object MediaTagger {
 
     private class Cover(val bytes: ByteArray, val mime: String)
 
+    private fun fetchCover(track: Song): Cover? {
+        val url = track.artworkAt(1200) ?: return null
+        return runCatching {
+            val request = okhttp3.Request.Builder().url(url).build()
+            Http.client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@runCatching null
