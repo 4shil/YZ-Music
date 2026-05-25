@@ -78,3 +78,42 @@ object WebmTagger {
         // A declared size only matches this shape when it accounts for every
         // byte already in the file — anything else (trailing padding, more
         // top-level elements after Segment) isn't a layout worth guessing at.
+        val declaredEnd = segmentContentStart + segmentSize.value
+        if (declaredEnd != bytes.size.toLong()) return bytes
+
+        val newSize = segmentSize.value + tail.size
+        val maxForWidth = (1L shl (7 * segmentSize.width)) - 2
+        if (newSize > maxForWidth) return bytes
+
+        val out = bytes.copyOf(bytes.size + tail.size)
+        tail.copyInto(out, bytes.size)
+        writeVint(out, segmentIdOffset + SEGMENT_ID.size, newSize, segmentSize.width)
+        return out
+    }
+
+    private fun buildTail(
+        title: String,
+        artist: String,
+        album: String?,
+        lyrics: String?,
+        cover: ByteArray?,
+        coverMime: String,
+        wordLyrics: String?,
+    ): ByteArray {
+        var out = ByteArray(0)
+
+        val simple = mutableListOf<ByteArray>()
+        if (title.isNotBlank()) simple += simpleTag("TITLE", title)
+        if (artist.isNotBlank()) simple += simpleTag("ARTIST", artist)
+        if (!album.isNullOrBlank()) simple += simpleTag("ALBUM", album)
+        // `LYRICS` is Matroska's own name for the field, and `TagString` is a
+        // UTF-8 element with an explicit length — so the LRC's newlines need no
+        // escaping and there is no ceiling worth worrying about here.
+        if (!lyrics.isNullOrBlank()) simple += simpleTag("LYRICS", lyrics)
+        // Beside `LYRICS`, never instead of it: a SimpleTag with a name a
+        // player doesn't know is skipped, so the portable field is untouched.
+        if (!wordLyrics.isNullOrBlank()) simple += simpleTag(WORD_LYRICS_FIELD, wordLyrics)
+        if (simple.isNotEmpty()) {
+            // An empty Targets applies the tag to the whole file — there is no
+            // track/chapter to single out in a lone-audio-stream download.
+            val targets = elem(ID_TARGETS, ByteArray(0))
