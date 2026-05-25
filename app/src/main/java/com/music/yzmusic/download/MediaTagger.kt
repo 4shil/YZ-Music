@@ -138,3 +138,30 @@ object MediaTagger {
     private fun downscale(bitmap: Bitmap, maxSide: Int): Bitmap {
         val longest = max(bitmap.width, bitmap.height)
         if (longest <= maxSide) return bitmap
+        val scale = maxSide.toFloat() / longest
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            (bitmap.width * scale).toInt().coerceAtLeast(1),
+            (bitmap.height * scale).toInt().coerceAtLeast(1),
+            true,
+        )
+    }
+
+    private fun readAll(context: Context, uri: Uri): ByteArray? = runCatching {
+        if (uri.scheme == "file") {
+            File(requireNotNull(uri.path)).readBytes()
+        } else {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }
+    }.onFailure { Log.w(TAG, "could not read $uri for tagging: ${it.message}") }.getOrNull()
+
+    private fun writeAll(context: Context, uri: Uri, bytes: ByteArray) {
+        runCatching {
+            if (uri.scheme == "file") {
+                File(requireNotNull(uri.path)).writeBytes(bytes)
+            } else {
+                context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
+            }
+        }.onFailure { Log.w(TAG, "could not write tags to $uri: ${it.message}") }
+    }
+}
