@@ -244,3 +244,20 @@ object Mp4Tagger {
         return box("hdlr", body)
     }
 
+    private fun ilstAtom(items: List<ByteArray>): ByteArray {
+        val payload = ByteArray(items.sumOf { it.size })
+        var p = 0
+        items.forEach { it.copyInto(payload, p); p += it.size }
+        return box("ilst", payload)
+    }
+
+    private fun metaAtom(ilst: ByteArray): ByteArray {
+        val hdlr = hdlrAtom()
+        val payload = ByteArray(4 + hdlr.size + ilst.size)
+        hdlr.copyInto(payload, 4)
+        ilst.copyInto(payload, 4 + hdlr.size)
+        return box("meta", payload)
+    }
+
+    private fun udtaAtom(meta: ByteArray): ByteArray = box("udta", meta)
+}
