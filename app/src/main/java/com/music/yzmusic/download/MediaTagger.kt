@@ -59,3 +59,16 @@ object MediaTagger {
     fun carriesTags(extension: String): Boolean = extension in TAGGABLE
 
     /** @param lyrics what [LyricsTag] found, or null when there are none to write. */
+    internal fun embed(
+        context: Context,
+        uri: Uri,
+        track: Song,
+        extension: String,
+        lyrics: LyricsTag.Embeddable? = null,
+    ) {
+        if (!carriesTags(extension)) return
+        val original = readAll(context, uri) ?: return
+        val cover = fetchCover(track)
+        // The portable field and this app's own. Split here rather than inside
+        // each tagger so all three agree on which string goes where.
+        val plain = lyrics?.plain
