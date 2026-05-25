@@ -175,3 +175,38 @@ object Mp4Tagger {
         return v
     }
 
+    private fun writeU32(b: ByteArray, off: Int, value: Long) {
+        b[off] = ((value shr 24) and 0xFF).toByte()
+        b[off + 1] = ((value shr 16) and 0xFF).toByte()
+        b[off + 2] = ((value shr 8) and 0xFF).toByte()
+        b[off + 3] = (value and 0xFF).toByte()
+    }
+
+    private fun writeU64(b: ByteArray, off: Int, value: Long) {
+        for (i in 0 until 8) b[off + i] = ((value shr (8 * (7 - i))) and 0xFF).toByte()
+    }
+
+    private fun box(type: String, payload: ByteArray): ByteArray {
+        val out = ByteArray(8 + payload.size)
+        writeU32(out, 0, (8 + payload.size).toLong())
+        // ISO-8859-1, not ASCII: the iTunes item names below carry the 0xA9
+        // "copyright" byte, which plain ASCII can't encode and would replace
+        // with '?' — corrupting the very atom type a player looks up by.
+        type.toByteArray(Charsets.ISO_8859_1).copyInto(out, 4)
+        payload.copyInto(out, 8)
+        return out
+    }
+
+    /** iTunes's `data` atom: version(0) + a type indicator packed into 3 flag bytes, then the value. */
+    private fun dataAtom(typeIndicator: Int, payload: ByteArray): ByteArray {
+        val body = ByteArray(8 + payload.size)
+        writeU32(body, 0, typeIndicator.toLong())
+        payload.copyInto(body, 8)
+        return box("data", body)
+    }
+
+    /** Type indicator 1 = UTF-8 text. */
+    private fun textItem(fourCc: String, text: String): ByteArray =
+        box(fourCc, dataAtom(1, text.toByteArray(Charsets.UTF_8)))
+
+    /** Type indicator 13 = JPEG, 14 = PNG. */
