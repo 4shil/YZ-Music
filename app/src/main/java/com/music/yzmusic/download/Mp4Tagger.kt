@@ -121,3 +121,16 @@ object Mp4Tagger {
 
     /** `stco`: FullBox header, an entry count, then that many 32-bit offsets. */
     private fun patchStco(bytes: ByteArray, box: BoxRef, insertAt: Int, delta: Int) {
+        val base = box.contentOffset + 4
+        val count = readU32(bytes, base).toInt()
+        var p = base + 4
+        repeat(count) {
+            val off = readU32(bytes, p)
+            if (off >= insertAt) writeU32(bytes, p, off + delta)
+            p += 4
+        }
+    }
+
+    /** `co64`: the same shape as [patchStco], with 64-bit offsets. */
+    private fun patchCo64(bytes: ByteArray, box: BoxRef, insertAt: Int, delta: Int) {
+        val base = box.contentOffset + 4
