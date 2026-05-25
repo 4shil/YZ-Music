@@ -72,3 +72,50 @@ object MediaTagger {
         // The portable field and this app's own. Split here rather than inside
         // each tagger so all three agree on which string goes where.
         val plain = lyrics?.plain
+        val words = lyrics?.enhanced
+
+        val tagged = runCatching {
+            when (extension) {
+                "m4a" -> Mp4Tagger.tag(
+                    original,
+                    track.title,
+                    track.artist,
+                    track.albumName,
+                    plain,
+                    cover?.bytes,
+                    coverIsPng = false,
+                    wordLyrics = words,
+                )
+                "flac" -> FlacTagger.tag(
+                    original,
+                    track.title,
+                    track.artist,
+                    track.albumName,
+                    plain,
+                    cover?.bytes,
+                    cover?.mime ?: "image/jpeg",
+                    wordLyrics = words,
+                )
+                else -> WebmTagger.tag(
+                    original,
+                    track.title,
+                    track.artist,
+                    track.albumName,
+                    plain,
+                    cover?.bytes,
+                    cover?.mime ?: "image/jpeg",
+                    wordLyrics = words,
+                )
+            }
+        }.getOrNull() ?: return
+
+        // Every tagger hands back the same array reference when there was
+        // nothing safe to do — cheaper than a byte comparison, and exact
+        // where it matters: it means "don't touch the file that just finished
+        // downloading" rather than "these bytes happen to be equal".
+        if (tagged === original) return
+        writeAll(context, uri, tagged)
+    }
+
+    private class Cover(val bytes: ByteArray, val mime: String)
+
