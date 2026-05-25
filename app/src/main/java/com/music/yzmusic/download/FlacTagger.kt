@@ -91,3 +91,57 @@ object FlacTagger {
             .filter { it.second.size <= MAX_BLOCK_BYTES }
         if (additions.isEmpty()) return bytes
 
+        val chain = blocks.filterNot { it.type in REPLACED }
+            .map { it.type to bytes.copyOfRange(it.start, it.start + it.length) } + additions
+
+        val out = ByteArrayOutputStream(bytes.size + additions.sumOf { it.second.size } + 64)
+        out.write(MAGIC)
+        chain.forEachIndexed { index, (type, payload) ->
+            out.write(if (index == chain.lastIndex) type or 0x80 else type)
+            out.write((payload.size ushr 16) and 0xFF)
+            out.write((payload.size ushr 8) and 0xFF)
+            out.write(payload.size and 0xFF)
+            out.write(payload)
+        }
+        // The frames, verbatim. [offset] is one past the last metadata block,
+        // which is where they start.
+        out.write(bytes, offset, bytes.size - offset)
+        return out.toByteArray()
+    }
+
+    /**
+     * A `VORBIS_COMMENT` payload, or null when there is nothing to say.
+     *
+     * Every length in here is **little-endian**, which is the one surprise in an
+     * otherwise big-endian format — the block reuses Ogg Vorbis' comment layout
+     * wholesale, and that layout is little-endian.
+     *
+     * It does *not* reuse the trailing framing bit. That byte belongs to the
+     * Vorbis packet, not to the comment structure, and writing one here appends
+     * a stray byte to the block that strict parsers reject. It is the classic
+     * way this gets written wrong, so: no framing bit.
+     *
+     * [lyrics] goes in as `LYRICS`, which is where every reader that shows
+     * lyrics for a FLAC looks. Nothing about the layout minds it being long or
+     * containing newlines: a field is a length-prefixed run of UTF-8 bytes, and
+     * only the *name* before the `=` is constrained.
+     */
+    private fun vorbisComment(
+        title: String,
+        artist: String,
+        album: String?,
+        lyrics: String?,
+        wordLyrics: String?,
+    ): ByteArray? {
+        val fields = buildList {
+            if (title.isNotBlank()) add("TITLE=$title")
+            if (artist.isNotBlank()) add("ARTIST=$artist")
+            if (!album.isNullOrBlank()) add("ALBUM=$album")
+            if (!lyrics.isNullOrBlank()) add("LYRICS=$lyrics")
+            // Beside `LYRICS`, never instead of it: an unknown name is skipped
+            // by every reader, so the portable field stays exactly as it was.
+            if (!wordLyrics.isNullOrBlank()) add("$WORD_LYRICS_FIELD=$wordLyrics")
+        }
+        if (fields.isEmpty()) return null
+
+        val out = ByteArrayOutputStream()
