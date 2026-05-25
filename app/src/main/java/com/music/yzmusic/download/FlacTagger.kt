@@ -184,3 +184,44 @@ object FlacTagger {
 
     private class Block(val type: Int, val start: Int, val length: Int)
 
+    private fun ByteArrayOutputStream.writeLe(value: Int) {
+        write(value and 0xFF)
+        write((value ushr 8) and 0xFF)
+        write((value ushr 16) and 0xFF)
+        write((value ushr 24) and 0xFF)
+    }
+
+    private fun ByteArrayOutputStream.writeBe(value: Int) {
+        write((value ushr 24) and 0xFF)
+        write((value ushr 16) and 0xFF)
+        write((value ushr 8) and 0xFF)
+        write(value and 0xFF)
+    }
+
+    private fun ByteArray.regionMatches(offset: Int, other: ByteArray): Boolean {
+        if (offset < 0 || offset + other.size > size) return false
+        for (i in other.indices) if (this[offset + i] != other[i]) return false
+        return true
+    }
+
+    private val MAGIC = "fLaC".toByteArray(Charsets.US_ASCII)
+
+    /** One byte of flags plus three of length, before every block's payload. */
+    private const val BLOCK_HEADER = 4
+
+    private const val TYPE_STREAMINFO = 0
+    private const val TYPE_PADDING = 1
+    private const val TYPE_VORBIS_COMMENT = 4
+    private const val TYPE_PICTURE = 6
+
+    /** Blocks this rewrites or spends, rather than carrying across. */
+    private val REPLACED = setOf(TYPE_PADDING, TYPE_VORBIS_COMMENT, TYPE_PICTURE)
+
+    /** The most a three-byte length field can describe. */
+    private const val MAX_BLOCK_BYTES = (1 shl 24) - 1
+
+    /** The `PICTURE` type for a front cover, which is the only one written here. */
+    private const val PICTURE_FRONT_COVER = 3
+
+    private const val VENDOR = "YZ Music"
+}
