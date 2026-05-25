@@ -1,0 +1,243 @@
+﻿package com.music.yzmusic.playback
+
+import android.content.Context
+import android.media.MediaDataSource
+import android.net.Uri
+import android.os.SystemClock
+import com.music.yzmusic.data.TrackLog
+import androidx.media3.common.C
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheKeyFactory
+import androidx.media3.datasource.cache.CacheWriter
+import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.ContentMetadataMutations
+import androidx.media3.datasource.cache.SimpleCache
+import java.io.IOException
+import com.music.yzmusic.data.innertube.StreamResolver
+import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.sources.SourceRegistry
+import com.music.yzmusic.data.sources.SourceResolver
+import com.music.yzmusic.data.sources.TrackMatcher
+import com.music.yzmusic.download.Downloads
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.coroutineContext
+
+/**
+ * On-disk cache of the audio itself, and the read-ahead that fills it.
+ *
+ * Two problems, one cache:
+ *
+ *  - **Seeking.** Everything played is written to disk on the way through, so
+ *    seeking back is always a file read. Seeking *forward* past what the
+ *    player has buffered is the gap, and it closes once a track is on disk in
+ *    full — which is why read-ahead fetches whole tracks rather than openings.
+ *  - **Track changes.** The next track needs a stream URL resolved (an
+ *    Innertube round trip, plus running YouTube's player JavaScript to
+ *    de-obfuscate the `n` parameter) before its first byte can even be asked
+ *    for. Fetching its opening ahead of time moves all of that off the gap
+ *    between songs.
+ *
+ * The cache is keyed by videoId, not by URL: googlevideo URLs are single-use,
+ * expire within hours, and differ between resolves of the same track, so
+ * keying on them would cache every track afresh on every play. Because
+ * [CacheDataSource] sits *outside* the resolving data source it sees the
+ * original `yzmusic://watch?v=<id>` request, and a cache hit never resolves a
+ * URL at all.
+ */
+@UnstableApi
+object AudioCache {
+
+    private const val TAG = "YZ Music"
+
+    /**
+     * The disk budget, straight from [AppSettings] — 512MB by default, roughly
+     * 150 tracks at the highest bitrate offered, adjustable up to 10GB from
+     * Settings. Least-recently-used entries are dropped past it, so it's a
+     * ceiling rather than something the listener has to manage day to day.
+     */
+    private val evictor = DynamicLruCacheEvictor(AppSettings.DEFAULT_CACHE_LIMIT_BYTES)
+
+    /**
+     * How much of the next track to fetch. About 50 seconds at 160kbps — long
+     * enough that playback starts instantly and keeps going while the rest
+     * streams, without spending the listener's data on a track they may well
+     * skip past.
+     */
+    private const val PRELOAD_BYTES = 1L * 1024 * 1024
+
+    /**
+     * Size of each range the whole-track fetch asks for.
+     *
+     * Ranges, not one long read, because googlevideo paces a continuous
+     * response down to roughly playback speed after the first megabyte or so —
+     * a track fetched that way finishes caching around the time it finishes
+     * playing, which is far too late to be worth anything to a seek. Bounded
+     * ranges are served at line rate: two megabytes lands in about a third of a
+     * second on this connection, against seventy seconds streamed.
+     */
+    private const val CHUNK_BYTES = 2L * 1024 * 1024
+
+    /**
+     * What [cacheWholeOnce] risks before committing to a whole [CHUNK_BYTES].
+     *
+     * Sized to answer one question — did this write land at all — as cheaply
+     * as that question can be asked, not to be worth anything on its own.
+     */
+    private const val LOCK_PROBE_BYTES = 64L * 1024
+
+    /**
+     * How far into a rendition [cachedPrefixBytes] looks when its real length
+     * isn't known yet. Only an upper bound on the answer, so it costs nothing
+     * to set well past the half-minute of audio any caller actually wants —
+     * eight megabytes covers that even for lossless.
+     */
+    private const val HEAD_PROBE_BYTES = 8L * 1024 * 1024
+
+    /**
+     * What [requestAnalysisHead] asks for when the track's real size can't be
+     * had.
+     *
+     * Twelve seconds of audio is what the head pass needs and four megabytes
+     * clears that for anything short of lossless. Only reached when
+     * [StreamResolver] cannot say how long the file is, which is rare — it has
+     * just resolved the stream — and a blind request is the one case where
+     * spending more would be the listener's data spent on a guess.
+     */
+    private const val MAX_ANALYSIS_HEAD_BYTES = 4L * 1024 * 1024
+
+    /**
+     * The most [requestAnalysisHead] will pull for one track when its size *is*
+     * known.
+     *
+     * A bound rather than "the whole file, always": a substituted lossless
+     * rendition runs to thirty or forty megabytes, and the analyzer only ever
+     * reads the head and the tail. Sixteen covers every YouTube Opus stream in
+     * full — a ten-minute track at 160 kbps is twelve — which is the case this
+     * exists for.
+     *
+     * Taking the whole file in one request is also what keeps the entry
+     * single-sourced; see [analysisHeadSize].
+     */
+    private const val MAX_ANALYSIS_TRACK_BYTES = 16L * 1024 * 1024
+
+    /**
+     * How long [renditionKeysFor]'s answer is reused. Short enough that a
+     * rendition which just started downloading is picked up well inside the
+     * several seconds an analysis takes anyway.
+     */
+    private const val RENDITION_KEYS_TTL_MS = 5_000L
+
+    /**
+     * Grace period before reading ahead. The seconds just after a track starts
+     * are when the player is filling its own buffer and the listener is waiting
+     * on sound; read-ahead competing for bandwidth there would trade the gap
+     * between songs for a gap at the start of one. It also collapses a burst of
+     * skips into a single fetch of wherever the listener lands, and leaves the
+     * player's opening burst holding the cache entry alone — see [fetchWhole].
+     */
+    private const val PREFETCH_DELAY_MS = 8_000L
+
+    /** How long to leave the player alone with an entry before trying again. */
+    private const val RETRY_DELAY_MS = 5_000L
+
+    /** Enough to cover a hand-over, not enough to keep chasing a lost race. */
+    private const val MAX_ATTEMPTS = 4
+
+    /**
+     * How many tracks past the immediate next one get their stream URL warmed
+     * ahead of time. Only the very next track is worth spending bytes on — see
+     * [prefetchQueue] — but resolving a URL costs a handful of small round
+     * trips, not a stream's worth of data, so paying that cost several tracks
+     * early is worth it purely to keep a fast run of skips from ever landing
+     * on a track that has to resolve cold.
+     *
+     * One, not three, and the difference is not the round trips. While every
+     * player client is being refused, *every* warm-up falls through to NewPipe
+     * extraction — the one step in this app that does not share out when it is
+     * run concurrently, but collapses: 1.8s alone against 30.3s with three in
+     * flight. Warming three tracks ahead therefore did not cost three cheap
+     * resolves in the background, it cost the track the listener was waiting on
+     * a thirty-second start. See
+     * [StreamResolver][com.music.yzmusic.data.innertube.StreamResolver]'s
+     * extraction gate, which serialises what is left of that.
+     */
+    private const val QUEUE_LOOKAHEAD = 1
+
+    /** Spacing between queued resolves, so warming the queue never competes with the track actually playing. */
+    private const val QUEUE_RESOLVE_STAGGER_MS = 500L
+
+    /** How many upcoming tracks are worth gathering for [prefetchQueue] — the caller doesn't need to know why. */
+    const val QUEUE_DEPTH = QUEUE_LOOKAHEAD + 1
+
+    private lateinit var cache: SimpleCache
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /**
+     * Kept in the app's cache directory: this is disposable by definition, and
+     * that is where the system and the "clear cache" button expect to reclaim
+     * it from. [SimpleCache] copes with files disappearing underneath it by
+     * dropping the spans that named them.
+     */
+    fun init(context: Context) {
+        evictor.maxBytes = AppSettings.audioCacheLimitBytes.value
+        cache = SimpleCache(
+            File(context.cacheDir, "audio"),
+            evictor,
+            StandaloneDatabaseProvider(context),
+        )
+        // A SimpleCache can only be opened once per process, so the ceiling
+        // moves by mutating this evictor rather than reopening the cache —
+        // see [DynamicLruCacheEvictor].
+        scope.launch {
+            AppSettings.audioCacheLimitBytes.collect { maxBytes ->
+                evictor.maxBytes = maxBytes
+                evictor.applyNow(cache)
+            }
+        }
+    }
+
+    /** Drops everything on disk. The listener asked; no grace period. */
+    fun clear(onComplete: () -> Unit = {}) {
+        cancel()
+        scope.launch {
+            cache.keys.toList().forEach { cache.removeResource(it) }
+            withContext(Dispatchers.Main) { onComplete() }
+        }
+    }
+
+    /**
+     * Throws away everything held for the track [uri] plays, so the next open
+     * fetches it again from the top.
+     *
+     * For when what is on disk is the problem rather than the network: a
+     * half-written entry, or one filled from two different files and now
+     * unreadable at the seam. Nothing here can tell which of those it is
+     * looking at, so every rendition of the track goes — the `#alt` and
+     * `#hifi` siblings as well as the entry named — and the cost is a
+     * re-download rather than a track that cannot be played at all.
+     *
+     * A key still locked by a live reader can't be removed; that throw is
+     * caught rather than prevented, because the alternative is holding a lock
+     * of our own across the player's teardown.
+     *
+     * Runs on the caller's thread rather than off in [scope], so that a caller
+     * about to re-open the track can be sure the old bytes are gone first.
+     * Call it off the main thread.
+     */
+    fun discard(uri: Uri) {
+        val exact = keyFactory.buildCacheKey(DataSpec(uri))
