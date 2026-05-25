@@ -37,3 +37,87 @@ object Mp4Tagger {
         val rawSize32: Long,
         val type: String,
     ) {
+        val contentOffset get() = offset + headerLen
+        val end get() = offset + size
+    }
+
+    /** Box types whose payload is itself a run of child boxes, on the path down to `stco`/`co64`. */
+    private val CONTAINERS = setOf("moov", "trak", "mdia", "minf", "stbl")
+
+    fun tag(
+        bytes: ByteArray,
+        title: String,
+        artist: String,
+        album: String?,
+        lyrics: String?,
+        cover: ByteArray?,
+        coverIsPng: Boolean,
+        /** The A2 form, kept beside [lyrics] rather than instead of it — see [freeformItem]. */
+        wordLyrics: String? = null,
+    ): ByteArray {
+        val items = mutableListOf<ByteArray>()
+        // © is iTunes's own "copyright" prefix for the four text atoms
+        // below — not a copyright mark here, just the byte their readers key on.
+        if (title.isNotBlank()) items += textItem("©nam", title)
+        if (artist.isNotBlank()) items += textItem("©ART", artist)
+        if (!album.isNullOrBlank()) items += textItem("©alb", album)
+        // `©lyr` is a UTF-8 text atom like the three above, with no length limit
+        // and no objection to newlines, so LRC goes in as-is. There is a
+        // separate `Sync Lyrics`/`sylt`-style representation in some tools;
+        // nothing writes it, because `©lyr` holding LRC is what the players
+        // that show synced lyrics for an M4A actually read.
+        if (!lyrics.isNullOrBlank()) items += textItem("©lyr", lyrics)
+        if (!wordLyrics.isNullOrBlank()) items += freeformItem(WORD_LYRICS_FIELD, wordLyrics)
+        if (cover != null && cover.isNotEmpty()) items += coverItem(cover, coverIsPng)
+        if (items.isEmpty()) return bytes
+
+        val moov = runCatching {
+            parseBoxes(bytes, 0, bytes.size).firstOrNull { it.type == "moov" }
+        }.getOrNull() ?: return bytes
+
+        return runCatching {
+            insert(bytes, moov, udtaAtom(metaAtom(ilstAtom(items))))
+        }.getOrDefault(bytes)
+    }
+
+    private fun insert(bytes: ByteArray, moov: BoxRef, udta: ByteArray): ByteArray {
+        val insertAt = moov.end
+        val delta = udta.size
+
+        val prefix = bytes.copyOf(insertAt)
+        // rawSize32 == 0 means "this box runs to the end of its parent" — still
+        // true after the insertion, since nothing follows moov but this new
+        // atom, so the field is left as-is rather than given a concrete value.
+        if (moov.rawSize32 != 0L) {
+            if (moov.headerLen == 16) {
+                writeU64(prefix, moov.offset + 8, moov.size.toLong() + delta)
+            } else {
+                writeU32(prefix, moov.offset, moov.size.toLong() + delta)
+            }
+        }
+
+        val offsetBoxes = mutableListOf<BoxRef>()
+        collectOffsetBoxes(bytes, moov, offsetBoxes)
+        offsetBoxes.forEach { box ->
+            when (box.type) {
+                "stco" -> patchStco(prefix, box, insertAt, delta)
+                "co64" -> patchCo64(prefix, box, insertAt, delta)
+            }
+        }
+
+        val suffix = bytes.copyOfRange(insertAt, bytes.size)
+        return prefix + udta + suffix
+    }
+
+    private fun collectOffsetBoxes(bytes: ByteArray, box: BoxRef, out: MutableList<BoxRef>) {
+        if (box.type == "stco" || box.type == "co64") {
+            out += box
+            return
+        }
+        if (box.type in CONTAINERS) {
+            parseBoxes(bytes, box.contentOffset, box.end).forEach { collectOffsetBoxes(bytes, it, out) }
+        }
+    }
+
+    /** `stco`: FullBox header, an entry count, then that many 32-bit offsets. */
+    private fun patchStco(bytes: ByteArray, box: BoxRef, insertAt: Int, delta: Int) {
