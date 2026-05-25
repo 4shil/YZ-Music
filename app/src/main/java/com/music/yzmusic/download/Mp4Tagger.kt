@@ -134,3 +134,44 @@ object Mp4Tagger {
     /** `co64`: the same shape as [patchStco], with 64-bit offsets. */
     private fun patchCo64(bytes: ByteArray, box: BoxRef, insertAt: Int, delta: Int) {
         val base = box.contentOffset + 4
+        val count = readU32(bytes, base).toInt()
+        var p = base + 4
+        repeat(count) {
+            val off = readU64(bytes, p)
+            if (off >= insertAt) writeU64(bytes, p, off + delta)
+            p += 8
+        }
+    }
+
+    private fun parseBoxes(bytes: ByteArray, start: Int, end: Int): List<BoxRef> {
+        val out = mutableListOf<BoxRef>()
+        var pos = start
+        while (pos + 8 <= end) {
+            val size32 = readU32(bytes, pos)
+            val type = String(bytes, pos + 4, 4, Charsets.ISO_8859_1)
+            var headerLen = 8
+            var size = size32
+            if (size32 == 1L) {
+                if (pos + 16 > end) break
+                size = readU64(bytes, pos + 8)
+                headerLen = 16
+            } else if (size32 == 0L) {
+                size = (end - pos).toLong()
+            }
+            if (size < headerLen || pos + size > end || size > Int.MAX_VALUE) break
+            out += BoxRef(pos, headerLen, size.toInt(), size32, type)
+            pos += size.toInt()
+        }
+        return out
+    }
+
+    private fun readU32(b: ByteArray, off: Int): Long =
+        ((b[off].toLong() and 0xFF) shl 24) or ((b[off + 1].toLong() and 0xFF) shl 16) or
+            ((b[off + 2].toLong() and 0xFF) shl 8) or (b[off + 3].toLong() and 0xFF)
+
+    private fun readU64(b: ByteArray, off: Int): Long {
+        var v = 0L
+        for (i in 0 until 8) v = (v shl 8) or (b[off + i].toLong() and 0xFF)
+        return v
+    }
+
