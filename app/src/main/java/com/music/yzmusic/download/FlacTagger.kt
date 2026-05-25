@@ -145,3 +145,42 @@ object FlacTagger {
         if (fields.isEmpty()) return null
 
         val out = ByteArrayOutputStream()
+        val vendor = VENDOR.toByteArray(Charsets.UTF_8)
+        out.writeLe(vendor.size)
+        out.write(vendor)
+        out.writeLe(fields.size)
+        for (field in fields) {
+            val encoded = field.toByteArray(Charsets.UTF_8)
+            out.writeLe(encoded.size)
+            out.write(encoded)
+        }
+        return out.toByteArray()
+    }
+
+    /**
+     * A `PICTURE` payload holding [cover] as the front cover.
+     *
+     * Big-endian throughout, unlike the comment block above. The dimensions and
+     * colour fields are all written as zero, which the format defines as
+     * "unstated" rather than as a claim about a 0x0 image — decoding the JPEG
+     * here to fill them in would buy nothing, since every player that draws the
+     * image has to decode it anyway.
+     */
+    private fun picture(cover: ByteArray, mime: String): ByteArray {
+        val out = ByteArrayOutputStream(cover.size + 64)
+        val mimeBytes = mime.toByteArray(Charsets.US_ASCII)
+        out.writeBe(PICTURE_FRONT_COVER)
+        out.writeBe(mimeBytes.size)
+        out.write(mimeBytes)
+        out.writeBe(0) // description length; the picture type already says it
+        out.writeBe(0) // width
+        out.writeBe(0) // height
+        out.writeBe(0) // colour depth
+        out.writeBe(0) // colours used — zero for anything that isn't paletted
+        out.writeBe(cover.size)
+        out.write(cover)
+        return out.toByteArray()
+    }
+
+    private class Block(val type: Int, val start: Int, val length: Int)
+
