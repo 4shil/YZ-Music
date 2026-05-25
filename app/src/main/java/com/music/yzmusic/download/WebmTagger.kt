@@ -63,3 +63,18 @@ object WebmTagger {
         if (bytes.size < 16 || !bytes.regionMatches(0, EBML_HEADER_ID)) return bytes
 
         val headerSize = readSize(bytes, EBML_HEADER_ID.size) ?: return bytes
+        val segmentIdOffset = EBML_HEADER_ID.size + headerSize.width + headerSize.value.toInt()
+        if (segmentIdOffset + 4 > bytes.size || !bytes.regionMatches(segmentIdOffset, SEGMENT_ID)) return bytes
+
+        val segmentSize = readSize(bytes, segmentIdOffset + SEGMENT_ID.size) ?: return bytes
+        val segmentContentStart = segmentIdOffset + SEGMENT_ID.size + segmentSize.width
+
+        if (segmentSize.isUnknown) {
+            val out = bytes.copyOf(bytes.size + tail.size)
+            tail.copyInto(out, bytes.size)
+            return out
+        }
+
+        // A declared size only matches this shape when it accounts for every
+        // byte already in the file — anything else (trailing padding, more
+        // top-level elements after Segment) isn't a layout worth guessing at.
