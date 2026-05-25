@@ -102,3 +102,31 @@ internal object LyricsTag {
 
         val lrc = found.lines.toLrc()
         if (lrc.length > MAX_LRC_CHARS) {
+            // Every byte of this is about to be copied into a file the user
+            // keeps, and the size is decided by a third party's response body.
+            // A cap is the difference between a bad answer costing the lyrics
+            // and one costing the download's file size.
+            Log.w(TAG, "lyrics for ${track.videoId} are ${lrc.length} chars; not embedding")
+            return null
+        }
+        if (lrc.isBlank()) return null
+        // Capped the same way and for the same reason as the plain form; the
+        // word stamps roughly double it, so it gets its own headroom rather
+        // than sharing the budget and pushing the portable field out.
+        val enhanced = found.lines.toEnhancedLrc().takeIf {
+            it.isNotBlank() && it.length <= MAX_LRC_CHARS * 2
+        }
+        Log.d(
+            TAG,
+            "embedding ${found.source.label} lyrics for ${track.videoId}" +
+                if (enhanced != null) " (word-synced)" else "",
+        )
+        return Embeddable(plain = lrc, enhanced = enhanced)
+    }
+
+    /**
+     * The most LRC one track may contribute to its own file.
+     *
+     * A long song's stamped sheet runs to a few thousand characters, so this is
+     * an order of magnitude clear of anything genuine — it is a ceiling on a
+     * malformed or hostile response, not a judgement about songs.
