@@ -302,3 +302,78 @@ object AudioCache {
      */
     fun discardBadRendition(uri: Uri, key: String): Boolean {
         if (!::cache.isInitialized) return false
+        val about = mediaIdIn(uri)
+        if (key == keyFactory.buildCacheKey(DataSpec(uri))) {
+            TrackLog.d(TAG, "keeping undecodable rendition $key: it is the one playing", about = about)
+            return false
+        }
+        return runCatching { cache.removeResource(key) }
+            .onSuccess {
+                TrackLog.d(TAG, "discarded undecodable rendition $key", about = about)
+                // Deleting the bytes is only half of it. The head fetch runs once
+                // per track per session, so without this the entry it just made
+                // room for is never refilled and the discard buys nothing.
+                uri.getQueryParameter("v")?.let(analysisHeads::remove)
+            }
+            .onFailure {
+                TrackLog.d(TAG, "undecodable rendition $key still in use: ${it.message}", about = about)
+            }
+            .isSuccess
+    }
+
+    /**
+     * The videoId behind a request. Playback asks through the custom scheme;
+     * read-ahead builds the same URI, so both land on one cache entry.
+     */
+    private val keyFactory = CacheKeyFactory { spec ->
+        spec.uri.getQueryParameter("v")
+            // A YouTube id can name several different recordings on disk: the
+            // Opus rendition YouTube serves, whatever a source ranked above it
+            // hands over instead — see [SourceResolver.substituteForYouTube] —
+            // and the better copy that replaces *that* mid-track when one
+            // turns up, see [QualityUpgrade]. Sharing one entry between them
+            // survives neither a reorder nor a half-cached track: the next
+            // play would serve a FLAC prefix and then stream Opus into the
+            // middle of it. Each gets its own entry, and the duplication costs
+            // a re-download rather than a corrupt file.
+            //
+            // Written as a `when` rather than a chain of `?.let`: the previous
+            // form ended `cacheTag(...)?.let { return@let "$videoId#$it" }`,
+            // where `return@let` binds to the *inner* lambda, not the outer
+            // one it was meant for. The upgraded key was built, discarded as
+            // an unused expression, and every upgraded track fell through to
+            // the `#alt` entry belonging to the stream it had just replaced —
+            // so a 320kbps AAC was written into the middle of a half-cached
+            // WebM, which is the exact corruption the paragraph above exists
+            // to prevent. It cost `IllegalStateException: No valid varint
+            // length mask found` at the seam, and eight-second stalls before
+            // that, when the swap blocked on a cache lock the outgoing reader
+            // still held.
+            ?.let { videoId ->
+                val rendition = QualityUpgrade.cacheTag(spec.uri)
+                when {
+                    rendition != null -> "$videoId#$rendition"
+                    SourceResolver.canSubstituteForYouTube() -> "$videoId#alt"
+                    else -> videoId
+                }
+            }
+            // A source-backed track keys on the source and its track id alone.
+            // The full URI would work but carries the title and artist used
+            // for cross-source matching, and the same track queued from a row
+            // that spelled either of them differently would then occupy a
+            // second copy of itself on disk.
+            ?: spec.uri.takeIf { it.authority == "source" }?.let { uri ->
+                val source = uri.getQueryParameter("s")
+                val track = uri.getQueryParameter("t")
+                if (source != null && track != null) "$source|$track" else null
+            }
+            ?: spec.key
+            ?: spec.uri.toString()
+    }
+
+    /**
+     * Wraps [upstream] so everything played is written to disk on the way
+     * through, and anything already there is served without a request.
+     * Local file and content URIs bypass disk caching to prevent redundant writes.
+     */
+    fun playbackFactory(upstream: DataSource.Factory): DataSource.Factory = DataSource.Factory {
