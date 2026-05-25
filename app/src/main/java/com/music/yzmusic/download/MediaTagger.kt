@@ -1,0 +1,61 @@
+﻿package com.music.yzmusic.download
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import com.music.yzmusic.data.DebugLog as Log
+import com.music.yzmusic.data.Http
+import com.music.yzmusic.data.model.Song
+import com.music.yzmusic.data.model.artworkAt
+import java.io.ByteArrayOutputStream
+import java.io.File
+import kotlin.math.max
+
+/**
+ * Embeds title, artist, album, lyrics and cover art into a track [Downloads]
+ * just finished saving, so it reads correctly in a file manager or another
+ * player rather than only inside this app, where the filename is otherwise
+ * the only thing carrying that.
+ *
+ * Best-effort throughout, deliberately: the cover fetch is a network call
+ * that can fail for reasons that have nothing to do with the download that
+ * already succeeded, and [Mp4Tagger], [WebmTagger] and [FlacTagger] all fall
+ * back to returning their input unchanged on anything they don't recognise.
+ * Every step here is caught rather than left to propagate, because a download
+ * this runs after has already landed — a tagging failure should cost the tags,
+ * not the file.
+ *
+ * The lyrics are the one thing not fetched here. They come in as text from
+ * [LyricsTag], started by [Downloads] early enough to overlap the transfer,
+ * because that lookup races four services and is the one piece of this worth
+ * not paying for in wall-clock time after the last byte has landed.
+ */
+object MediaTagger {
+
+    private const val TAG = "YZ Music"
+
+    /** Long side of the embedded cover — plenty for a lock screen or a car head unit, without ballooning the file. */
+    private const val COVER_MAX_SIDE = 1000
+
+    /**
+     * The containers there is a tagger for.
+     *
+     * A download can land as something else — `.wav` from a source that serves
+     * it, see [DownloadStore.storable] — and that file keeps the tags its
+     * filename carries and nothing more. Worth having no tagger for rather than
+     * a half-written one: a WAV's metadata lives in RIFF chunks that a good
+     * number of players ignore outright.
+     */
+    private val TAGGABLE = setOf("m4a", "webm", "flac")
+
+    /**
+     * Whether a file of [extension] gets tags at all.
+     *
+     * Asked by [Downloads] before it starts fetching anything that exists only
+     * to be tagged, so a `.wav` download doesn't spend four lyric lookups on a
+     * field it has nowhere to put.
+     */
+    fun carriesTags(extension: String): Boolean = extension in TAGGABLE
+
+    /** @param lyrics what [LyricsTag] found, or null when there are none to write. */
