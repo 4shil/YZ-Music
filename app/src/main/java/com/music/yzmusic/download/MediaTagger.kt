@@ -127,3 +127,14 @@ object MediaTagger {
                 if (!response.isSuccessful) return@runCatching null
                 val raw = response.body?.bytes() ?: return@runCatching null
                 val bitmap = BitmapFactory.decodeByteArray(raw, 0, raw.size) ?: return@runCatching null
+                val scaled = downscale(bitmap, COVER_MAX_SIDE)
+                val out = ByteArrayOutputStream()
+                scaled.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                Cover(out.toByteArray(), "image/jpeg")
+            }
+        }.onFailure { Log.d(TAG, "no cover embedded for ${track.videoId}: ${it.message}") }.getOrNull()
+    }
+
+    private fun downscale(bitmap: Bitmap, maxSide: Int): Bitmap {
+        val longest = max(bitmap.width, bitmap.height)
+        if (longest <= maxSide) return bitmap
