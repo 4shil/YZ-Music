@@ -78,3 +78,16 @@ object WebmTagger {
         // A declared size only matches this shape when it accounts for every
         // byte already in the file — anything else (trailing padding, more
         // top-level elements after Segment) isn't a layout worth guessing at.
+        val declaredEnd = segmentContentStart + segmentSize.value
+        if (declaredEnd != bytes.size.toLong()) return bytes
+
+        val newSize = segmentSize.value + tail.size
+        val maxForWidth = (1L shl (7 * segmentSize.width)) - 2
+        if (newSize > maxForWidth) return bytes
+
+        val out = bytes.copyOf(bytes.size + tail.size)
+        tail.copyInto(out, bytes.size)
+        writeVint(out, segmentIdOffset + SEGMENT_ID.size, newSize, segmentSize.width)
+        return out
+    }
+
