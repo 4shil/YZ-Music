@@ -91,3 +91,29 @@ object WebmTagger {
         return out
     }
 
+    private fun buildTail(
+        title: String,
+        artist: String,
+        album: String?,
+        lyrics: String?,
+        cover: ByteArray?,
+        coverMime: String,
+        wordLyrics: String?,
+    ): ByteArray {
+        var out = ByteArray(0)
+
+        val simple = mutableListOf<ByteArray>()
+        if (title.isNotBlank()) simple += simpleTag("TITLE", title)
+        if (artist.isNotBlank()) simple += simpleTag("ARTIST", artist)
+        if (!album.isNullOrBlank()) simple += simpleTag("ALBUM", album)
+        // `LYRICS` is Matroska's own name for the field, and `TagString` is a
+        // UTF-8 element with an explicit length — so the LRC's newlines need no
+        // escaping and there is no ceiling worth worrying about here.
+        if (!lyrics.isNullOrBlank()) simple += simpleTag("LYRICS", lyrics)
+        // Beside `LYRICS`, never instead of it: a SimpleTag with a name a
+        // player doesn't know is skipped, so the portable field is untouched.
+        if (!wordLyrics.isNullOrBlank()) simple += simpleTag(WORD_LYRICS_FIELD, wordLyrics)
+        if (simple.isNotEmpty()) {
+            // An empty Targets applies the tag to the whole file — there is no
+            // track/chapter to single out in a lone-audio-stream download.
+            val targets = elem(ID_TARGETS, ByteArray(0))
