@@ -60,3 +60,17 @@ internal object LyricsTag {
             AppSettings.lyricsSources.value
         } else {
             emptySet()
+        }
+        if (sources.isEmpty()) return null
+
+        // Three of the four sources match on the track's length, and LRCLIB
+        // *ranks* on it. Asking without one is worse than not asking: the fuzzy
+        // fallback would return the closest hit to zero seconds, which is the
+        // shortest edit in the database rather than the one being downloaded,
+        // and its timings would be wrong for the whole file.
+        val durationMs = track.durationMillis()
+        if (durationMs <= 0L) {
+            Log.d(TAG, "no duration for ${track.videoId}; skipping lyrics")
+            return null
+        }
+
