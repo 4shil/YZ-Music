@@ -134,3 +134,17 @@ object Mp4Tagger {
     /** `co64`: the same shape as [patchStco], with 64-bit offsets. */
     private fun patchCo64(bytes: ByteArray, box: BoxRef, insertAt: Int, delta: Int) {
         val base = box.contentOffset + 4
+        val count = readU32(bytes, base).toInt()
+        var p = base + 4
+        repeat(count) {
+            val off = readU64(bytes, p)
+            if (off >= insertAt) writeU64(bytes, p, off + delta)
+            p += 8
+        }
+    }
+
+    private fun parseBoxes(bytes: ByteArray, start: Int, end: Int): List<BoxRef> {
+        val out = mutableListOf<BoxRef>()
+        var pos = start
+        while (pos + 8 <= end) {
+            val size32 = readU32(bytes, pos)
