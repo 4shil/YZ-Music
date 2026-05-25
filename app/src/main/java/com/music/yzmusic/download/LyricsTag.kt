@@ -74,3 +74,17 @@ internal object LyricsTag {
             return null
         }
 
+        val found = try {
+            withTimeoutOrNull(LOOKUP_MS) {
+                LyricsRepository.lyrics(
+                    videoId = track.videoId,
+                    title = track.title,
+                    artist = track.artist,
+                    durationMs = durationMs,
+                    album = track.albumName,
+                    sources = sources,
+                    order = AppSettings.lyricsSourceOrder.value,
+                    prioritizeSyllableSync = AppSettings.prioritizeSyllableSync.value,
+                )
+            }
+        } catch (e: CancellationException) {
