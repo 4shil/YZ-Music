@@ -68,3 +68,7 @@ object MediaTagger {
     ) {
         if (!carriesTags(extension)) return
         val original = readAll(context, uri) ?: return
+        val cover = fetchCover(track)
+        // The portable field and this app's own. Split here rather than inside
+        // each tagger so all three agree on which string goes where.
+        val plain = lyrics?.plain
