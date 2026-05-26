@@ -69,3 +69,16 @@ suspend fun loadAutoplayTracks(
                         } catch (ignored: Throwable) {
                             // If resolution fails for this candidate, retain the original
                             // candidate so the recommendation is not lost.
+                            song
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Throwable) {
+        return Result.failure(failure)
+    }
+    return Result.success(resolved.map { it.copy(fromAutoplay = true) })
+}
