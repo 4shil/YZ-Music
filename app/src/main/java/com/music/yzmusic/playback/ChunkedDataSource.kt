@@ -177,3 +177,20 @@ class ChunkedDataSource(
 
     override fun getUri(): Uri? = upstream.uri ?: baseSpec?.uri
 
+    override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
+
+    override fun close() {
+        closeChunk()
+        baseSpec = null
+        bytesRemaining = 0L
+        chunkRemaining = 0L
+    }
+
+    private companion object {
+        const val TAG = "YZ Music"
+
+        /** Enough to ride out a truncated range, not enough to hang on a dead one. */
+        const val MAX_EMPTY_RANGES = 3
+    }
+
+    /** Wraps [upstream]'s sources so everything opened through it is ranged. */
