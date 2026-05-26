@@ -377,3 +377,14 @@ object AudioCache {
      * Local file and content URIs bypass disk caching to prevent redundant writes.
      */
     fun playbackFactory(upstream: DataSource.Factory): DataSource.Factory = DataSource.Factory {
+        val cacheDs = cacheFactory(upstream).createDataSource()
+        val upstreamDs = upstream.createDataSource()
+        object : DataSource {
+            private var activeDs: DataSource = cacheDs
+
+            override fun addTransferListener(transferListener: androidx.media3.datasource.TransferListener) {
+                cacheDs.addTransferListener(transferListener)
+                upstreamDs.addTransferListener(transferListener)
+            }
+
+            override fun open(dataSpec: DataSpec): Long {
