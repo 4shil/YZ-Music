@@ -155,3 +155,38 @@ object WebmTagger {
     private fun readSize(bytes: ByteArray, offset: Int): Size? {
         if (offset >= bytes.size) return null
         val first = bytes[offset].toInt() and 0xFF
+        var width = 1
+        var mask = 0x80
+        while (mask != 0 && (first and mask) == 0) {
+            mask = mask shr 1
+            width++
+        }
+        if (mask == 0 || offset + width > bytes.size) return null
+        var value = (first and (mask - 1)).toLong()
+        for (i in 1 until width) value = (value shl 8) or (bytes[offset + i].toLong() and 0xFF)
+        val maxVal = (1L shl (7 * width)) - 1
+        return Size(value, width, value == maxVal)
+    }
+
+    /** The narrowest vint that fits [value], reserving the all-ones value as "unknown". */
+    private fun encodeVint(value: Long): ByteArray {
+        var width = 1
+        while (width < 8 && value > (1L shl (7 * width)) - 2) width++
+        return ByteArray(width).also { writeVint(it, 0, value, width) }
+    }
+
+    private fun writeVint(bytes: ByteArray, offset: Int, value: Long, width: Int) {
+        var v = value
+        for (i in width - 1 downTo 0) {
+            bytes[offset + i] = (v and 0xFF).toByte()
+            v = v shr 8
+        }
+        bytes[offset] = (bytes[offset].toInt() or (0x80 shr (width - 1))).toByte()
+    }
+
+    private fun ByteArray.regionMatches(offset: Int, other: ByteArray): Boolean {
+        if (offset < 0 || offset + other.size > size) return false
+        for (i in other.indices) if (this[offset + i] != other[i]) return false
+        return true
+    }
+}
