@@ -137,3 +137,21 @@ object WebmTagger {
 
     private fun simpleTag(name: String, value: String): ByteArray {
         val nameElem = elem(ID_TAGNAME, name.toByteArray(Charsets.US_ASCII))
+        val stringElem = elem(ID_TAGSTRING, value.toByteArray(Charsets.UTF_8))
+        return elem(ID_SIMPLETAG, nameElem + stringElem)
+    }
+
+    private fun elem(id: ByteArray, payload: ByteArray): ByteArray =
+        id + encodeVint(payload.size.toLong()) + payload
+
+    private class Size(val value: Long, val width: Int, val isUnknown: Boolean)
+
+    /**
+     * An EBML variable-length integer: the position of the highest set bit in
+     * the first byte gives the width (1-8 bytes), and the remaining bits
+     * across all of them are the value. A value using every one of those bits
+     * (all ones) is the reserved "unknown length" marker.
+     */
+    private fun readSize(bytes: ByteArray, offset: Int): Size? {
+        if (offset >= bytes.size) return null
+        val first = bytes[offset].toInt() and 0xFF
