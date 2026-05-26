@@ -1,0 +1,23 @@
+﻿package com.music.yzmusic.playback
+
+import com.music.yzmusic.data.YtMusicRepository
+import com.music.yzmusic.data.model.SearchFilter
+import com.music.yzmusic.data.model.SearchResult
+import com.music.yzmusic.data.model.Song
+import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.sources.SourceRegistry
+import com.music.yzmusic.data.sources.TrackMatcher
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+
+/** Most AutoPlay-suggested tracks kept queued ahead of the current one at once. */
+const val MAX_QUEUED_AUTOPLAY = 10
+
+/** Threshold below which AutoPlay replenishes future queued recommendations. */
+const val AUTOPLAY_LOW_WATER_MARK = 5
+
+/**
+ * Finds the YouTube id that should seed AutoPlay for a song. Module tracks and local
+ * audio files do not carry native YouTube ids, so they are matched on YouTube before
