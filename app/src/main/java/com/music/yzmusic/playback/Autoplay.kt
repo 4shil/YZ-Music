@@ -53,3 +53,19 @@ suspend fun loadAutoplayTracks(
     val seed = youtubeSeedFor(seedSong) ?: return Result.success(emptyList())
     val related = fetchRadio(seed).getOrElse { return Result.failure(it) }
     val extra = QueueBuilder.extend(existing, related, limit)
+    if (extra.isEmpty()) return Result.success(emptyList())
+
+    val resolved = try {
+        coroutineScope {
+            extra.map { song ->
+                async {
+                    if (!song.isVideo || !AppSettings.convertVideoToAudio.value) {
+                        song
+                    } else {
+                        try {
+                            resolveAudio(song)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (ignored: Throwable) {
+                            // If resolution fails for this candidate, retain the original
+                            // candidate so the recommendation is not lost.
