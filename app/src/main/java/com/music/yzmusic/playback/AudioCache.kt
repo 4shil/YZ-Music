@@ -966,3 +966,74 @@ object AudioCache {
      */
     fun renditionsOf(uri: Uri): List<Rendition> {
         if (!::cache.isInitialized) return emptyList()
+        val videoId = uri.getQueryParameter("v")
+            ?: return listOfNotNull(renditionFor(keyFactory.buildCacheKey(DataSpec(uri))))
+        return renditionKeysFor(videoId)
+            .mapNotNull(::renditionFor)
+            .sortedBy { it.contentLength }
+    }
+
+    /**
+     * Which cache keys belong to [videoId], memoized.
+     *
+     * [SimpleCache.getKeys] copies the entire key set on every call, and this
+     * runs on the main thread twice per crossfade tick — four times a second,
+     * against a cache holding every track ever played. Which *renditions* exist
+     * changes only when a new one starts downloading, so it is safe to hold for
+     * a few seconds; how much of each is on disk is not memoized and is still
+     * read fresh every time.
+     */
+    private fun renditionKeysFor(videoId: String): List<String> {
+        val now = SystemClock.elapsedRealtime()
+        renditionKeys[videoId]?.let { (at, keys) ->
+            if (now - at < RENDITION_KEYS_TTL_MS) return keys
+        }
+        val keys = cache.keys.filter { it == videoId || it.startsWith("$videoId#") }
+        renditionKeys[videoId] = now to keys
+        return keys
+    }
+
+    private val renditionKeys = ConcurrentHashMap<String, Pair<Long, List<String>>>()
+
+    /** The cache key [uri] itself resolves to right now — the rendition the player is using. */
+    fun cacheKeyOf(uri: Uri): String = keyFactory.buildCacheKey(DataSpec(uri))
+
+    private fun renditionFor(key: String): Rendition? {
+        val contentLength =
+            ContentMetadata.getContentLength(cache.getContentMetadata(key)).coerceAtLeast(0L)
+        val probe = contentLength.takeIf { it > 0 } ?: HEAD_PROBE_BYTES
+        val prefix = cache.getCachedLength(key, 0, probe).coerceAtLeast(0L)
+        return if (prefix <= 0L) null else Rendition(key, contentLength, prefix)
+    }
+
+    /**
+     * A reader over one named [Rendition], whatever the player is currently
+     * using.
+     *
+     * The key is pinned rather than derived, because [keyFactory] resolves a
+     * YouTube URI to whichever rendition is live *now* — which is precisely the
+     * heavy one this exists to avoid reading. The URI is still passed along for
+     * [CacheDataSource] to open against; only the key decides which bytes come
+     * back.
+     */
+    fun renditionDataSource(uri: Uri, rendition: Rendition): MediaDataSource =
+        CacheMediaDataSource(
+            CacheDataSource.Factory()
+                .setCache(cache)
+                .setUpstreamDataSourceFactory(NoUpstream)
+                .setCacheKeyFactory { rendition.key }
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                .createDataSource(),
+            uri,
+        )
+
+    /**
+     * A random-access reader over [uri]'s cached bytes, for the analyzer to hand
+     * to [android.media.MediaExtractor]. Null when the rendition isn't fully
+     * cached yet — analysis always treats that as "not ready" rather than
+     * reading a partial file.
+     *
+     * The returned source only ever reads from disk: its upstream throws if
+     * touched at all, which should never happen once [isFullyCached] is true.
+     * Callers must [MediaDataSource.close] it.
+     */
