@@ -1037,3 +1037,39 @@ object AudioCache {
      * touched at all, which should never happen once [isFullyCached] is true.
      * Callers must [MediaDataSource.close] it.
      */
+    fun mediaDataSource(uri: Uri): MediaDataSource? {
+        if (!isFullyCached(uri)) return null
+        return CacheMediaDataSource(cacheFactory(NoUpstream).createDataSource(), uri)
+    }
+
+    /**
+     * The same reader over a rendition that is still downloading, for Smart
+     * Fade's head-only pass.
+     *
+     * Nothing here truncates explicitly: a read into a region that hasn't
+     * arrived reaches [NoUpstream], which throws, and [CacheMediaDataSource]
+     * turns that into an end-of-stream. So a partially cached rendition presents
+     * itself to [android.media.MediaExtractor] as a short file that stops where
+     * the cache does, which is exactly what a head-only decode wants. Its
+     * declared size is still the real one, so a container whose header describes
+     * the whole track parses normally.
+     *
+     * Callers must check [cachedPrefixBytes] first — this only refuses the case
+     * where the rendition has no beginning on disk at all. Callers must
+     * [MediaDataSource.close] it.
+     */
+    fun headMediaDataSource(uri: Uri): MediaDataSource? {
+        if (cachedPrefixBytes(uri) <= 0L) return null
+        return CacheMediaDataSource(cacheFactory(NoUpstream).createDataSource(), uri)
+    }
+
+    /**
+     * Never fetches. For a fully cached rendition nothing should reach this; for
+     * a partially cached one, throwing is how a read past the cached prefix
+     * becomes an end-of-stream instead of a download.
+     */
+    private object NoUpstream : DataSource.Factory {
+        override fun createDataSource(): DataSource = object : DataSource {
+            override fun addTransferListener(transferListener: TransferListener) {}
+            override fun open(dataSpec: DataSpec): Long =
+                throw IOException("Automix analysis reads only cached bytes; no upstream is wired up")
