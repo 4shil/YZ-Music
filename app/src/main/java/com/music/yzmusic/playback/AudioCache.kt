@@ -1073,3 +1073,134 @@ object AudioCache {
             override fun addTransferListener(transferListener: TransferListener) {}
             override fun open(dataSpec: DataSpec): Long =
                 throw IOException("Automix analysis reads only cached bytes; no upstream is wired up")
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                throw IOException("Automix analysis reads only cached bytes; no upstream is wired up")
+            override fun getUri(): Uri? = null
+            override fun close() {}
+        }
+    }
+
+    /**
+     * Adapts a Media3 [DataSource] (reading only from [cache]) to the
+     * [MediaDataSource] interface [android.media.MediaExtractor] wants.
+     *
+     * Keeps the underlying source open across consecutive sequential reads —
+     * the pattern MediaExtractor actually uses — and only reopens at a new
+     * position when the read pattern jumps, e.g. a seek.
+     */
+    private class CacheMediaDataSource(
+        private val dataSource: DataSource,
+        private val uri: Uri,
+    ) : MediaDataSource() {
+        private var isOpen = false
+        private var openPosition = -1L
+
+        override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+            if (size == 0) return 0
+            if (!isOpen || position != openPosition) {
+                closeUpstream()
+                val available = try {
+                    dataSource.open(DataSpec.Builder().setUri(uri).setPosition(position).build())
+                } catch (error: IOException) {
+                    return -1
+                }
+                isOpen = true
+                openPosition = position
+                if (available == 0L) return -1
+            }
+            val count = try {
+                dataSource.read(buffer, offset, size)
+            } catch (error: IOException) {
+                closeUpstream()
+                return -1
+            }
+            if (count == C.RESULT_END_OF_INPUT) {
+                closeUpstream()
+                return -1
+            }
+            openPosition += count
+            return count
+        }
+
+        override fun getSize(): Long {
+            closeUpstream()
+            return try {
+                dataSource.open(DataSpec(uri))
+            } catch (error: IOException) {
+                -1L
+            } finally {
+                closeUpstream()
+            }
+        }
+
+        override fun close() {
+            closeUpstream()
+        }
+
+        private fun closeUpstream() {
+            if (isOpen) {
+                runCatching { dataSource.close() }
+                isOpen = false
+            }
+        }
+    }
+
+    /**
+     * Pulls [length] bytes of [videoId] from [position] into the cache.
+     * [CacheWriter] fetches only the gaps, so a range already partly on disk —
+     * from a track played earlier, or skipped back to — costs only the rest.
+     */
+    private suspend fun fetch(videoId: String, position: Long, length: Long) =
+        fetch(videoId, Uri.parse("yzmusic://watch?v=$videoId"), position, length)
+
+    /**
+     * [pinKey] forces the write to land under [cacheKey] instead of wherever
+     * [keyFactory] would put it.
+     *
+     * Worth spelling out because the two are not otherwise the same thing:
+     * [cacheKey] is only consulted for the "is this already here" check below,
+     * while the entry actually written is chosen by [keyFactory] from the spec —
+     * and [keyFactory] answers partly from the global substitution setting, not
+     * from what this request resolves to. A caller that knows exactly what it is
+     * fetching, as [requestAnalysisHead] does, is better off saying so than
+     * letting a global decide on its behalf.
+     */
+    private suspend fun fetch(
+        cacheKey: String,
+        uri: Uri,
+        position: Long,
+        length: Long,
+        pinKey: Boolean = false,
+    ) {
+        if (upstreamFactory == null) return
+        if (cache.getCachedBytes(cacheKey, position, length) >= length) return
+
+        // A cheap first knock rather than the whole range on the door.
+        // Losing this entry to another writer isn't something
+        // [CacheDataSource] surfaces as a failure — it quietly falls through
+        // to the network and hands the bytes to nobody, which looks exactly
+        // like a real fetch until the write is checked afterwards, because
+        // that check has always been the only way to tell "nobody's home"
+        // from "got it". Measured without this: a read-ahead fetch that had
+        // lost that race read a full [CHUNK_BYTES] from the network, found
+        // nothing had landed, and paid that again on every one of
+        // [MAX_ATTEMPTS] retries — nine megabytes for a track that was never
+        // going to cache, because whoever held the entry held it the whole
+        // time. A small probe reaches the same verdict for a fraction of
+        // the cost, and only a probe that actually lands is worth following
+        // with the rest of the range.
+        if (length > LOCK_PROBE_BYTES) {
+            pull(cacheKey, uri, position, LOCK_PROBE_BYTES, pinKey)
+            if (cache.getCachedBytes(cacheKey, position, LOCK_PROBE_BYTES) < LOCK_PROBE_BYTES) return
+        }
+        pull(cacheKey, uri, position, length, pinKey)
+    }
+
+    /** The actual network pull behind [fetch], unconditional and unchecked. */
+    private suspend fun pull(cacheKey: String, uri: Uri, position: Long, length: Long, pinKey: Boolean) {
+        val upstream = upstreamFactory ?: return
+
+        // Whose track this is, taken off the URI rather than off [cacheKey]:
+        // the key splits a track's renditions apart on purpose, and reading
+        // ahead is the clearest case there is of work logged nowhere near the
+        // track it is for. See [TrackLog.about].
