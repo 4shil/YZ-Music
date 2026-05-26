@@ -434,3 +434,195 @@ object AudioCache {
      * going to. Without the flag, losing the race throws before a byte is
      * read, and every attempt past the first costs nothing.
      */
+    private fun readAheadCacheFactory(upstream: DataSource.Factory) = CacheDataSource.Factory()
+        .setCache(cache)
+        .setUpstreamDataSourceFactory(upstream)
+        .setCacheKeyFactory(keyFactory)
+
+    /** Set once the player exists; read-ahead resolves streams the same way. */
+    private var upstreamFactory: DataSource.Factory? = null
+
+    fun setUpstream(factory: DataSource.Factory) {
+        upstreamFactory = factory
+    }
+
+    private var job: Job? = null
+    private var pendingQueue: List<String> = emptyList()
+
+    /**
+     * Gets the queue ahead of the one playing warmed up, in play order.
+     *
+     * The first id gets the full treatment: its opening onto disk first, so
+     * it can start the moment it's reached, then the rest of it, so that
+     * seeking around it is a disk read from the first second it plays. Only
+     * that one track — never the one playing, and never bytes for anything
+     * further out. Media3 locks a cache entry to a single writer and the
+     * player holds that lock for as long as it is streaming the track — a
+     * fetch aimed at the same entry is quietly served from the network and
+     * written nowhere, spending the listener's data to cache precisely
+     * nothing. Caching a track before it is reached gets the same result
+     * without the contention. And full-track bytes for tracks that may never
+     * be reached would spend real mobile data on nothing.
+     *
+     * The next [QUEUE_LOOKAHEAD] ids past that one get a lighter treatment:
+     * just their stream URL resolved and held in [StreamResolver]'s own
+     * cache, not their bytes. That's the gap a fast run of skips actually
+     * falls into — the queue moving faster than a single-track read-ahead can
+     * follow it — and a resolve is cheap enough that warming several at once
+     * costs nothing worth guarding.
+     *
+     * Called freely; a call naming the same queue as the one already running
+     * is left alone, and a different one replaces it outright, since on a run
+     * of skips only wherever the listener actually lands is worth chasing.
+     */
+    fun prefetchQueue(upcoming: List<Upcoming>) {
+        val mediaIds = upcoming.map { it.mediaId }
+        if (mediaIds == pendingQueue) return
+        android.util.Log.d("BCFetchDebug", "prefetchQueue: head ${pendingQueue.firstOrNull()} -> ${mediaIds.firstOrNull()}")
+        pendingQueue = mediaIds
+        job?.cancel()
+        // Both halves of the read-ahead below go through [StreamResolver],
+        // which speaks YouTube ids and nothing else. A source-backed track
+        // handed to it resolves to a failure, so filtering here saves a dead
+        // round trip per queued track rather than changing any outcome —
+        // read-ahead for those is a separate job, and their servers are
+        // typically a good deal closer than googlevideo anyway.
+        //
+        val videoIds = mediaIds.filter { SourceRegistry.parseTrackKey(it) == null }
+            // A track already on disk needs no reading ahead, and read-ahead
+            // speaks only to googlevideo: warming one would spend mobile data
+            // fetching a second copy of a file the listener deliberately saved,
+            // then cache it under a key playback is never going to ask for —
+            // it plays the download instead. See [Song.toMediaItem].
+            .filter { it !in Downloads.saved.value }
+        // With substitution possible, only the *bytes* half drops out. Read-
+        // ahead builds its own spec below from an id alone and carries none of
+        // the title and artist a substitution is matched on — so it resolves
+        // to YouTube and would write Opus bytes into the very entry playback
+        // is about to fill from a higher-ranked source, under the same key, at
+        // whatever offset each of them happened to reach. Reading ahead for a
+        // track and then corrupting it is worse than not reading ahead at all.
+        //
+        // The URL half is a different matter and was thrown out with it, at
+        // real cost. Warming [StreamResolver]'s own cache writes nothing to
+        // disk and cannot corrupt anything, and it is the difference between
+        // the fallback starting instantly and starting with a full client walk
+        // — measured at 7.9s. Since the fallback now races the module lookup
+        // rather than waiting behind it, that walk is what a track waits on
+        // whenever the modules are slow, and warming it here is what makes the
+        // race worth running at all.
+        val substitutable = SourceResolver.canSubstituteForYouTube()
+        job = videoIds.firstOrNull()?.let { next ->
+            val target = upcoming.firstOrNull { it.mediaId == next }?.target
+            scope.launch {
+                // With substitution on, the *bytes* half above used to be
+                // switched off outright, and the paragraph explaining why is
+                // still correct as far as it goes: read-ahead resolving to
+                // YouTube on its own would write Opus into the entry a
+                // higher-ranked source is about to fill.
+                //
+                // What it treated as impossible was knowing the answer in
+                // advance. A quick source can be asked *here* — see
+                // [SourceResolver.prefetchSubstitute] — and once its stream is
+                // recorded in [StreamChoice], the question stops being open:
+                // every later resolve for this track, read-ahead's own included,
+                // is held to that one stream. Both writers then agree on the
+                // file and on the `#alt` key it lands under, which is exactly
+                // the condition the byte half was missing.
+                //
+                // A source that is disabled, doesn't have the track, or fails
+                // leaves nothing pinned, and this falls through to the same
+                // URL-only warm-up it did before — YouTube resolves the track at
+                // playback time as usual.
+                val warmed = if (substitutable && target != null) {
+                    runCatching { SourceResolver.prefetchSubstitute(target) }
+                        .onFailure { TrackLog.d(TAG, "warm-up substitute failed for $next: ${it.message}", about = next) }
+                        .getOrNull()
+                        ?.also { StreamChoice.remember(next, it, substituted = true) }
+                } else {
+                    null
+                }
+                // Safe to fill for the same reason in both cases: either nothing
+                // outranks YouTube and read-ahead is the only writer, or a
+                // source has been pinned and every writer now resolves to it.
+                val cacheBytes = !substitutable || warmed != null
+                if (cacheBytes) {
+                    launch(TrackLog.about(next)) {
+                        delay(PREFETCH_DELAY_MS)
+                        fetch(next, 0, PRELOAD_BYTES)
+                        fetchWhole(next)
+                    }
+                }
+                launch {
+                    delay(PREFETCH_DELAY_MS)
+                    for (id in videoIds.take(QUEUE_LOOKAHEAD + 1).let { if (cacheBytes) it.drop(1) else it }) {
+                        // A track already pinned to another source has no use
+                        // for a YouTube URL: nothing will ask for one, and
+                        // minting it spends a client walk to fill a cache entry
+                        // that is never read.
+                        if (id == next && warmed != null) continue
+                        runCatching { StreamResolver.resolve(id) }
+                            .onFailure { TrackLog.d(TAG, "queue warm-up skipped $id: ${it.message}", about = id) }
+                        delay(QUEUE_RESOLVE_STAGGER_MS)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * A queued track as read-ahead needs it.
+     *
+     * [target] is what a cross-source match is made on, and read-ahead cannot
+     * reach it any other way: it runs for tracks that are not the current item,
+     * so the session's metadata is the wrong track's, and the plain
+     * `yzmusic://watch?v=…` URI it builds for itself carries an id and nothing
+     * else. It rides along from the queue instead — see
+     * [PlaybackService.prefetchAround][com.music.yzmusic.playback.PlaybackService].
+     */
+    data class Upcoming(val mediaId: String, val target: TrackMatcher.Target)
+
+    /**
+     * Nothing to read ahead for once playback stops. The queue is cleared with
+     * the job, so resuming starts the fetch again rather than being mistaken
+     * for one already in hand.
+     */
+    fun cancel() {
+        pendingQueue = emptyList()
+        job?.cancel()
+        job = null
+    }
+
+    /**
+     * Gets the whole of [videoId] onto disk, a range at a time.
+     *
+     * Progress is measured rather than assumed: a pass that caches nothing
+     * means the entry is held by another writer — the listener has skipped
+     * ahead and the player now owns this track — so there is no point hammering
+     * it. A few spaced retries cover the hand-over, and then it is left alone.
+     */
+    private suspend fun fetchWhole(videoId: String) {
+        repeat(MAX_ATTEMPTS) {
+            // The race this retry loop exists to cover is the *queue's own*:
+            // cancelling [job] tells a blocking network read to stop, but that
+            // takes until its next checkpoint, not instantly — so the walk
+            // that lost the entry to the player can still be a retry or two
+            // into asking for it again by the time [prefetchQueue] has moved
+            // this track's job on to a different one. Re-checking here is
+            // what makes that overlap cost one interrupted read instead of
+            // up to four full ones: once this videoId is no longer the track
+            // [pendingQueue] actually wants read ahead, every further attempt
+            // is spent on a track something else now owns, and asking again
+            // in five seconds would only be wrong for longer.
+            if (pendingQueue.firstOrNull() != videoId) {
+                TrackLog.d(TAG, "$videoId is no longer the read-ahead target; stopping", about = videoId)
+                return
+            }
+            if (cacheWholeOnce(videoId)) return
+            delay(RETRY_DELAY_MS)
+        }
+        TrackLog.d(TAG, "stopped short of caching $videoId in full", about = videoId)
+    }
+
+    /** @return true once every range of [videoId] is on disk. */
+    private suspend fun cacheWholeOnce(videoId: String): Boolean {
