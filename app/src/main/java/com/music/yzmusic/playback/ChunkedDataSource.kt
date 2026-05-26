@@ -100,3 +100,5 @@ class ChunkedDataSource(
         return bytesRemaining
     }
 
+    private fun openChunk() {
+        val length = minOf(chunkBytes, bytesRemaining)
