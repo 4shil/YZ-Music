@@ -921,3 +921,80 @@ object AudioCache {
      * Zero when the rendition's length isn't known yet, when nothing is cached,
      * or when the cached region doesn't start at byte 0.
      */
+    fun cachedPrefixBytes(uri: Uri): Long {
+        if (!::cache.isInitialized) return 0L
+        val key = keyFactory.buildCacheKey(DataSpec(uri))
+        // Probed over a fixed span rather than the content length. The length is
+        // only recorded once something has *opened* the rendition, and the whole
+        // point of this measurement is a track nothing has opened yet — read-
+        // ahead has written its opening bytes and nothing else has touched it.
+        // Requiring the length here made this return zero for exactly the
+        // tracks it exists to describe.
+        val probe = contentLengthOf(uri).takeIf { it > 0 } ?: HEAD_PROBE_BYTES
+        // Negative means "this many bytes of hole", i.e. position 0 isn't cached at all.
+        return cache.getCachedLength(key, 0, probe).coerceAtLeast(0L)
+    }
+
+    /**
+     * One rendition of a recording, as Automix's analyzer sees it.
+     *
+     * [key] is a cache key, not a URI: the point of this type is to name a
+     * rendition the *player* is not using, which no URI in hand refers to.
+     */
+    data class Rendition(val key: String, val contentLength: Long, val cachedPrefix: Long) {
+        val isComplete: Boolean get() = contentLength > 0 && cachedPrefix >= contentLength
+    }
+
+    /**
+     * Every rendition of [uri]'s recording that is on disk, cheapest first.
+     *
+     * One videoId owns up to three cache entries — the Opus stream YouTube
+     * serves, a substituted source's copy (`#alt`), and a quality upgrade
+     * (`#<rendition>`); see [keyFactory]. They hold the same *music*, so an
+     * analysis of any of them describes all of them, and analysing the smallest
+     * one costs a fraction of what the largest does. This is what lets a track
+     * be analysed off a 3 MB Opus stream that finished downloading a minute ago
+     * instead of waiting on the 40 MB FLAC that replaced it.
+     *
+     * Ordered by size because decode time tracks bytes, and because the
+     * lightest complete rendition is the one that was available earliest.
+     *
+     * Callers must still check the durations agree before treating two
+     * renditions as interchangeable — see [TrackAnalyzer]. A `#alt` entry comes
+     * from a different source and can be a different cut of the same song,
+     * where a shared beat grid would put every anchor seconds off.
+     */
+    fun renditionsOf(uri: Uri): List<Rendition> {
+        if (!::cache.isInitialized) return emptyList()
+        val videoId = uri.getQueryParameter("v")
+            ?: return listOfNotNull(renditionFor(keyFactory.buildCacheKey(DataSpec(uri))))
+        return renditionKeysFor(videoId)
+            .mapNotNull(::renditionFor)
+            .sortedBy { it.contentLength }
+    }
+
+    /**
+     * Which cache keys belong to [videoId], memoized.
+     *
+     * [SimpleCache.getKeys] copies the entire key set on every call, and this
+     * runs on the main thread twice per crossfade tick — four times a second,
+     * against a cache holding every track ever played. Which *renditions* exist
+     * changes only when a new one starts downloading, so it is safe to hold for
+     * a few seconds; how much of each is on disk is not memoized and is still
+     * read fresh every time.
+     */
+    private fun renditionKeysFor(videoId: String): List<String> {
+        val now = SystemClock.elapsedRealtime()
+        renditionKeys[videoId]?.let { (at, keys) ->
+            if (now - at < RENDITION_KEYS_TTL_MS) return keys
+        }
+        val keys = cache.keys.filter { it == videoId || it.startsWith("$videoId#") }
+        renditionKeys[videoId] = now to keys
+        return keys
+    }
+
+    private val renditionKeys = ConcurrentHashMap<String, Pair<Long, List<String>>>()
+
+    /** The cache key [uri] itself resolves to right now — the rendition the player is using. */
+    fun cacheKeyOf(uri: Uri): String = keyFactory.buildCacheKey(DataSpec(uri))
+
