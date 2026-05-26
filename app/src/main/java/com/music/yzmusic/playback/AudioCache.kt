@@ -388,3 +388,49 @@ object AudioCache {
             }
 
             override fun open(dataSpec: DataSpec): Long {
+                val scheme = dataSpec.uri.scheme
+                activeDs = if (scheme == "file" || scheme == "content") {
+                    upstreamDs
+                } else {
+                    cacheDs
+                }
+                return activeDs.open(dataSpec)
+            }
+
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                activeDs.read(buffer, offset, length)
+
+            override fun getUri(): Uri? = activeDs.uri
+
+            override fun close() {
+                activeDs.close()
+            }
+        }
+    }
+
+    private fun cacheFactory(upstream: DataSource.Factory) = CacheDataSource.Factory()
+        .setCache(cache)
+        .setUpstreamDataSourceFactory(upstream)
+        .setCacheKeyFactory(keyFactory)
+        // A cache write that fails (full disk, evicted mid-write) should drop
+        // to streaming, not surface as a playback error.
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+    /**
+     * As [cacheFactory], minus [CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR] —
+     * for [fetch] alone, never for playback.
+     *
+     * That flag exists so a playback read whose *write* fails still serves
+     * the listener their audio; a read-ahead fetch has no listener to serve,
+     * so hiding the same failure just spends their data reading bytes onto
+     * the floor. Measured: read-ahead for a track the player had already
+     * reached — its cache entry locked by the real reader, exactly the "lost
+     * race" [fetchWhole] is meant to give up on cheaply — instead read a
+     * full [CHUNK_BYTES] from the network on every one of [MAX_ATTEMPTS]
+     * retries, because the flag turned the lock exception into a silent,
+     * uncached pass-through rather than the failure [fetch]'s own
+     * `runCatching` is written to catch. Nine megabytes on one ordinary,
+     * unskipped track change, for a fetch that cached nothing and was always
+     * going to. Without the flag, losing the race throws before a byte is
+     * read, and every attempt past the first costs nothing.
+     */
