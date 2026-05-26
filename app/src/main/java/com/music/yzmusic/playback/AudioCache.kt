@@ -679,3 +679,99 @@ object AudioCache {
      */
     fun cachedSummary(uri: Uri): String {
         val key = keyFactory.buildCacheKey(DataSpec(uri))
+        val spans = cache.getCachedSpans(key).filter { it.isCached }
+        if (spans.isEmpty()) return "$key holds nothing"
+        val total = spans.sumOf { it.length }
+        val ranges = spans.sortedBy { it.position }
+            .joinToString(" ") { "[${it.position},${it.position + it.length})" }
+        return "$key holds ${total / 1024}kB in ${spans.size} spans: $ranges"
+    }
+
+    suspend fun warmRange(uri: Uri, position: Long, length: Long) {
+        val key = keyFactory.buildCacheKey(DataSpec(uri))
+        fetch(key, uri, position, length)
+    }
+
+    /**
+     * Video ids whose analysis copy has already been asked for this session.
+     *
+     * A set, not a size: the fetch is sized once from the track's real length
+     * rather than grown into over several rounds — see [analysisHeadSize].
+     * Cleared for a track whose copy turns out to be undecodable, so discarding
+     * it leads to a fresh pull rather than to nothing.
+     */
+    private val analysisHeads = ConcurrentHashMap<String, Boolean>()
+
+    /** Video ids with a head fetch in the air, so a tick cannot stack another on top. */
+    private val analysisHeadsInFlight = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Pulls [uri]'s recording onto disk under the plain YouTube key, so Smart
+     * Fade has something to measure; sized by [analysisHeadSize].
+     *
+     * ## Why the analyzer has to ask for this
+     *
+     * Nothing else fetches a track's opening early enough. The analyzer can only
+     * read bytes some other part of the app happened to write, at the offsets it
+     * happened to need, and neither of the two writers produces a head in time:
+     *
+     *  - Read-ahead's *byte* half is switched off outright whenever source
+     *    substitution is on — see [prefetchQueue] — so a track that has never
+     *    been played holds nothing at all until it starts playing. Measured, the
+     *    next track's analysis then lands eleven to forty seconds late, which is
+     *    after the transition it was meant to inform and sometimes after the
+     *    track has started.
+     *  - A quality upgrade fetches its rendition from the swap point onward, so
+     *    the upgraded copy's first seconds are a region nothing downloads on its
+     *    own, and the copy it replaced is discarded. A track that plays lossless
+     *    from the start is therefore permanently unmeasurable however long it
+     *    sits in the cache.
+     *
+     * ## Why this one is safe when [prefetchQueue]'s bytes are not
+     *
+     * The hazard read-ahead was disabled over is a key that disagrees with its
+     * contents. [keyFactory] decides between `videoId` and `videoId#alt` from
+     * the *global* substitution setting rather than from what a request actually
+     * resolved to, so a fetch built from an id alone — which always resolves to
+     * YouTube, carrying none of the title and artist a substitution is matched
+     * on — wrote Opus bytes into the entry playback was filling from another
+     * source. That is what produced `No valid varint length mask found` at the
+     * seam.
+     *
+     * Here the key is pinned to the plain videoId rather than derived, so the
+     * bytes and the entry they land in are both unambiguously YouTube's, and the
+     * `#alt` and `#<rendition>` entries are untouched. The analyzer reaches this
+     * copy through [renditionsOf] and cross-checks its container duration before
+     * borrowing a beat grid across renditions, so a substituted source that
+     * turns out to be a different cut is caught there.
+     *
+     * ## Why it fetches once, at full size
+     *
+     * An earlier version started at a megabyte and grew the request on each
+     * later call, so that a track whose first attempt did not decode was not
+     * stuck forever. That cured the dead end and caused a worse fault: every
+     * round resolves the stream again, and the second round skips what is
+     * already cached and writes the *remainder of a different rendition* into the
+     * same entry. See [analysisHeadSize].
+     *
+     * The dead end it was solving is now answered from the other side. A copy
+     * that cannot be decoded is deleted rather than remembered — see
+     * [discardBadRendition] — which both frees the entry and re-arms this, so the
+     * retry is a clean pull instead of a larger read of the same bad bytes.
+     *
+     * A no-op for anything that isn't a YouTube-backed track.
+     */
+    fun requestAnalysisHead(uri: Uri) {
+        if (!::cache.isInitialized) return
+        if (upstreamFactory == null) return
+        val videoId = uri.getQueryParameter("v") ?: return
+        // One round per track per session, and it is sized correctly up front
+        // rather than grown into. See [analysisHeadSize] for why growing it was
+        // the wrong shape.
+        if (analysisHeads.putIfAbsent(videoId, true) != null) return
+        // Checked before the round is claimed, so the playback thread pays a set
+        // lookup per tick rather than queueing coroutines four times a second on
+        // top of a fetch that is still running.
+        if (!analysisHeadsInFlight.add(videoId)) return
+        scope.launch {
+            try {
