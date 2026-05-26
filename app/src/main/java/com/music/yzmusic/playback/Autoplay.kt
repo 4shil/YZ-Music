@@ -61,3 +61,11 @@ suspend fun loadAutoplayTracks(
                 async {
                     if (!song.isVideo || !AppSettings.convertVideoToAudio.value) {
                         song
+                    } else {
+                        try {
+                            resolveAudio(song)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (ignored: Throwable) {
+                            // If resolution fails for this candidate, retain the original
+                            // candidate so the recommendation is not lost.
