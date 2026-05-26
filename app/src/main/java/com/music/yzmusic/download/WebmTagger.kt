@@ -127,3 +127,13 @@ object WebmTagger {
             // A fixed id is fine: one attachment, and nothing here needs to
             // reference it back from a Tag.
             val fileUid = elem(ID_FILEUID, byteArrayOf(0, 0, 0, 0, 0, 0, 0, 1))
+            val fileData = elem(ID_FILEDATA, cover)
+            val attachedFile = elem(ID_ATTACHEDFILE, fileName + fileMime + fileUid + fileData)
+            out += elem(ID_ATTACHMENTS, attachedFile)
+        }
+
+        return out
+    }
+
+    private fun simpleTag(name: String, value: String): ByteArray {
+        val nameElem = elem(ID_TAGNAME, name.toByteArray(Charsets.US_ASCII))
