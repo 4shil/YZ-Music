@@ -998,3 +998,42 @@ object AudioCache {
     /** The cache key [uri] itself resolves to right now — the rendition the player is using. */
     fun cacheKeyOf(uri: Uri): String = keyFactory.buildCacheKey(DataSpec(uri))
 
+    private fun renditionFor(key: String): Rendition? {
+        val contentLength =
+            ContentMetadata.getContentLength(cache.getContentMetadata(key)).coerceAtLeast(0L)
+        val probe = contentLength.takeIf { it > 0 } ?: HEAD_PROBE_BYTES
+        val prefix = cache.getCachedLength(key, 0, probe).coerceAtLeast(0L)
+        return if (prefix <= 0L) null else Rendition(key, contentLength, prefix)
+    }
+
+    /**
+     * A reader over one named [Rendition], whatever the player is currently
+     * using.
+     *
+     * The key is pinned rather than derived, because [keyFactory] resolves a
+     * YouTube URI to whichever rendition is live *now* — which is precisely the
+     * heavy one this exists to avoid reading. The URI is still passed along for
+     * [CacheDataSource] to open against; only the key decides which bytes come
+     * back.
+     */
+    fun renditionDataSource(uri: Uri, rendition: Rendition): MediaDataSource =
+        CacheMediaDataSource(
+            CacheDataSource.Factory()
+                .setCache(cache)
+                .setUpstreamDataSourceFactory(NoUpstream)
+                .setCacheKeyFactory { rendition.key }
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                .createDataSource(),
+            uri,
+        )
+
+    /**
+     * A random-access reader over [uri]'s cached bytes, for the analyzer to hand
+     * to [android.media.MediaExtractor]. Null when the rendition isn't fully
+     * cached yet — analysis always treats that as "not ready" rather than
+     * reading a partial file.
+     *
+     * The returned source only ever reads from disk: its upstream throws if
+     * touched at all, which should never happen once [isFullyCached] is true.
+     * Callers must [MediaDataSource.close] it.
+     */
