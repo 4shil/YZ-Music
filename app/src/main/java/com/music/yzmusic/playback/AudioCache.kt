@@ -775,3 +775,149 @@ object AudioCache {
         if (!analysisHeadsInFlight.add(videoId)) return
         scope.launch {
             try {
+                val total = runCatching { StreamResolver.contentLength(videoId) }.getOrNull() ?: 0L
+                val want = analysisHeadSize(total)
+                if (!clearPartialHead(videoId, want)) return@launch
+                fetch(
+                    cacheKey = videoId,
+                    uri = Uri.parse("yzmusic://watch?v=$videoId"),
+                    position = 0,
+                    length = want,
+                    pinKey = true,
+                )
+                if (total > 0) recordContentLength(videoId, total)
+            } finally {
+                analysisHeadsInFlight.remove(videoId)
+            }
+        }
+    }
+
+    /**
+     * How much of a track to pull for the analyzer, decided once from its real
+     * size.
+     *
+     * This used to start at a megabyte and grow by [HEAD_ESCALATION] on each
+     * later call, which was the wrong shape for a reason this file documents
+     * elsewhere — see [discardRendition]. Each round resolves the stream again,
+     * and YouTube does not promise the same rendition twice. Round one wrote a
+     * megabyte of one encoding; round two skipped what was already cached and
+     * wrote the *remainder of a different one* into the same entry. The result is
+     * a contiguous, correctly sized, complete-looking file that decodes for a few
+     * seconds and then stops at the seam — which is exactly what two tracks were
+     * observed doing, one decoding 14.4s of a 153s container and another 35.5s of
+     * 211.5s, both while the cache called them complete.
+     *
+     * One resolve, one range, one encoding. [StreamResolver] has the length
+     * already, from resolving the stream, so asking first costs nothing.
+     */
+    private fun analysisHeadSize(total: Long): Long =
+        if (total > 0) minOf(total, MAX_ANALYSIS_TRACK_BYTES) else MAX_ANALYSIS_HEAD_BYTES
+
+    /**
+     * Makes sure [videoId]'s entry is either empty or already covers [want]
+     * before anything writes to it.
+     *
+     * A part-filled entry is the seam hazard in [analysisHeadSize] waiting to
+     * happen: whatever is there came from an earlier resolve — a fetch this
+     * session cancelled, or a round from a build that still escalated — and
+     * filling the gap would splice a second encoding onto it. Cheaper to throw
+     * the prefix away and pull one clean copy.
+     *
+     * @return false when the caller should not fetch: either the entry is
+     *   already complete enough, or it is held by a live reader and cannot be
+     *   cleared, in which case writing would create the very seam this avoids.
+     */
+    private fun clearPartialHead(videoId: String, want: Long): Boolean {
+        val held = cache.getCachedBytes(videoId, 0, want)
+        if (held <= 0L) return true
+        if (held >= want) return false
+        return runCatching { cache.removeResource(videoId) }
+            .onSuccess {
+                TrackLog.d(TAG, "cleared partial analysis head for $videoId ($held of $want)", about = videoId)
+            }
+            .onFailure {
+                TrackLog.d(TAG, "partial head for $videoId is in use: ${it.message}", about = videoId)
+            }
+            .isSuccess
+    }
+
+    /**
+     * Writes [videoId]'s real size into its cache metadata, which a bounded
+     * fetch does not.
+     *
+     * Media3 records a resource's length from a response that describes the
+     * whole resource. [requestAnalysisHead] asks for a megabyte, so the response
+     * describes a megabyte, and the entry is left with no length at all — which
+     * is not a cosmetic gap. Everything downstream divides by it: the analyzer
+     * ranks renditions by how much *audio* each holds, so a length of zero makes
+     * a freshly fetched head score zero seconds and lose to any sibling holding
+     * a sliver of an unusable one. That is how a track whose opening had just
+     * been downloaded went on reading as having nothing.
+     *
+     * Cheap because [StreamResolver] has the number already: it was read to
+     * resolve the stream this fetch just pulled from.
+     */
+    private fun recordContentLength(videoId: String, total: Long) {
+        if (ContentMetadata.getContentLength(cache.getContentMetadata(videoId)) > 0) return
+        if (total <= 0) return
+        runCatching {
+            cache.applyContentMetadataMutations(
+                videoId,
+                ContentMetadataMutations().apply { ContentMetadataMutations.setContentLength(this, total) },
+            )
+        }.onFailure { TrackLog.d(TAG, "could not record length for $videoId: ${it.message}", about = videoId) }
+    }
+
+    /**
+     * True once every byte of [uri]'s rendition is on disk.
+     *
+     * Automix's analyzer needs this before it can safely decode a track: a
+     * partially fetched file may not even have a parsable container, and
+     * analysing the head of a track whose tail hasn't arrived would produce a
+     * grid for audio the listener will never reach through that transition.
+     *
+     * Reads the content length Media3 already recorded against this cache key
+     * (from the upstream response, the first time anything read this rendition)
+     * rather than re-deriving it per source type — unlike [cacheWholeOnce],
+     * which only knows how to ask [StreamResolver] for a YouTube videoId's
+     * length, this works for anything that has ever been opened through
+     * [cacheFactory], YouTube or not.
+     */
+    fun isFullyCached(uri: Uri): Boolean {
+        val contentLength = contentLengthOf(uri)
+        if (contentLength <= 0) return false
+        // [Cache.getCachedLength], not [Cache.getCachedBytes]. The latter counts
+        // every cached byte in the span *however it is scattered*, so a
+        // rendition with holes in it — which is the normal result of seeking
+        // around a track while read-ahead fills the rest in behind you — reports
+        // the same total as a complete one. The decoder does not skip holes: it
+        // stops at the first, and the analyzer then reads the entire missing
+        // remainder as trailing silence and places the mix-out anchor there.
+        // That is how a four-minute track came to be analysed as ending at
+        // 61 seconds and transitioned out of at 56. Contiguous-from-zero is what
+        // "fully cached" was always meant to mean.
+        return cachedPrefixBytes(uri) >= contentLength
+    }
+
+    /**
+     * The full size of [uri]'s rendition in bytes, or 0 when it isn't known yet.
+     *
+     * Read from the content metadata Media3 recorded from the upstream response
+     * the first time anything opened this rendition, so it is available well
+     * before the bytes are.
+     */
+    fun contentLengthOf(uri: Uri): Long {
+        if (!::cache.isInitialized) return 0L
+        val key = keyFactory.buildCacheKey(DataSpec(uri))
+        return ContentMetadata.getContentLength(cache.getContentMetadata(key)).coerceAtLeast(0L)
+    }
+
+    /**
+     * How many bytes of [uri]'s rendition are on disk *contiguously from the
+     * start*, which is the only measure a head-only decode can act on: a
+     * rendition holding its last megabyte and nothing else has plenty of cached
+     * bytes and no parsable beginning.
+     *
+     * Zero when the rendition's length isn't known yet, when nothing is cached,
+     * or when the cached region doesn't start at byte 0.
+     */
