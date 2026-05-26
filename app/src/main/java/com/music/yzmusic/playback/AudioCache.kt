@@ -626,3 +626,56 @@ object AudioCache {
 
     /** @return true once every range of [videoId] is on disk. */
     private suspend fun cacheWholeOnce(videoId: String): Boolean {
+        val total = runCatching { StreamResolver.contentLength(videoId) }.getOrNull()
+            ?: return false
+
+        var position = 0L
+        while (position < total) {
+            // Checked per chunk, not just once per pass: a track long enough
+            // to need several chunks can lose the race partway through one,
+            // and a queue change mid-pass is exactly the "the player has it
+            // now" case the guard in [fetchWhole] exists for.
+            if (pendingQueue.firstOrNull() != videoId) return false
+            val length = minOf(CHUNK_BYTES, total - position)
+            if (cache.getCachedBytes(videoId, position, length) < length) {
+                fetch(videoId, position, length)
+                // Written nowhere means the entry is held elsewhere; the rest
+                // of this pass would be just as wasted. See [fetch] for why
+                // this can be true even though the fetch just above returned
+                // without error.
+                if (cache.getCachedBytes(videoId, position, length) < length) return false
+            }
+            position += length
+        }
+        return true
+    }
+
+    /**
+     * Pulls [length] bytes of whatever [uri] names into the cache, under [uri]'s
+     * own key rather than the plain videoId.
+     *
+     * For the opening of a rendition that is about to be swapped in — see
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService]'s audition.
+     * A player preparing a progressive source has to parse the container from
+     * byte zero before it can seek anywhere, and for a FLAC that is not a few
+     * bytes: STREAMINFO, the seek table, the tags and an embedded cover can run
+     * to hundreds of kilobytes. Measured here, the audition itself cached only
+     * `[0, 8192)` before seeking away to the playing position, so the real
+     * player's very first read after the swap — the one nothing can start
+     * without — was a cache miss and a round trip to the CDN, in silence.
+     *
+     * Call it *before* the audition rather than alongside: Media3 locks a cache
+     * entry to one writer, and two writers on the same rendition means one of
+     * them spends the listener's data caching nothing.
+     */
+    /**
+     * What is actually on disk for [uri]'s rendition, as a log line.
+     *
+     * Here because "the audition cached it" is an assumption that has already
+     * been wrong once, and the only place it can be checked is against the
+     * cache itself: a swap that lands on bytes the audition was supposed to
+     * have fetched looks, from the player's side, exactly like one that lands
+     * on bytes it never reached.
+     */
+    fun cachedSummary(uri: Uri): String {
+        val key = keyFactory.buildCacheKey(DataSpec(uri))
