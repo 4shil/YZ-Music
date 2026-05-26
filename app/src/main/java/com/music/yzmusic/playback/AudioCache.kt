@@ -1037,3 +1037,74 @@ object AudioCache {
      * touched at all, which should never happen once [isFullyCached] is true.
      * Callers must [MediaDataSource.close] it.
      */
+    fun mediaDataSource(uri: Uri): MediaDataSource? {
+        if (!isFullyCached(uri)) return null
+        return CacheMediaDataSource(cacheFactory(NoUpstream).createDataSource(), uri)
+    }
+
+    /**
+     * The same reader over a rendition that is still downloading, for Smart
+     * Fade's head-only pass.
+     *
+     * Nothing here truncates explicitly: a read into a region that hasn't
+     * arrived reaches [NoUpstream], which throws, and [CacheMediaDataSource]
+     * turns that into an end-of-stream. So a partially cached rendition presents
+     * itself to [android.media.MediaExtractor] as a short file that stops where
+     * the cache does, which is exactly what a head-only decode wants. Its
+     * declared size is still the real one, so a container whose header describes
+     * the whole track parses normally.
+     *
+     * Callers must check [cachedPrefixBytes] first — this only refuses the case
+     * where the rendition has no beginning on disk at all. Callers must
+     * [MediaDataSource.close] it.
+     */
+    fun headMediaDataSource(uri: Uri): MediaDataSource? {
+        if (cachedPrefixBytes(uri) <= 0L) return null
+        return CacheMediaDataSource(cacheFactory(NoUpstream).createDataSource(), uri)
+    }
+
+    /**
+     * Never fetches. For a fully cached rendition nothing should reach this; for
+     * a partially cached one, throwing is how a read past the cached prefix
+     * becomes an end-of-stream instead of a download.
+     */
+    private object NoUpstream : DataSource.Factory {
+        override fun createDataSource(): DataSource = object : DataSource {
+            override fun addTransferListener(transferListener: TransferListener) {}
+            override fun open(dataSpec: DataSpec): Long =
+                throw IOException("Automix analysis reads only cached bytes; no upstream is wired up")
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                throw IOException("Automix analysis reads only cached bytes; no upstream is wired up")
+            override fun getUri(): Uri? = null
+            override fun close() {}
+        }
+    }
+
+    /**
+     * Adapts a Media3 [DataSource] (reading only from [cache]) to the
+     * [MediaDataSource] interface [android.media.MediaExtractor] wants.
+     *
+     * Keeps the underlying source open across consecutive sequential reads —
+     * the pattern MediaExtractor actually uses — and only reopens at a new
+     * position when the read pattern jumps, e.g. a seek.
+     */
+    private class CacheMediaDataSource(
+        private val dataSource: DataSource,
+        private val uri: Uri,
+    ) : MediaDataSource() {
+        private var isOpen = false
+        private var openPosition = -1L
+
+        override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+            if (size == 0) return 0
+            if (!isOpen || position != openPosition) {
+                closeUpstream()
+                val available = try {
+                    dataSource.open(DataSpec.Builder().setUri(uri).setPosition(position).build())
+                } catch (error: IOException) {
+                    return -1
+                }
+                isOpen = true
+                openPosition = position
+                if (available == 0L) return -1
+            }
