@@ -388,3 +388,126 @@ object AudioCache {
             }
 
             override fun open(dataSpec: DataSpec): Long {
+                val scheme = dataSpec.uri.scheme
+                activeDs = if (scheme == "file" || scheme == "content") {
+                    upstreamDs
+                } else {
+                    cacheDs
+                }
+                return activeDs.open(dataSpec)
+            }
+
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                activeDs.read(buffer, offset, length)
+
+            override fun getUri(): Uri? = activeDs.uri
+
+            override fun close() {
+                activeDs.close()
+            }
+        }
+    }
+
+    private fun cacheFactory(upstream: DataSource.Factory) = CacheDataSource.Factory()
+        .setCache(cache)
+        .setUpstreamDataSourceFactory(upstream)
+        .setCacheKeyFactory(keyFactory)
+        // A cache write that fails (full disk, evicted mid-write) should drop
+        // to streaming, not surface as a playback error.
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+    /**
+     * As [cacheFactory], minus [CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR] —
+     * for [fetch] alone, never for playback.
+     *
+     * That flag exists so a playback read whose *write* fails still serves
+     * the listener their audio; a read-ahead fetch has no listener to serve,
+     * so hiding the same failure just spends their data reading bytes onto
+     * the floor. Measured: read-ahead for a track the player had already
+     * reached — its cache entry locked by the real reader, exactly the "lost
+     * race" [fetchWhole] is meant to give up on cheaply — instead read a
+     * full [CHUNK_BYTES] from the network on every one of [MAX_ATTEMPTS]
+     * retries, because the flag turned the lock exception into a silent,
+     * uncached pass-through rather than the failure [fetch]'s own
+     * `runCatching` is written to catch. Nine megabytes on one ordinary,
+     * unskipped track change, for a fetch that cached nothing and was always
+     * going to. Without the flag, losing the race throws before a byte is
+     * read, and every attempt past the first costs nothing.
+     */
+    private fun readAheadCacheFactory(upstream: DataSource.Factory) = CacheDataSource.Factory()
+        .setCache(cache)
+        .setUpstreamDataSourceFactory(upstream)
+        .setCacheKeyFactory(keyFactory)
+
+    /** Set once the player exists; read-ahead resolves streams the same way. */
+    private var upstreamFactory: DataSource.Factory? = null
+
+    fun setUpstream(factory: DataSource.Factory) {
+        upstreamFactory = factory
+    }
+
+    private var job: Job? = null
+    private var pendingQueue: List<String> = emptyList()
+
+    /**
+     * Gets the queue ahead of the one playing warmed up, in play order.
+     *
+     * The first id gets the full treatment: its opening onto disk first, so
+     * it can start the moment it's reached, then the rest of it, so that
+     * seeking around it is a disk read from the first second it plays. Only
+     * that one track — never the one playing, and never bytes for anything
+     * further out. Media3 locks a cache entry to a single writer and the
+     * player holds that lock for as long as it is streaming the track — a
+     * fetch aimed at the same entry is quietly served from the network and
+     * written nowhere, spending the listener's data to cache precisely
+     * nothing. Caching a track before it is reached gets the same result
+     * without the contention. And full-track bytes for tracks that may never
+     * be reached would spend real mobile data on nothing.
+     *
+     * The next [QUEUE_LOOKAHEAD] ids past that one get a lighter treatment:
+     * just their stream URL resolved and held in [StreamResolver]'s own
+     * cache, not their bytes. That's the gap a fast run of skips actually
+     * falls into — the queue moving faster than a single-track read-ahead can
+     * follow it — and a resolve is cheap enough that warming several at once
+     * costs nothing worth guarding.
+     *
+     * Called freely; a call naming the same queue as the one already running
+     * is left alone, and a different one replaces it outright, since on a run
+     * of skips only wherever the listener actually lands is worth chasing.
+     */
+    fun prefetchQueue(upcoming: List<Upcoming>) {
+        val mediaIds = upcoming.map { it.mediaId }
+        if (mediaIds == pendingQueue) return
+        android.util.Log.d("BCFetchDebug", "prefetchQueue: head ${pendingQueue.firstOrNull()} -> ${mediaIds.firstOrNull()}")
+        pendingQueue = mediaIds
+        job?.cancel()
+        // Both halves of the read-ahead below go through [StreamResolver],
+        // which speaks YouTube ids and nothing else. A source-backed track
+        // handed to it resolves to a failure, so filtering here saves a dead
+        // round trip per queued track rather than changing any outcome —
+        // read-ahead for those is a separate job, and their servers are
+        // typically a good deal closer than googlevideo anyway.
+        //
+        val videoIds = mediaIds.filter { SourceRegistry.parseTrackKey(it) == null }
+            // A track already on disk needs no reading ahead, and read-ahead
+            // speaks only to googlevideo: warming one would spend mobile data
+            // fetching a second copy of a file the listener deliberately saved,
+            // then cache it under a key playback is never going to ask for —
+            // it plays the download instead. See [Song.toMediaItem].
+            .filter { it !in Downloads.saved.value }
+        // With substitution possible, only the *bytes* half drops out. Read-
+        // ahead builds its own spec below from an id alone and carries none of
+        // the title and artist a substitution is matched on — so it resolves
+        // to YouTube and would write Opus bytes into the very entry playback
+        // is about to fill from a higher-ranked source, under the same key, at
+        // whatever offset each of them happened to reach. Reading ahead for a
+        // track and then corrupting it is worse than not reading ahead at all.
+        //
+        // The URL half is a different matter and was thrown out with it, at
+        // real cost. Warming [StreamResolver]'s own cache writes nothing to
+        // disk and cannot corrupt anything, and it is the difference between
+        // the fallback starting instantly and starting with a full client walk
+        // — measured at 7.9s. Since the fallback now races the module lookup
+        // rather than waiting behind it, that walk is what a track waits on
+        // whenever the modules are slow, and warming it here is what makes the
+        // race worth running at all.
