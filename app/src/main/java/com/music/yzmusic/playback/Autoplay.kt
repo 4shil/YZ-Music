@@ -29,3 +29,19 @@ suspend fun youtubeSeedFor(song: Song): String? {
     if (!isLocal && !isModule) return song.videoId
 
     val target = TrackMatcher.targetOf(song)
+    val query = TrackMatcher.queries(target).firstOrNull() ?: return null
+    return YtMusicRepository.search(query, SearchFilter.SONGS)
+        .getOrNull()
+        ?.filterIsInstance<SearchResult.Track>()
+        ?.map { it.song }
+        ?.let { TrackMatcher.best(it, target) }
+        ?.videoId
+}
+
+/**
+ * Loads, de-duplicates and resolves one AutoPlay batch. The playback service is
+ * the only caller for the AutoPlay toggle; the player UI's explicit radio start
+ * uses this same helper for its initial station batch.
+ */
+suspend fun loadAutoplayTracks(
+    existing: List<Song>,
