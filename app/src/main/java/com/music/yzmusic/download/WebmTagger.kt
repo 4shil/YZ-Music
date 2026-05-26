@@ -117,3 +117,13 @@ object WebmTagger {
             // An empty Targets applies the tag to the whole file — there is no
             // track/chapter to single out in a lone-audio-stream download.
             val targets = elem(ID_TARGETS, ByteArray(0))
+            val tagPayload = simple.fold(targets) { acc, s -> acc + s }
+            out += elem(ID_TAGS, elem(ID_TAG, tagPayload))
+        }
+
+        if (cover != null && cover.isNotEmpty()) {
+            val fileName = elem(ID_FILENAME, "cover.jpg".toByteArray(Charsets.UTF_8))
+            val fileMime = elem(ID_FILEMIMETYPE, coverMime.toByteArray(Charsets.US_ASCII))
+            // A fixed id is fine: one attachment, and nothing here needs to
+            // reference it back from a Tag.
+            val fileUid = elem(ID_FILEUID, byteArrayOf(0, 0, 0, 0, 0, 0, 0, 1))
