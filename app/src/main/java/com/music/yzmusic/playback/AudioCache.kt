@@ -241,3 +241,64 @@ object AudioCache {
      */
     fun discard(uri: Uri) {
         val exact = keyFactory.buildCacheKey(DataSpec(uri))
+        val about = mediaIdIn(uri)
+        val family = uri.getQueryParameter("v")?.let { videoId ->
+            cache.keys.filter { it == videoId || it.startsWith("$videoId#") }
+        } ?: emptyList()
+        (family + exact).distinct().forEach { key ->
+            runCatching { cache.removeResource(key) }
+                .onSuccess { TrackLog.d(TAG, "discarded cache entry $key", about = about) }
+                .onFailure { TrackLog.d(TAG, "cache entry $key still in use: ${it.message}", about = about) }
+        }
+    }
+
+    /**
+     * Throws away only the rendition [uri] names, leaving the track's other
+     * entries where they are.
+     *
+     * [discard]'s scorched-earth pass is right when what is on disk cannot be
+     * trusted and there is no telling which entry is at fault. This is for the
+     * case where there is: an upgrade that was fetched and then not used — an
+     * audition that failed to prove itself, a swap the player put back — has
+     * written a prefix of one file under the `#hifi` key and stopped. Left
+     * there, the *next* upgrade of the same track keys to that same `#hifi`
+     * entry, is served the abandoned prefix, and streams a different file into
+     * the middle of it. Taking the whole family instead would throw away the
+     * bytes of the stream still playing, which is the one thing that is
+     * definitely fine.
+     *
+     * Runs on the caller's thread; call it off the main one.
+     */
+    fun discardRendition(uri: Uri) {
+        val key = keyFactory.buildCacheKey(DataSpec(uri))
+        runCatching { cache.removeResource(key) }
+            .onSuccess { TrackLog.d(TAG, "discarded unused rendition $key", about = mediaIdIn(uri)) }
+            .onFailure { TrackLog.d(TAG, "rendition $key still in use: ${it.message}", about = mediaIdIn(uri)) }
+    }
+
+    /**
+     * Throws away one named rendition of [uri] because its bytes cannot be
+     * decoded, so the next attempt starts from a clean copy.
+     *
+     * The analyzer can tell a corrupt file from a merely incomplete one — a
+     * container that reports two and a half minutes and decodes fourteen seconds
+     * is not still downloading — but until this existed, knowing that led
+     * nowhere. It recorded the rendition as bad and moved on, the bytes stayed on
+     * disk looking complete, and every later attempt (including after a restart,
+     * which clears that memory) re-read the same file and reached the same
+     * answer. Two tracks were observed stuck that way permanently.
+     *
+     * Refuses to touch the rendition the player is currently reading from, whose
+     * bytes are by definition fine — the decode that failed was of a *sibling*
+     * copy. [Cache.removeResource] would also throw on the live entry's lock, but
+     * relying on that would mean asking for playback's bytes to be deleted and
+     * being saved by a race.
+     *
+     * Runs on the caller's thread; call it off the main one.
+     *
+     * @return true when the bytes are actually gone, which the caller must treat
+     *   as "stop holding this key against the track" — a copy that no longer
+     *   exists cannot be the reason to refuse the one replacing it.
+     */
+    fun discardBadRendition(uri: Uri, key: String): Boolean {
+        if (!::cache.isInitialized) return false
