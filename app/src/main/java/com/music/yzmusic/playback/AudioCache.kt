@@ -1204,3 +1204,48 @@ object AudioCache {
         // the key splits a track's renditions apart on purpose, and reading
         // ahead is the clearest case there is of work logged nowhere near the
         // track it is for. See [TrackLog.about].
+        val about = mediaIdIn(uri)
+        // Read-ahead is the app's largest consumer of bandwidth and, until this
+        // line existed, its most invisible: whole tracks were pulled down while
+        // a listener waited on a resolve for the track in front of them, and
+        // nothing in the log said so. Bracketing it is what makes the overlap
+        // between "reading ahead" and "waiting for sound" readable at all.
+        val fetchStart = SystemClock.elapsedRealtime()
+        TrackLog.d(TAG, "read-ahead fetching $cacheKey [$position, ${position + length})", about = about)
+
+        val source = readAheadCacheFactory(upstream)
+            .apply { if (pinKey) setCacheKeyFactory { cacheKey } }
+            .createDataSource()
+        val spec = DataSpec.Builder()
+            .setUri(uri)
+            .setPosition(position)
+            .setLength(length)
+            .build()
+        val writer = CacheWriter(source, spec, /* temporaryBuffer = */ null, /* listener = */ null)
+
+        runCatching {
+            withContext(Dispatchers.IO) {
+                // CacheWriter blocks in a read loop and checks this flag between
+                // reads; cancelling the coroutine alone would leave it running.
+                val handle = coroutineContext.job.invokeOnCompletion { writer.cancel() }
+                try {
+                    writer.cache()
+                } finally {
+                    handle.dispose()
+                }
+            }
+        }.onFailure {
+            // Expected on a skip, and never worth failing playback over — see
+            // [readAheadCacheFactory] for why this is now also the ordinary
+            // shape of losing the race to the player.
+            TrackLog.d(TAG, "read-ahead stopped for $cacheKey: ${it.message}", about = about)
+        }.onSuccess {
+            TrackLog.d(
+                TAG,
+                "read-ahead fetched $cacheKey [$position, ${position + length}) in " +
+                    "${SystemClock.elapsedRealtime() - fetchStart}ms",
+                about = about,
+            )
+        }
+    }
+}
