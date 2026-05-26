@@ -45,3 +45,11 @@ suspend fun youtubeSeedFor(song: Song): String? {
  */
 suspend fun loadAutoplayTracks(
     existing: List<Song>,
+    seedSong: Song,
+    limit: Int = MAX_QUEUED_AUTOPLAY,
+    fetchRadio: suspend (String) -> Result<List<Song>> = { YtMusicRepository.radio(it) },
+    resolveAudio: suspend (Song) -> Song = { YtMusicRepository.resolveAudio(it) },
+): Result<List<Song>> {
+    val seed = youtubeSeedFor(seedSong) ?: return Result.success(emptyList())
+    val related = fetchRadio(seed).getOrElse { return Result.failure(it) }
+    val extra = QueueBuilder.extend(existing, related, limit)
