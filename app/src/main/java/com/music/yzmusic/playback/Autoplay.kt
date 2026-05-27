@@ -77,3 +77,8 @@ suspend fun loadAutoplayTracks(
         }
     } catch (cancelled: CancellationException) {
         throw cancelled
+    } catch (failure: Throwable) {
+        return Result.failure(failure)
+    }
+    return Result.success(resolved.map { it.copy(fromAutoplay = true) })
+}
