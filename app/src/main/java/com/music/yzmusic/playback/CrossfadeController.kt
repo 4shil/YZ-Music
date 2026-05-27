@@ -512,3 +512,133 @@ class CrossfadeController(
         val nextIndex = player.nextMediaItemIndex
         if (nextIndex == C.INDEX_UNSET) return
         val nextItem = player.getMediaItemAt(nextIndex)
+        val nextDuration = nextItemDurationMs(nextIndex, nextItem)
+
+        requestAnalysisAround(player, duration)
+
+        // Only used before analysis lands, or when the evidence is too weak
+        // for more than a plain fade (see [TransitionTier.PLAIN_CROSSFADE]):
+        // once real analysis is available, [planTransition] sizes the overlap
+        // itself from tempo and structure and ignores this entirely. Honours
+        // the manual slider if the listener also set one, so the two settings
+        // don't fight; falls back to a fixed length when it's at "Off".
+        val fallbackSeconds = configuredFadeMs().takeIf { it > 0L }
+            ?.div(1000.0)
+            ?: DEFAULT_SMART_FALLBACK_SECONDS
+
+        // Resolved once and reused: [analysisFor] was being called five separate
+        // times per tick below, and the answer cannot change mid-tick.
+        val currentAnalysis = analysisFor(currentItem)
+        val nextAnalysis = analysisFor(nextItem)
+        val analysisState = AppSettings.smartAnalysis.value
+
+        val plan = planTransition(
+            analysis = currentAnalysis,
+            nextAnalysis = nextAnalysis,
+            currentTrack = currentItem.toTransitionInfo(duration),
+            nextTrack = nextItem.toTransitionInfo(nextDuration),
+            currentTime = player.currentPosition / 1000.0,
+            duration = duration / 1000.0,
+            fadeSeconds = fallbackSeconds,
+            mode = CrossfadeMode.SMART,
+        )
+        // One line per distinct verdict rather than one per 250ms tick, so the
+        // log says what the planner decided for this pair without burying it.
+        val verdict = "${plan.reason}|${plan.transitionStyle}|fade=${plan.fadeMs}" +
+            "|cue=${plan.incomingCueTime}|rate=${plan.incomingPlaybackRate}" +
+            "|vocalOverlap=${"%.2f".format(Locale.ROOT, plan.vocalOverlap)}" +
+            "|blocked=${plan.blocked}|policy=${plan.policyReasons.joinToString(",")}"
+        if (verdict != lastPlanVerdict) {
+            lastPlanVerdict = verdict
+            Log.d(
+                TAG,
+                "plan ${currentItem.mediaId}->${nextItem.mediaId}: $verdict " +
+                    "bpm=${currentAnalysis.bpm}/${nextAnalysis.bpm} " +
+                    "conf=${currentAnalysis.beatConfidence}/${nextAnalysis.beatConfidence}",
+            )
+        }
+
+        // Gated on *both* tracks being measured, not on the plan alone. Until
+        // then the planner is still sizing the overlap from a fallback that
+        // moves as evidence lands, and a marker that slides along the bar while
+        // you watch it is worse than none. Cleared during the transition itself
+        // by [driveLap], because from that moment these fractions describe a
+        // track the session player has already left.
+        //
+        // Asymmetric on purpose, because the two sides are read for different
+        // things and a head-only result covers one of them completely.
+        //
+        // Where the window *sits* comes almost entirely from the outgoing track:
+        // its content end, its outro, its mix-out anchors. A provisional result
+        // has none of those — [analyzeHead] drops them deliberately rather than
+        // answering confidently about a track it has only seen the opening of —
+        // so the plan falls back to a plain end-of-track window, and the marker
+        // would sit there and then jump backwards when the whole-track pass
+        // lands. That is the sliding marker this guard exists for, so the
+        // outgoing side still has to be finished.
+        //
+        // The incoming side is the opposite case. All the planner asks of it is
+        // tempo, confidence and where it is safe to cue in — which are exactly
+        // the fields a head pass measures, and it measures them over the same
+        // opening window the whole-track pass would. Refining will sharpen those
+        // numbers but not move them, so holding the marker back for it hid a
+        // window that was already correct. Since the incoming track is now
+        // routinely analysed from its opening long before it plays, that was
+        // most of the time the marker was missing.
+        val markable = !plan.blocked &&
+            plan.markerVisible &&
+            duration > 0L &&
+            analysisState.current == TrackAnalysisState.ANALYSED &&
+            analysisState.next in MEASURED_ENOUGH_TO_ENTER_ON
+        AppSettings.smartTransitionWindow.value = if (markable) {
+            TransitionWindow(
+                start = (plan.transitionStart * 1000.0 / duration).toFloat().coerceIn(0f, 1f),
+                end = (plan.transitionEnd * 1000.0 / duration).toFloat().coerceIn(0f, 1f),
+            )
+        } else {
+            null
+        }
+
+        if (plan.blocked) return
+
+        val fade = plan.fadeMs
+        if (fade <= 0L) return
+
+        val transitionStartMs = (plan.transitionStart * 1000).roundToLong()
+        val remaining = transitionStartMs - player.currentPosition
+        // Same arm-ahead margin as the standard path, just measured against
+        // the plan's own start rather than a fixed offset from track end —
+        // an analyzed mix-out anchor can place that start well before the
+        // file actually ends.
+        if (remaining > ARM_LEAD_MS) return
+
+        begin(
+            fade,
+            endMs = (plan.transitionEnd * 1000).roundToLong(),
+            smart = true,
+            cueTimeMs = (plan.incomingCueTime * 1000).roundToLong(),
+            playbackRate = plan.incomingPlaybackRate,
+            renderStyle = Render(
+                style = plan.transitionStyle,
+                bassSwap = plan.bassSwap,
+                bassSwapFraction = plan.bassSwapFraction,
+                filterSweep = plan.filterSweep,
+                vocalOverlap = plan.vocalOverlap,
+            ),
+        )
+    }
+
+    /**
+     * Queues the playing track and the one queued after it for analysis.
+     *
+     * Cheap no-ops once a track is analysed or already in flight; called every
+     * tick so a track that finishes caching mid-song is picked up without a
+     * separate trigger.
+     *
+     * Not folded into [considerSmartTransition], because the pair still needs
+     * measuring in the one case that never plans a transition at all: a track
+     * on repeat-one, which will hand over to this same next track as soon as
+     * the loop is switched off.
+     */
+    private fun requestAnalysisAround(player: ExoPlayer, duration: Long) {
+        val currentItem = player.currentMediaItem ?: return
