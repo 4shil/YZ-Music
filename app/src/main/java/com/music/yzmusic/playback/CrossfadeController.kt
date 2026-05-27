@@ -1286,3 +1286,353 @@ class CrossfadeController(
      * half, where it is already quiet enough that the change reads as it
      * receding rather than as an effect.
      */
+    private fun rideBassSwap(progress: Float) {
+        val swapAt = render.bassSwapFraction.coerceIn(0.05, 0.95)
+        // 0 before the swap window, 1 after it: how much of the low end has
+        // changed hands.
+        val handover = ((progress - swapAt) / BASS_SWAP_WIDTH * 0.5 + 0.5).coerceIn(0.0, 1.0)
+        // The incoming track's own low end is already being held out by the
+        // swap, so whichever corner sits higher is the one doing the work.
+        // Scaled up by however much the two are actually singing over each other.
+        // A blend is chosen for pairs on a shared grid, which is the case where
+        // nothing about the arrangement separates two lead vocals — they sit in
+        // the same bar and the same range for the whole overlap — so the fixed
+        // corner that was here handled a marginal collision and a head-on one
+        // identically. At full collision the entry corner reaches
+        // [BLEND_ENTRY_CLASH_HIGH_PASS_HZ] and holds longer.
+        val clash = render.vocalOverlap.coerceIn(0.0, 1.0)
+        val entry = maxOf(
+            bassCutoff(1.0 - handover),
+            entryHighPass(
+                progress,
+                1.0,
+                glide(BLEND_ENTRY_HIGH_PASS_HZ, BLEND_ENTRY_CLASH_HIGH_PASS_HZ, clash),
+                BLEND_ENTRY_OPEN_BY + (BLEND_ENTRY_CLASH_OPEN_BY - BLEND_ENTRY_OPEN_BY) * clash,
+            ),
+        )
+        filters.incoming(TransitionFilterProcessor.OPEN_HZ, entry)
+        filters.outgoing(blendExitLowPass(progress, clash), bassCutoff(handover))
+    }
+
+    /**
+     * The outgoing track's low-pass through a beat-matched blend: open until
+     * [BLEND_EXIT_FROM], then closing to [BLEND_EXIT_LOW_PASS_HZ] by the end.
+     *
+     * Deliberately shallow. Enough to take the air and the sibilance off a voice
+     * that is on its way out, so it stops competing with the one arriving;
+     * nowhere near the [FILTER_FLOOR_HZ] that [rideFilterSweep] drives to, which
+     * would contradict the reason this style was chosen.
+     *
+     * [clash] both starts it earlier and takes it further, because "shallow" is
+     * the right default and the wrong answer for two choruses landing together.
+     */
+    private fun blendExitLowPass(progress: Float, clash: Double): Float {
+        val from = BLEND_EXIT_FROM + (BLEND_EXIT_CLASH_FROM - BLEND_EXIT_FROM) * clash
+        val amount = ((progress - from) / (1.0 - from)).coerceIn(0.0, 1.0)
+        val floor = glide(BLEND_EXIT_LOW_PASS_HZ, BLEND_EXIT_CLASH_LOW_PASS_HZ, clash)
+        return glide(TransitionFilterProcessor.OPEN_HZ.toDouble(), floor, amount).toFloat()
+    }
+
+    /** [amount] 0 leaves the low end alone; 1 lifts it out entirely. */
+    private fun bassCutoff(amount: Double): Float =
+        glide(TransitionFilterProcessor.OFF_HZ.toDouble(), BASS_SWAP_HZ, amount).toFloat()
+
+    /**
+     * Whether the transition in flight is doing something a plain crossfade
+     * could not — which is what [AppSettings.smartMixInProgress] promises the
+     * listener when it lights the scrubber up.
+     *
+     * Any one of three things qualifies, because they are the three things
+     * analysis buys: a style that filters or swaps bass, an incoming track cued
+     * into its arrangement instead of its first frame, or a tempo stretch. The
+     * case this exists to exclude is the fallback — an unanalysed pair, cued at
+     * 0:00, fading equal-power — which is indistinguishable from what the app
+     * did before Automix existed and would be a lie to advertise.
+     */
+    private fun isRealMix(): Boolean = smartFadeActive && (
+        render.style == TransitionStyle.DJ_BLEND ||
+            render.style == TransitionStyle.DJ_FILTER ||
+            incomingCueTimeMs > 0L ||
+            incomingPlaybackRate != 1.0
+        )
+
+    /** Equal-power pair: [riseGain]² + [fallGain]² = 1, so the blend never dips. */
+    private fun riseGain(progress: Float): Float =
+        sin(progress.coerceIn(0f, 1f) * PI.toFloat() / 2f)
+
+    private fun fallGain(progress: Float): Float =
+        cos(progress.coerceIn(0f, 1f) * PI.toFloat() / 2f)
+
+    // There is deliberately no second, equal-gain pair here any more. It existed
+    // for the handoff of a track from one player to the other, where the two
+    // signals were the same signal and so summed in amplitude rather than in
+    // power. Nothing in this class renders the same audio twice now, so every
+    // gain it applies is a gain against a genuinely different track, and
+    // equal-power is right everywhere.
+
+    private companion object {
+        const val TAG = "YZMusicCrossfade"
+
+        /**
+         * Used only before a pair has been analysed, or when the evidence is
+         * too weak for more than a plain fade — see [considerSmartTransition].
+         * Once real analysis lands, the overlap is sized from tempo and
+         * structure instead and this is never read.
+         */
+        const val DEFAULT_SMART_FALLBACK_SECONDS = 6.0
+
+        /** Ramp used when a fade is interrupted. */
+        const val BAIL_MS = 120L
+
+        /**
+         * Head start the standby gets to open the incoming track and buffer to
+         * its cue point.
+         *
+         * Sized for a *stream being opened*, which is the only thing arming
+         * waits on now — there is no alignment to converge. Usually instant, as
+         * the next track has normally been read ahead onto disk by the time it
+         * matters, but a cold one has to be resolved and fetched, and a
+         * transition that arrives before its incoming track is ready is one that
+         * gets dropped.
+         */
+        const val ARM_LEAD_MS = 4_000L
+
+        /**
+         * States in which a track is measured well enough to be *entered* on.
+         *
+         * [TrackAnalysisState.REFINING] belongs here because the entry fields —
+         * tempo, beat confidence, the cue point — are all measured over the
+         * track's opening, which is precisely what a head-only pass reads. The
+         * whole-track pass it is waiting on adds the *exit* half: content end,
+         * outro, mix-out anchors, the energy curve. Those matter when this track
+         * is later the one being left, and not at all for the transition into it.
+         */
+        val MEASURED_ENOUGH_TO_ENTER_ON = setOf(
+            TrackAnalysisState.ANALYSED,
+            TrackAnalysisState.REFINING,
+        )
+
+        /**
+         * Longest a transition will wait on an incoming track that will not
+         * become ready. Past this the queue is left to move on plainly, which is
+         * a missed crossfade rather than a broken one.
+         */
+        const val ARM_TIMEOUT_MS = 12_000L
+
+        /**
+         * Where the outgoing low-pass sits the instant a filter ride begins.
+         *
+         * The ride used to start from [TransitionFilterProcessor.OPEN_HZ] and
+         * travel down, which meant the first stretch of every transition was
+         * spent crossing a range nobody can hear a filter in: a tenth of the way
+         * through the fade the cutoff was still at 17.5kHz, indistinguishable
+         * from no filter at all, and the ride only became audible around the
+         * midpoint. Engaging here instead — above the fundamentals of everything
+         * but cymbals, so what goes first is air and shimmer — is what makes the
+         * gesture read as a hand landing on the filter the moment the blend
+         * starts, rather than something remembered late.
+         *
+         * 9kHz was the first attempt at that and still read as late by ear: it
+         * is above everything but cymbals, so engaging there takes the air off
+         * and nothing else, and the outgoing vocal — the thing actually clashing
+         * — was untouched until the sweep had travelled most of the way down.
+         * 7kHz is inside the presence range, so the gesture is audible on the
+         * voice itself from the first instant.
+         */
+        const val FILTER_ENTRY_HZ = 7_000.0
+
+        /**
+         * The bottom of a filter ride. Below a few hundred hertz a track stops
+         * reading as "further away" and starts reading as "broken", which is not
+         * the impression a transition should leave of the song being left.
+         */
+        const val FILTER_FLOOR_HZ = 300.0
+
+        /**
+         * Where the low end is considered to end. Around the fundamental of a
+         * bass guitar's upper register, and the usual corner on a mixer's bass
+         * kill — high enough to clear the kick and the sub, low enough to leave
+         * the body of the vocal alone.
+         */
+        const val BASS_SWAP_HZ = 200.0
+
+        /** How much of the fade the low end takes to change hands. */
+        const val BASS_SWAP_WIDTH = 0.10
+
+        /**
+         * Shape of the outgoing low-pass against fade progress, between
+         * [FILTER_ENTRY_HZ] and [FILTER_FLOOR_HZ].
+         *
+         * Was 2.0 — squared — which left the cutoff at 6.9kHz at the midpoint,
+         * so the outgoing vocal went untouched through the whole first half of
+         * every transition. Then 1.3, which was still back-loaded: the exponent
+         * held the cutoff near its entry point through the opening of the fade,
+         * which is precisely where the two vocals overlap at comparable level.
+         *
+         * Below 1 now, so the ride is front-loaded — steepest at the start,
+         * flattening as it approaches the floor. That is the shape of the gesture
+         * being imitated: a hand moves a filter knob fast and then eases it in,
+         * not the reverse. The old worry that a fast cutoff takes the outgoing
+         * track out prematurely is answered by [FILTER_FLOOR_HZ] rather than by
+         * the exponent — the ride bottoms out at 300Hz, which is still a present
+         * bed under the incoming track, not silence.
+         *
+         * Crosses 5kHz — about where a low-pass becomes plainly audible on a
+         * full-range mix — a twentieth of the way into the fade, against a
+         * quarter of the way at 1.3. Lands at 3.8kHz a tenth of the way in,
+         * 2.6kHz at a fifth, 1.0kHz at the midpoint.
+         */
+        const val FILTER_SWEEP_SHAPE = 0.75
+
+        /**
+         * Where the incoming track's high-pass starts on a filter ride.
+         *
+         * Above the fundamental range of most voices and the body of a snare, so
+         * what arrives first is presence and percussion — enough to hear a track
+         * coming and lock onto its groove, not enough for a second lead vocal.
+         *
+         * 700Hz was that corner while the outgoing sweep was gentler. It no longer
+         * is: the sweep engages at [FILTER_ENTRY_HZ] and is down to 4kHz a tenth
+         * of the way in, so a 700Hz entry left the two tracks sharing very nearly
+         * three octaves — and sharing them from 529Hz up, which is exactly where a
+         * lead vocal's fundamentals sit. 1.2kHz takes about an octave off the
+         * bottom of that shared band, and it is the octave the collision actually
+         * happens in. What is left of the outgoing track then sits *under* the
+         * arriving one rather than inside it, which is what makes the incoming
+         * track read as a layer landing on top of a darkening one instead of a
+         * second voice in the same space.
+         */
+        const val ENTRY_HIGH_PASS_HZ = 1_200.0
+
+        /**
+         * How far into the fade the incoming track is fully open again.
+         *
+         * Comfortably before the end: past this point the outgoing track is deep
+         * into its own sweep and quiet with it, so there is nothing left to keep
+         * out of the way of, and anything still filtered here would just be the
+         * new track arriving wrong.
+         */
+        const val ENTRY_OPEN_BY = 0.6
+
+        /**
+         * Shape of the incoming high-pass's descent; see [entryHighPass].
+         *
+         * Below 1 so the corner lingers in the range a voice occupies instead of
+         * dropping straight through it into sub-bass, where a high-pass is
+         * inaudible and the clash this exists to prevent is already back.
+         *
+         * 0.35 rather than 0.45 for more of the same, and the effect compounds
+         * across the overlap rather than being a flat offset: on a filter ride the
+         * corner sits a fourteenth higher a tenth of the way in, a quarter higher
+         * at three tenths, a third higher at four. So the hold is back-loaded into
+         * the middle of the blend — where both tracks are near equal gain and the
+         * collision is at its worst — and what gets given up in exchange is the
+         * bottom of the descent, which is a few hundred hertz of sub-bass nobody
+         * hears a high-pass leave. The release into the last of [ENTRY_OPEN_BY] is
+         * correspondingly more of an event, which is the point: the arriving track
+         * opening out is the moment the listener is meant to notice.
+         */
+        const val ENTRY_SHAPE = 0.35
+
+        /**
+         * How far [rideVocalSeparation] closes the outgoing track's top at a
+         * full collision.
+         *
+         * Well above [FILTER_FLOOR_HZ]'s 300Hz, because this fires on pairs that
+         * were going to be crossfaded plainly and the intent is to stop two
+         * voices competing, not to send one of them into another room. 1.6kHz is
+         * below the presence and sibilance a lead vocal is picked out by, and
+         * above enough of its body that the track still reads as itself.
+         */
+        const val VOCAL_SEPARATION_FLOOR_HZ = 1_600.0
+
+        /**
+         * Where the incoming track's high-pass starts in [rideVocalSeparation].
+         *
+         * Lower than [ENTRY_HIGH_PASS_HZ]'s 1.2kHz, for the same reason the floor
+         * is higher: on a plain crossfade the arriving track has no filter
+         * gesture to explain itself with, so it has to sound like it fades in
+         * normally. 700Hz clears the body of a voice while leaving its lower
+         * harmonics, which is enough to stop it fighting the outgoing lead.
+         *
+         * Was 450Hz, which fit that description on paper and was mostly inaudible
+         * in practice: a fifth of the way in it was already down to 268Hz, doing
+         * nothing about a collision the vocal model had reported at full strength.
+         * 700Hz is the corner a filter ride itself used to open at, so it is a
+         * known-restrained one rather than a new guess — and keeping this style a
+         * clear step below that one leaves the two ranked the way their tiers are.
+         */
+        const val VOCAL_SEPARATION_HIGH_PASS_HZ = 700.0
+
+        /**
+         * [ENTRY_HIGH_PASS_HZ]'s counterpart for a beat-matched blend: lower, and
+         * briefer.
+         *
+         * Was 320Hz, which the bass swap almost entirely swallowed. The incoming
+         * track is already high-passed at [BASS_SWAP_HZ] until the low end changes
+         * hands and [rideBassSwap] takes whichever corner is higher, so a 320Hz
+         * entry was only above that floor for the first sixth of the blend, and
+         * only ever by a little. 520Hz gives the arriving track an entry gesture
+         * that outlives the bass kill — clear of it until nearly three tenths in —
+         * rather than one hiding inside it.
+         */
+        const val BLEND_ENTRY_HIGH_PASS_HZ = 520.0
+
+        /** [ENTRY_OPEN_BY]'s counterpart for a beat-matched blend. */
+        const val BLEND_ENTRY_OPEN_BY = 0.45
+
+        /**
+         * Where [BLEND_ENTRY_HIGH_PASS_HZ] and [BLEND_ENTRY_OPEN_BY] go at a full
+         * vocal collision: a corner high enough to hold the arriving voice's body
+         * out, held for most of the blend rather than a third of it.
+         *
+         * Still short of [ENTRY_HIGH_PASS_HZ]'s filter-ride treatment. The two
+         * tracks are on a shared grid and meant to sound simultaneous; the aim is
+         * to stop the two leads occupying one band, not to hide either of them.
+         *
+         * Tracks [BLEND_ENTRY_HIGH_PASS_HZ] upward — 620Hz to 950Hz — so how hard
+         * the two are singing over each other stays the thing that separates a
+         * marginal collision from a head-on one, rather than both converging on
+         * whatever the bass kill was already doing.
+         */
+        const val BLEND_ENTRY_CLASH_HIGH_PASS_HZ = 950.0
+        const val BLEND_ENTRY_CLASH_OPEN_BY = 0.7
+
+        /** Where [BLEND_EXIT_FROM] and [BLEND_EXIT_LOW_PASS_HZ] go at a full collision. */
+        const val BLEND_EXIT_CLASH_FROM = 0.12
+        const val BLEND_EXIT_CLASH_LOW_PASS_HZ = 1_100.0
+
+        /**
+         * Where the outgoing track starts losing its top on a beat-matched
+         * blend.
+         *
+         * Was 0.5, which left the outgoing track completely unfiltered for the
+         * whole first half — the same "remembered late" complaint that
+         * [FILTER_ENTRY_HZ] answers on a filter ride, in the one style where
+         * both tracks are at their most similar and so most likely to clash.
+         * Brought forward rather than to zero: a beat-matched blend is chosen
+         * because the two tracks are meant to sound simultaneous, and opening
+         * with the outgoing one already darkened would defeat that.
+         */
+        const val BLEND_EXIT_FROM = 0.3
+
+        /**
+         * Where that low-pass lands by the end of the blend. High enough that the
+         * track is still plainly itself — this style is chosen for pairs meant to
+         * sound simultaneous — and low enough to take the sibilance off a voice
+         * that is leaving.
+         */
+        const val BLEND_EXIT_LOW_PASS_HZ = 2_200.0
+
+        const val IDLE_STEP_MS = 250L
+
+        /**
+         * Arming only waits on a buffer now — nothing is being converged — so
+         * this is about how promptly the fade can start once the incoming track
+         * is ready, not about a control loop's step size.
+         */
+        const val ARM_STEP_MS = 40L
+        const val FADE_STEP_MS = 30L
+        const val BAIL_STEP_MS = 15L
+    }
+}
