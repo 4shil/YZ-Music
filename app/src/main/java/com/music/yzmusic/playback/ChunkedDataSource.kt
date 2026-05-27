@@ -143,3 +143,28 @@ class ChunkedDataSource(
         }
     }
 
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        if (passthrough) return upstream.read(buffer, offset, length)
+        if (bytesRemaining == 0L) return C.RESULT_END_OF_INPUT
+
+        // A range that ends early is re-opened for the part that didn't
+        // arrive, which is also how the step to the next range happens. The
+        // attempt limit is what stops a server that has decided to send
+        // nothing from spinning here forever.
+        repeat(MAX_EMPTY_RANGES) {
+            if (chunkRemaining == 0L) {
+                closeChunk()
+                openChunk()
+            }
+            val read = upstream.read(buffer, offset, minOf(length.toLong(), chunkRemaining).toInt())
+            if (read != C.RESULT_END_OF_INPUT) {
+                position += read
+                chunkRemaining -= read
+                bytesRemaining -= read
+                return read
+            }
+            chunkRemaining = 0L
+        }
+        return C.RESULT_END_OF_INPUT
+    }
+
