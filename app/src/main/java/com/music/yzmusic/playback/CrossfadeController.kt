@@ -741,3 +741,88 @@ class CrossfadeController(
     }
 
     /** YZ Music doesn't carry album metadata on [MediaMetadata] yet, so [TransitionTrackInfo.album] stays blank. */
+    private fun MediaItem.toTransitionInfo(durationMs: Long) = TransitionTrackInfo(
+        id = mediaId,
+        durationMs = durationMs,
+        title = mediaMetadata.title?.toString().orEmpty(),
+        artist = mediaMetadata.artist?.toString().orEmpty(),
+    )
+
+    /**
+     * Loads the standby player with the queue, positioned on the incoming track
+     * at the plan's cue point, and leaves it buffering there silently.
+     *
+     * Nothing is committed here. The standby is a scratch player until
+     * [startFade] runs, so a queue edit, a skip or a pause arriving during
+     * arming costs nothing but the decoder it was holding.
+     *
+     * The cue point is reached by *starting there* rather than by seeking:
+     * `setMediaItems` takes the position the item is to begin at, so the
+     * incoming track opens at its analyzed mix-in point with no seek, no
+     * discontinuity and no frame-rounding. Same for the beatmatch stretch, which
+     * is applied before a note has been rendered rather than being switched on
+     * underneath one already playing.
+     */
+    private fun begin(
+        fade: Long,
+        endMs: Long,
+        smart: Boolean,
+        cueTimeMs: Long = 0L,
+        playbackRate: Double = 1.0,
+        renderStyle: Render = Render(),
+    ): Boolean {
+        val out = active()
+        val into = standby()
+        if (out === into) return false
+        val nextIndex = out.nextMediaItemIndex
+        if (nextIndex == C.INDEX_UNSET) return false
+
+        fadeMs = fade
+        fadeEndMs = endMs
+        smartFadeActive = smart
+        incomingCueTimeMs = cueTimeMs.coerceAtLeast(0L)
+        incomingPlaybackRate = playbackRate
+        render = renderStyle
+        armDeadline = SystemClock.elapsedRealtime() + ARM_TIMEOUT_MS
+        handedOff = false
+        outgoing = out
+        incoming = into
+
+        val items = (0 until out.mediaItemCount).map { out.getMediaItemAt(it) }
+        queuedItemCount = items.size
+
+        Log.d(
+            TAG,
+            "arm ${if (smart) "smart" else "standard"} fade=${fade}ms end=${endMs}ms " +
+                "cue=${incomingCueTimeMs}ms rate=$incomingPlaybackRate at=${out.currentPosition}ms " +
+                "style=${render.style} bassSwap=${render.bassSwap}@${render.bassSwapFraction} " +
+                "sweep=${render.filterSweep}",
+        )
+
+        // Carried across so the incoming track inherits the listener's own
+        // settings rather than whatever the standby was left on last time.
+        into.skipSilenceEnabled = out.skipSilenceEnabled
+        into.repeatMode = out.repeatMode
+        into.shuffleModeEnabled = out.shuffleModeEnabled
+        // Stacks on top of the listener's speed control rather than replacing
+        // it, so a beatmatched transition and "play everything at 1.25x" don't
+        // fight each other. Undone in [finish].
+        into.setPlaybackSpeed((AppSettings.playbackSpeed.value * incomingPlaybackRate).toFloat())
+        into.volume = 0f
+        into.setMediaItems(items, nextIndex, incomingCueTimeMs)
+        // Buffers without sounding. Started for real in [startFade].
+        into.playWhenReady = false
+        into.prepare()
+
+        phase = Phase.ARMING
+        return true
+    }
+
+    /**
+     * Waits for the standby to have the incoming track ready at its cue point,
+     * and for the outgoing track to reach the fade.
+     *
+     * There is nothing to align here — the two players hold different songs — so
+     * this is only ever waiting on a buffer.
+     */
+    private fun driveArming() {
