@@ -642,3 +642,21 @@ class CrossfadeController(
      */
     private fun requestAnalysisAround(player: ExoPlayer, duration: Long) {
         val currentItem = player.currentMediaItem ?: return
+        val nextIndex = player.nextMediaItemIndex
+        if (nextIndex == C.INDEX_UNSET) return
+        val nextItem = player.getMediaItemAt(nextIndex)
+        requestAnalysis(currentItem, duration)
+        requestAnalysis(nextItem, nextItemDurationMs(nextIndex, nextItem))
+    }
+
+    /**
+     * Keeps the stats line describing the pair that is actually playing.
+     *
+     * Cheap enough to run unconditionally — two concurrent-map lookups and a
+     * set membership test — and running it unconditionally is the point: any
+     * gating reintroduces the staleness this exists to remove.
+     */
+    private fun publishAnalysisState() {
+        val player = active()
+        val currentItem = player.currentMediaItem
+        val nextIndex = player.nextMediaItemIndex
