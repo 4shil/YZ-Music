@@ -66,3 +66,5 @@ class DynamicLruCacheEvictor(
     private var currentSize = 0L
 
     /** A span is a head if it starts at the very beginning, or within [headBytes] of it. */
+    private fun isHead(span: CacheSpan): Boolean = span.position < headBytes
+
