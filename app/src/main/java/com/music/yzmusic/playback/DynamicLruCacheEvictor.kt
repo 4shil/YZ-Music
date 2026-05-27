@@ -137,3 +137,13 @@ class DynamicLruCacheEvictor(
          */
         const val DEFAULT_HEAD_BUDGET_BYTES = 96L * 1024 * 1024
 
+        fun compare(lhs: CacheSpan, rhs: CacheSpan): Int {
+            val delta = lhs.lastTouchTimestamp - rhs.lastTouchTimestamp
+            return when {
+                delta == 0L -> lhs.compareTo(rhs)
+                delta < 0L -> -1
+                else -> 1
+            }
+        }
+    }
+}
