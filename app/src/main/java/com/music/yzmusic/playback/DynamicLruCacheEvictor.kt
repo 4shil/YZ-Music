@@ -98,3 +98,25 @@ class DynamicLruCacheEvictor(
         currentSize -= span.length
     }
 
+    override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) {
+        onSpanRemoved(cache, oldSpan)
+        onSpanAdded(cache, newSpan)
+    }
+
+    /**
+     * Reclaims space right away when [maxBytes] drops, rather than waiting for
+     * the next write to notice — otherwise a lowered limit only takes effect
+     * whenever the listener next happens to play something.
+     */
+    fun applyNow(cache: Cache) = evictCache(cache, 0)
+
+    private fun evictCache(cache: Cache, requiredSpace: Long) {
+        while (currentSize + requiredSpace > maxBytes) {
+            if (leastRecentlyUsed.isNotEmpty()) {
+                cache.removeSpan(leastRecentlyUsed.first())
+                continue
+            }
+            // Nothing left but protected heads. Releasing the oldest back to
+            // ordinary LRU is what stops the exemption from becoming a way to
+            // wedge the cache above its own ceiling: the loop then evicts it on
+            // the next pass like any other span.
