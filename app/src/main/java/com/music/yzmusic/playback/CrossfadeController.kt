@@ -948,3 +948,30 @@ class CrossfadeController(
         // end of an 8-second fade — finishing the blend on its first tick and
         // landing as an abrupt cut, which is precisely the failure a cued
         // transition is supposed to avoid.
+        val remainingIncoming = player.duration
+            .takeIf { it != C.TIME_UNSET && it > 0L }
+            ?.minus(incomingCueTimeMs)
+            ?.coerceAtLeast(0L)
+        val incomingCap = remainingIncoming?.div(3) ?: Long.MAX_VALUE
+        val span = minOf(fadeMs, incomingCap).coerceAtLeast(1L)
+        val elapsed = (player.currentPosition - incomingCueTimeMs).coerceAtLeast(0L)
+        val progress = (elapsed.toFloat() / span).coerceIn(0f, 1f)
+
+        player.volume = riseGain(progress)
+        out.volume = fallGain(progress)
+        // Only from here, never during ARMING: the standby is silent until the
+        // handoff, and [filters] describes the split between the track arriving
+        // and the track leaving, which only exists once both are audible.
+        rideFilters(progress)
+
+        // Whichever comes first: the fade running its course, the old track
+        // genuinely ending, the tail failing outright, or whichever setting
+        // armed this fade being switched off mid-blend. Checked against the
+        // setting that actually started it — a Automix normally runs with
+        // [configuredFadeMs] at zero, and reading that as "turned off" would
+        // end every Automix on its first tick.
+        val settingSwitchedOff = if (smartFadeActive) {
+            !AppSettings.smartFadeEnabled.value
+        } else {
+            configuredFadeMs() <= 0L
+        }
