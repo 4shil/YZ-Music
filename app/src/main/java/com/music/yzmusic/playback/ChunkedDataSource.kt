@@ -69,3 +69,34 @@ class ChunkedDataSource(
         baseSpec = dataSpec
         position = dataSpec.position
 
+        val total = dataSpec.uri.getQueryParameter("clen")?.toLongOrNull()
+        if (dataSpec.length != C.LENGTH_UNSET.toLong() || total == null) {
+            passthrough = true
+            chunkOpen = true
+            // Reported, not just thrown. Nothing but googlevideo carries `clen`,
+            // so every module stream comes through this branch — and this was
+            // the one open in the app whose refusal was neither logged nor
+            // handed anywhere. A dead Tidal URL surfaced as a bare
+            // ExoPlaybackException with not one line naming the server that
+            // produced it or the status it produced.
+            try {
+                return upstream.open(dataSpec)
+            } catch (e: Exception) {
+                if (e !is InterruptedIOException) {
+                    // `host` is null exactly when the URL was too broken to
+                    // parse, which is the case most in need of naming — so fall
+                    // back to the string itself rather than logging "null".
+                    val who = dataSpec.uri.host ?: dataSpec.uri.toString().take(120)
+                    TrackLog.w(TAG, "$who refused the stream: ${e.message}")
+                    report(dataSpec, e)
+                }
+                throw e
+            }
+        }
+
+        passthrough = false
+        bytesRemaining = (total - position).coerceAtLeast(0L)
+        if (bytesRemaining > 0) openChunk()
+        return bytesRemaining
+    }
+
