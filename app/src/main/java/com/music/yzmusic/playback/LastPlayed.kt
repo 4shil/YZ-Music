@@ -59,3 +59,28 @@ object LastPlayed {
             .apply()
     }
 
+    fun load(): Snapshot? {
+        val raw = prefs.getString(KEY_QUEUE, null) ?: return null
+        val stored = runCatching { json.decodeFromString<StoredQueue>(raw) }.getOrNull() ?: return null
+        if (stored.tracks.isEmpty()) return null
+        return Snapshot(
+            songs = stored.tracks.map {
+                Song(
+                    it.id,
+                    it.title,
+                    it.artist,
+                    it.artwork,
+                    durationText = it.duration,
+                    fromAutoplay = it.auto,
+                    localUri = it.local,
+                    localPath = it.path,
+                )
+            },
+            index = stored.index.coerceIn(0, stored.tracks.lastIndex),
+            positionMs = stored.positionMs.coerceAtLeast(0L),
+        )
+    }
+
+    @Serializable
+    private data class StoredTrack(
+        val id: String,
