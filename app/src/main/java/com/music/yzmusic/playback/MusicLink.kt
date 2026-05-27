@@ -59,3 +59,6 @@ object MusicLink {
     private val _pending = MutableStateFlow<LinkRequest?>(null)
 
     /** The outstanding request, or null. Cleared by [handled]. */
+    val pending: StateFlow<LinkRequest?> = _pending.asStateFlow()
+
+    /** Reads an incoming intent, and reports whether it carried a request. */
