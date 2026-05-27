@@ -948,3 +948,130 @@ class CrossfadeController(
         // end of an 8-second fade — finishing the blend on its first tick and
         // landing as an abrupt cut, which is precisely the failure a cued
         // transition is supposed to avoid.
+        val remainingIncoming = player.duration
+            .takeIf { it != C.TIME_UNSET && it > 0L }
+            ?.minus(incomingCueTimeMs)
+            ?.coerceAtLeast(0L)
+        val incomingCap = remainingIncoming?.div(3) ?: Long.MAX_VALUE
+        val span = minOf(fadeMs, incomingCap).coerceAtLeast(1L)
+        val elapsed = (player.currentPosition - incomingCueTimeMs).coerceAtLeast(0L)
+        val progress = (elapsed.toFloat() / span).coerceIn(0f, 1f)
+
+        player.volume = riseGain(progress)
+        out.volume = fallGain(progress)
+        // Only from here, never during ARMING: the standby is silent until the
+        // handoff, and [filters] describes the split between the track arriving
+        // and the track leaving, which only exists once both are audible.
+        rideFilters(progress)
+
+        // Whichever comes first: the fade running its course, the old track
+        // genuinely ending, the tail failing outright, or whichever setting
+        // armed this fade being switched off mid-blend. Checked against the
+        // setting that actually started it — a Automix normally runs with
+        // [configuredFadeMs] at zero, and reading that as "turned off" would
+        // end every Automix on its first tick.
+        val settingSwitchedOff = if (smartFadeActive) {
+            !AppSettings.smartFadeEnabled.value
+        } else {
+            configuredFadeMs() <= 0L
+        }
+        val done = progress >= 1f ||
+            out.playbackState == Player.STATE_ENDED ||
+            out.playbackState == Player.STATE_IDLE ||
+            settingSwitchedOff
+        if (done) finish()
+    }
+
+    /** Ramps the outgoing track away rather than cutting it, so an interruption has no click in it. */
+    private fun driveBail() {
+        val out = outgoing
+        if (out == null) {
+            finish()
+            return
+        }
+        val progress = (SystemClock.elapsedRealtime() - bailStartedAt).toFloat() / BAIL_MS
+        if (progress < 1f) {
+            out.volume = bailFromGain * fallGain(progress)
+            return
+        }
+        finish()
+    }
+
+    // ---- Lifecycle of a transition -----------------------------------------
+
+    /**
+     * Abandons whatever is in flight.
+     *
+     * What has to be put back depends entirely on whether [startFade] got as far
+     * as swapping the roles. Before the handoff the session player is untouched
+     * and the standby is a silent scratch player, so there is nothing to unwind
+     * at all — [finish] just retires it. After the handoff the session has
+     * already moved and cannot be moved back (the incoming track is playing and
+     * has been announced), so the only thing left is to take the outgoing track
+     * away gracefully.
+     */
+    private fun bail() {
+        if (phase == Phase.IDLE || phase == Phase.BAILING) return
+        Log.d(TAG, "bail from $phase")
+        AppSettings.smartMixInProgress.value = false
+        if (!handedOff) {
+            // Nothing was ever audible; no ramp to run.
+            finish()
+            return
+        }
+        // Glided open rather than snapped: the incoming track is audible here,
+        // and if the bail caught a bass swap mid-handover its low end is
+        // currently lifted out. Dropping a 24 dB/octave filter in one buffer is
+        // the click this ramp exists to avoid.
+        filters.open()
+        incoming?.volume = 1f
+        bailFromGain = outgoing?.volume ?: 0f
+        bailStartedAt = SystemClock.elapsedRealtime()
+        phase = Phase.BAILING
+    }
+
+    private fun finish() {
+        if (phase != Phase.IDLE) {
+            Log.d(TAG, "finish from $phase")
+            // Stamped under this guard rather than beside the assignment at the
+            // bottom, because this function is idempotent and gets called with
+            // nothing in flight: marking every one of those as a transition
+            // just ended would keep pushing the mark forward and hold a waiting
+            // caller off for as long as the calls kept coming.
+            settledAt = SystemClock.elapsedRealtime()
+        }
+        AppSettings.smartMixInProgress.value = false
+        // Unconditional and idempotent, like the speed reset below: correct
+        // whether or not this transition ever filtered anything.
+        filters.open()
+        render = Render()
+
+        if (handedOff) {
+            // The roles have already traded: the incoming player is the session
+            // and owns the queue from here, and the outgoing one is spare.
+            incoming?.let {
+                it.volume = 1f
+                // Undoes whatever [begin] stacked on for a beatmatched handoff.
+                // Unconditional and idempotent, so this is correct whether or
+                // not a stretch was ever actually applied.
+                it.setPlaybackSpeed(AppSettings.playbackSpeed.value)
+            }
+            outgoing?.let(::retire)
+        } else {
+            // The transition never became audible, so the session player never
+            // moved and the standby is the one to throw away.
+            outgoing?.volume = 1f
+            incoming?.let(::retire)
+        }
+
+        outgoing = null
+        incoming = null
+        handedOff = false
+        queuedItemCount = 0
+        incomingCueTimeMs = 0L
+        incomingPlaybackRate = 1.0
+        phase = Phase.IDLE
+    }
+
+    /** Still a next track, still playing, still switched on — by whichever setting armed this one. */
+    private fun stillWorthFading(): Boolean {
