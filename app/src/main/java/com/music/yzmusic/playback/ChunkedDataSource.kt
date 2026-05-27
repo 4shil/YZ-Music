@@ -194,3 +194,11 @@ class ChunkedDataSource(
     }
 
     /** Wraps [upstream]'s sources so everything opened through it is ranged. */
+    class Factory(
+        private val upstream: DataSource.Factory,
+        private val chunkBytes: Long,
+    ) : DataSource.Factory {
+        override fun createDataSource(): DataSource =
+            ChunkedDataSource(upstream.createDataSource(), chunkBytes)
+    }
+}
