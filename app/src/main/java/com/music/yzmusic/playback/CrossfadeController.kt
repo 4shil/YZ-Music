@@ -293,3 +293,189 @@ class CrossfadeController(
      * blend rather than merely delaying it, so such a caller should wait for
      * this to clear rather than proceed anyway.
      */
+    fun isTransitioning(): Boolean = phase != Phase.IDLE
+
+    /**
+     * How long since the last transition finished, or null while none has.
+     *
+     * For the same caller as [isTransitioning], which needs a little more than
+     * that flag can give it. The flag clears on the tick the blend completes,
+     * so a source torn down and rebuilt the moment it clears puts its break in
+     * the audio a few hundred milliseconds after the incoming track finally
+     * stood alone — not a broken blend, but heard as one. A caller that wants
+     * the transition to have been *over* for a while, rather than merely to
+     * have ended, waits this out too.
+     *
+     * Says nothing about a transition still in flight — it reports whatever the
+     * one before it left behind — so [isTransitioning] stays the first question
+     * to ask.
+     */
+    fun msSinceTransition(): Long? =
+        settledAt.takeIf { it != 0L }?.let { SystemClock.elapsedRealtime() - it }
+
+    private val listener = object : Player.Listener {
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            // The listener moving the playhead is something no half-finished
+            // crossfade should survive. Nothing this class does registers here
+            // any more: the handoff is a role swap, not a seek.
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) bail()
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            when (reason) {
+                // Something replaced the queue out from under the fade — a new
+                // album, a new search result — so the tail still playing is a
+                // leftover of a session that no longer exists. Note that this
+                // does *not* fire when AutoPlay appends to the end, since the
+                // playing item doesn't change: extending the queue mid-fade is
+                // harmless and shouldn't cost the listener the blend.
+                Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED -> bail()
+                Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> bail()
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) = bail()
+    }
+
+    /**
+     * Keeps [listener] on whichever player is the session.
+     *
+     * It has to move rather than sit on both: arming loads a whole queue onto
+     * the standby, which Media3 reports as the playlist changing, and a listener
+     * attached there would read that as the queue being replaced out from under
+     * the very transition it is setting up.
+     */
+    private fun listenTo(target: ExoPlayer) {
+        if (listeningTo === target) return
+        listeningTo?.removeListener(listener)
+        target.addListener(listener)
+        listeningTo = target
+    }
+
+    fun start() {
+        listenTo(active())
+        scope.launch {
+            while (isActive) {
+                tick()
+                delay(
+                    when (phase) {
+                        Phase.IDLE -> IDLE_STEP_MS
+                        Phase.ARMING -> ARM_STEP_MS
+                        Phase.FADING -> FADE_STEP_MS
+                        Phase.BAILING -> BAIL_STEP_MS
+                    },
+                )
+            }
+        }
+    }
+
+    fun release() {
+        listeningTo?.removeListener(listener)
+        listeningTo = null
+        active().volume = 1f
+        AppSettings.smartMixInProgress.value = false
+        filters.open()
+    }
+
+    // ---- Entry points -------------------------------------------------------
+
+    /**
+     * A skip the listener asked for: drop any blend in flight and get out of
+     * the way.
+     *
+     * Crossfade is deliberately a property of tracks *running out*, not of
+     * being changed. Blending a manual skip means the song just left behind
+     * stays audible over the one that was asked for, which reads as the app
+     * ignoring the button rather than as a transition — the point of pressing
+     * next is usually to stop hearing the current track.
+     *
+     * Called before the skip is carried out, so the outgoing track is already on
+     * its way down as the new one starts, and the listener's own seek lands on a
+     * player this class has finished with.
+     */
+    fun onSkipRequested() {
+        if (phase != Phase.IDLE) bail()
+    }
+
+    // ---- Ticker -------------------------------------------------------------
+
+    private fun tick() {
+        // A pause has to take the other player with it, or one half of the blend
+        // carries on alone over a stopped one. Mirrored every tick rather than
+        // handled as an event, so audio focus loss, the sleep timer and the
+        // pause button all get the same treatment for free. Which player follows
+        // which flips at the handoff: before it the standby shadows the session,
+        // after it the outgoing tail does.
+        if (phase == Phase.FADING || phase == Phase.BAILING) {
+            outgoing?.playWhenReady = incoming?.playWhenReady ?: true
+        }
+
+        // Every tick, not only when a transition can be planned. This used to
+        // live inside [considerSmartTransition], which needs an idle phase, a
+        // playing player and a known duration — none of which hold during a
+        // transition or during the re-buffer after a quality upgrade. The line
+        // simply froze on the previous pair, so a track that had not been
+        // analysed kept showing the *departing* track's "analysed" until
+        // ticking resumed.
+        publishAnalysisState()
+
+        when (phase) {
+            Phase.IDLE -> considerAutoTransition()
+            Phase.ARMING -> driveArming()
+            Phase.FADING -> driveFade()
+            Phase.BAILING -> driveBail()
+        }
+    }
+
+    /** Arms a crossfade as the playing track runs out. */
+    private fun considerAutoTransition() {
+        val player = active()
+        if (!player.isPlaying) return
+        // Nothing to transition *into*, so any analysis state left over from the
+        // previous pair is stale — the last track of a queue should not still be
+        // claiming both songs are measured.
+        if (!player.hasNextMediaItem()) {
+            AppSettings.smartTransitionWindow.value = null
+            return
+        }
+
+        val duration = player.duration
+        if (duration == C.TIME_UNSET || duration <= 0L) return
+
+        // Repeating one track would crossfade it into itself, so nothing is
+        // armed and no window is marked — but the queue behind the loop has not
+        // moved, and what sits after it is still the track that plays next the
+        // moment repeat-one comes off.
+        //
+        // Returning here outright is what made turning repeat off look like it
+        // lost an analysis. Analysis is only ever asked for on the way to
+        // planning a transition, so for as long as the loop ran nothing asked
+        // for the following track at all, and the request that finally arrived
+        // when repeat came off was the *first* one — a whole-track decode
+        // starting from nothing on a song that was by then seconds away, where
+        // an unlooped queue would have had it measured minutes earlier. The
+        // measurement is the same either way, so it may as well be made during
+        // the loop rather than after it.
+        if (player.repeatMode == Player.REPEAT_MODE_ONE) {
+            if (AppSettings.smartFadeEnabled.value) requestAnalysisAround(player, duration)
+            // Stale otherwise: the marker would keep describing the transition
+            // planned for this pair before the loop went on, at a point the
+            // playhead now runs past on every lap without anything happening.
+            AppSettings.smartTransitionWindow.value = null
+            return
+        }
+
+        // Automix is its own on/off, independent of the manual crossfade
+        // length: it decides its own duration from each pair of tracks (beats,
+        // tempo, structure), so requiring a nonzero [AppSettings.crossfadeSeconds]
+        // first would tie an automatic feature to a manual one it doesn't use.
+        if (AppSettings.smartFadeEnabled.value) {
+            considerSmartTransition(duration)
+            return
+        }
+
+        if (configuredFadeMs() <= 0L) return
