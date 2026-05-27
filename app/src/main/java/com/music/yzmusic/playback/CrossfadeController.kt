@@ -1075,3 +1075,150 @@ class CrossfadeController(
 
     /** Still a next track, still playing, still switched on — by whichever setting armed this one. */
     private fun stillWorthFading(): Boolean {
+        val stillOn = if (smartFadeActive) AppSettings.smartFadeEnabled.value else configuredFadeMs() > 0L
+        return stillOn && (outgoing ?: active()).hasNextMediaItem()
+    }
+
+    /**
+     * Puts a player back in the drawer: emptied, silent no longer, and on the
+     * listener's own playback rate again.
+     *
+     * The volume matters as much as the emptying. A player left at the gain it
+     * faded out on is the next transition's *incoming* player, and it would
+     * arrive already turned down — so the reset is part of retiring it, not part
+     * of preparing it.
+     */
+    private fun retire(player: ExoPlayer) {
+        player.stop()
+        player.clearMediaItems()
+        player.volume = 1f
+        player.setPlaybackSpeed(AppSettings.playbackSpeed.value)
+    }
+
+    // ---- Numbers ------------------------------------------------------------
+
+    private fun configuredFadeMs(): Long = AppSettings.crossfadeSeconds.value * 1000L
+
+    /**
+     * The configured length, kept off tracks too short to spend it on. A fade
+     * that swallows a third of a song stops being a transition and starts being
+     * the arrangement.
+     */
+    private fun fadeFor(duration: Long): Long {
+        val configured = configuredFadeMs()
+        if (duration == C.TIME_UNSET || duration <= 0L) return configured
+        return minOf(configured, duration / 3).coerceAtLeast(0L)
+    }
+
+    /**
+     * Renders the plan's [TransitionStyle] as filtering across the blend.
+     *
+     * The gain curve is the same equal-power pair for every style — this is
+     * what makes them sound different from each other, and it is the whole of
+     * Phase 4. Driven off the same `progress` as the gains so the two stay
+     * locked: a pause parks the filter exactly where it parks the fade.
+     */
+    private fun rideFilters(progress: Float) {
+        when (render.style) {
+            TransitionStyle.DJ_FILTER -> rideFilterSweep(progress)
+            TransitionStyle.DJ_BLEND ->
+                if (render.bassSwap) rideBassSwap(progress) else rideVocalSeparation(progress)
+            // GAPLESS is an album being played through, where any filtering would
+            // be an edit the record didn't ask for — so it stays open whatever
+            // the material does.
+            TransitionStyle.GAPLESS -> filters.open()
+            // EQUAL_POWER used to be defined the same way: the bottom tier,
+            // reached because the evidence was too weak to justify anything more
+            // opinionated, therefore don't touch the spectrum.
+            //
+            // That conflated two different kinds of evidence. The tier is decided
+            // by tempo and beat confidence; whether both tracks are singing is
+            // measured by a separate model that doesn't depend on either. A pair
+            // can have useless tempo evidence — dropping it to this tier — and a
+            // perfectly good vocal mask on both sides saying they collide. Every
+            // one of those transitions was rendered as a plain crossfade with two
+            // full vocals over each other, because the weak half of the evidence
+            // was silencing the strong half.
+            TransitionStyle.EQUAL_POWER -> rideVocalSeparation(progress)
+        }
+    }
+
+    /**
+     * The minimum intervention: pull two colliding vocals apart, and otherwise
+     * leave the spectrum alone.
+     *
+     * Not a filter ride. [rideFilterSweep] is a *style* — a gesture chosen for a
+     * pair that cannot be blended flat, driving to [FILTER_FLOOR_HZ] and taking
+     * the outgoing track somewhere distant. This is damage control on a pair that
+     * was going to be crossfaded plainly, and it has to stay subtle enough that a
+     * listener notices the absence of the clash rather than the presence of a
+     * filter. So it works the same way — complementary bands, outgoing losing its
+     * top while the incoming enters with its body lifted — over a much shorter
+     * distance, and only as far as the measured collision justifies.
+     *
+     * Zero overlap leaves both sides open, which is exactly what these styles did
+     * before, so nothing changes for a pair that doesn't collide or for either
+     * track lacking a vocal mask.
+     */
+    private fun rideVocalSeparation(progress: Float) {
+        val amount = render.vocalOverlap.coerceIn(0.0, 1.0)
+        if (amount <= 0.0) {
+            filters.open()
+            return
+        }
+        val open = TransitionFilterProcessor.OPEN_HZ.toDouble()
+        // Both endpoints scaled by the collision, so a marginal clash is nudged
+        // and a full one is properly separated, rather than everything getting
+        // the same treatment at different speeds.
+        val floor = glide(open, VOCAL_SEPARATION_FLOOR_HZ, amount)
+        filters.outgoing(
+            glide(open, floor, progress.toDouble().pow(FILTER_SWEEP_SHAPE)).toFloat(),
+            TransitionFilterProcessor.OFF_HZ,
+        )
+        filters.incoming(
+            TransitionFilterProcessor.OPEN_HZ,
+            entryHighPass(progress, amount, VOCAL_SEPARATION_HIGH_PASS_HZ, ENTRY_OPEN_BY),
+        )
+    }
+
+    /**
+     * Pulls the outgoing track behind a closing low-pass while the incoming one
+     * arrives with its body lifted out, for a pair too far apart in tempo to
+     * blend flat.
+     *
+     * ## Why both sides are filtered
+     *
+     * The first version filtered only the outgoing track, and squared the
+     * progress so that the sweep was spent almost entirely in the second half.
+     * Both halves of that were wrong for the same reason: at the midpoint the
+     * outgoing cutoff was still at 6.9kHz — wide open across the whole vocal
+     * range — and the incoming track was explicitly set to no filtering at all.
+     * So for the entire first half of every transition, two complete vocals
+     * played over each other at comparable level, and the only thing
+     * distinguishing them was gain. That is what a plain crossfade sounds like,
+     * which is the one thing this is meant not to be.
+     *
+     * What a DJ does instead is hand the midrange over rather than double it:
+     * the outgoing track starts losing its top the moment the blend begins, and
+     * the incoming one enters high-passed — hats and presence only, no vocal
+     * body — opening out as the outgoing track darkens. The two occupy
+     * complementary bands through the middle of the blend and never compete for
+     * the range a voice lives in.
+     *
+     * [FILTER_SWEEP_SHAPE] is what replaces the squaring: front-loaded now, so
+     * the outgoing track's top is gone within the first tenth of the blend
+     * rather than somewhere past the midpoint. What keeps that from gutting the
+     * track being left is [FILTER_FLOOR_HZ] — the ride settles onto a 300Hz bed
+     * and stays there — not restraint in the early travel, which is the part the
+     * listener reads as the transition happening at all.
+     */
+    private fun rideFilterSweep(progress: Float) {
+        val sweep = render.filterSweep.coerceIn(0.0, 1.0)
+        if (sweep <= 0.0) {
+            filters.open()
+            return
+        }
+        // Both ends scaled by [filterSweep], so a partial sweep engages less
+        // sharply *and* stops short of the floor rather than crawling the same
+        // distance more slowly.
+        val open = TransitionFilterProcessor.OPEN_HZ.toDouble()
