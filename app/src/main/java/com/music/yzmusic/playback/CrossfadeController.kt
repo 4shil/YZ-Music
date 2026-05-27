@@ -826,3 +826,125 @@ class CrossfadeController(
      * this is only ever waiting on a buffer.
      */
     private fun driveArming() {
+        val out = outgoing ?: return bail()
+        val into = incoming ?: return bail()
+        if (!stillWorthFading()) return bail()
+        // Paused while armed: the transition is no longer imminent, and holding
+        // a prepared decoder open against a stopped player is worse than arming
+        // again when playback resumes.
+        if (!out.playWhenReady) return bail()
+
+        val expired = SystemClock.elapsedRealtime() > armDeadline
+        val ready = into.playbackState == Player.STATE_READY
+
+        // A standby that never got the incoming track ready has nothing to fade
+        // up. Give up and let the queue move on plainly rather than fading into
+        // silence.
+        if (expired && !ready) return bail()
+
+        // Wait for the track to actually reach the fade point. [fadeEndMs] is
+        // the track's own duration in standard mode, or a Automix plan's
+        // analyzed mix-out anchor when it ends before the file does.
+        val atFadePoint = fadeEndMs <= 0L || fadeEndMs - out.currentPosition <= fadeMs
+        if (!atFadePoint) return
+        if (ready) startFade()
+    }
+
+    /**
+     * Starts the incoming track and moves the session onto it.
+     *
+     * The handoff happens *here*, as the first note sounds, not at the end of
+     * the blend. Everything hanging off the session player — queue index,
+     * metadata, the notification, the UI, audio focus — flips to the incoming
+     * song the moment it becomes audible, rather than trailing the song on its
+     * way out. From this point [outgoing] is the idle player, still audible,
+     * being faded away.
+     */
+    private fun startFade() {
+        val out = outgoing ?: return bail()
+        val into = incoming ?: return bail()
+
+        // AutoPlay may have appended to the queue since the standby was loaded
+        // with a copy of it; those tracks would otherwise be lost at the swap.
+        reconcileQueue(out, into)
+
+        into.volume = 0f
+        into.playWhenReady = true
+        fadeStartedAt = SystemClock.elapsedRealtime()
+
+        Log.d(TAG, "handoff at cue=${into.currentPosition}ms out=${out.currentPosition}ms")
+
+        // Before the swap, so the listener follows the session rather than
+        // firing on a player this class is about to demote.
+        listenTo(into)
+        handedOff = true
+        onHandoff(out, into)
+
+        // The outgoing player holds the whole queue too, and a standard
+        // crossfade runs right up to its track's natural end — at which point
+        // ExoPlayer would do what it always does and advance to the next item,
+        // starting the incoming song a second time, on top of itself, out of the
+        // player that is supposed to be going quiet. Truncating the queue at the
+        // playing item turns that into STATE_ENDED, which [driveFade] already
+        // reads as the tail being spent. Safe to discard: [into] is the
+        // authoritative queue from here, and this player is retired seconds
+        // later anyway.
+        if (out.mediaItemCount > out.currentMediaItemIndex + 1) {
+            out.removeMediaItems(out.currentMediaItemIndex + 1, out.mediaItemCount)
+        }
+
+        AppSettings.smartMixInProgress.value = isRealMix()
+        // The queue has just moved on, so the marker's fractions now refer to a
+        // track the session player is no longer showing a position for.
+        AppSettings.smartTransitionWindow.value = null
+        phase = Phase.FADING
+    }
+
+    /**
+     * Copies onto the standby anything appended to the queue while it was
+     * arming.
+     *
+     * AutoPlay extending the queue mid-transition is explicitly allowed — it
+     * doesn't change the playing item, so it has never been a reason to drop a
+     * blend. Under the old design that was free, because only one player ever
+     * held the queue. Now the standby is carrying a copy taken at arm time, and
+     * that copy is what survives the swap, so the difference has to be carried
+     * across or the appended tracks simply vanish when the roles change.
+     *
+     * Only a pure append is reconciled. Anything else — a queue replaced, an
+     * item removed or moved — changes what the incoming track *is*, and
+     * [listener] has already bailed the transition for it.
+     */
+    private fun reconcileQueue(out: ExoPlayer, into: ExoPlayer) {
+        val appended = (queuedItemCount until out.mediaItemCount).map { out.getMediaItemAt(it) }
+        if (appended.isEmpty()) return
+        into.addMediaItems(appended)
+        queuedItemCount = out.mediaItemCount
+        Log.d(TAG, "reconciled ${appended.size} appended item(s) onto the incoming player")
+    }
+
+    /**
+     * The crossfade proper.
+     *
+     * Driven off the *incoming* track's position rather than off a clock, so a
+     * pause parks the transition where it stands and resuming picks it back up
+     * — no timer to reconcile, and neither player left hanging at half volume
+     * while the other waits.
+     */
+    private fun driveFade() {
+        val out = outgoing ?: return bail()
+        val player = incoming ?: return bail()
+        // The incoming track gets the same say over the length as the outgoing
+        // one did, so a long crossfade into a short track tightens rather than
+        // swallowing it. Its duration is often still unknown when the fade
+        // starts — the stream is only being opened — so this is read every tick
+        // and simply narrows the span once the answer arrives. Capped only by
+        // the incoming track's own length, not by [configuredFadeMs] — a Smart
+        // Fade plan already sized itself independently of that setting, and
+        // may be running with it at zero.
+        // Measured from where the incoming track was *cued*, not from zero. A
+        // Automix plan can drop it in mid-arrangement, and reading its raw
+        // position as elapsed-fade would put a cue at 0:45 instantly past the
+        // end of an 8-second fade — finishing the blend on its first tick and
+        // landing as an abrupt cut, which is precisely the failure a cued
+        // transition is supposed to avoid.
