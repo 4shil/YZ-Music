@@ -88,3 +88,32 @@ object LastPlayed {
         val artist: String,
         val artwork: String? = null,
         /** Whether AutoPlay queued it — the queue's sections outlive a restart. */
+        val auto: Boolean = false,
+        /**
+         * Where it plays from on disk, when that is anywhere. Not a detail the
+         * player needs to resume — [id] alone finds the file again either way —
+         * but it is what the UI reads to tell a track off the device from one
+         * off YouTube, and a restored queue that dropped it had the player's
+         * menu offering to rate, download and share a local file.
+         */
+        val local: String? = null,
+        val path: String? = null,
+        /**
+         * How long the track runs, as the row that queued it said.
+         *
+         * Carried across a restart because it is what a cross-source match is
+         * made on — see [TrackMatcher][com.music.yzmusic.data.sources.TrackMatcher].
+         * Dropping it did not look like it cost anything: nothing on screen
+         * reads a queue row's duration, since the player takes its own from
+         * the decoder. But every duration-based rule in the matcher degrades
+         * silently to nothing without it, so a track resumed after a restart
+         * was matched on title and artist alone while the same track queued
+         * from a search was matched properly. That is the worst shape a bug
+         * can have — the same song behaving differently depending on how long
+         * ago the app was opened.
+         */
+        val duration: String? = null,
+    )
+
+    @Serializable
+    private data class StoredQueue(
