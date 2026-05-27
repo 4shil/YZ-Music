@@ -1222,3 +1222,67 @@ class CrossfadeController(
         // sharply *and* stops short of the floor rather than crawling the same
         // distance more slowly.
         val open = TransitionFilterProcessor.OPEN_HZ.toDouble()
+        val entry = glide(open, FILTER_ENTRY_HZ, sweep)
+        val floor = glide(open, FILTER_FLOOR_HZ, sweep)
+        val cutoff = glide(entry, floor, progress.toDouble().pow(FILTER_SWEEP_SHAPE))
+        filters.outgoing(cutoff.toFloat(), TransitionFilterProcessor.OFF_HZ)
+        filters.incoming(
+            TransitionFilterProcessor.OPEN_HZ,
+            entryHighPass(progress, sweep, ENTRY_HIGH_PASS_HZ, ENTRY_OPEN_BY),
+        )
+    }
+
+    /**
+     * Where the incoming track's high-pass sits at [progress].
+     *
+     * Rides from [topHz] down to nothing by [openBy] of the fade, so the track
+     * is whole well before it is alone — the filter is there to keep it out of
+     * the outgoing vocal's way during the overlap, not to colour the track the
+     * listener is left with. [amount] scales the whole gesture, so a partial
+     * sweep lifts proportionally less out.
+     *
+     * [ENTRY_SHAPE] is why the descent isn't linear. A geometric glide runs from
+     * [TransitionFilterProcessor.OFF_HZ] to [topHz], and the bottom half of that
+     * range is sub-bass nobody hears a filter in: measured, a plain ride was
+     * down to 123Hz by a third of the way through, which is to say doing nothing
+     * at all for two thirds of the overlap. The exponent spends the travel where
+     * a voice actually is — 772Hz at a sixth of the way in, 436Hz at a third —
+     * and still arrives at fully open on time.
+     */
+    private fun entryHighPass(progress: Float, amount: Double, topHz: Double, openBy: Double): Float {
+        val remaining = (1.0 - progress / openBy).coerceIn(0.0, 1.0)
+        return glide(TransitionFilterProcessor.OFF_HZ.toDouble(), topHz, amount * remaining.pow(ENTRY_SHAPE))
+            .toFloat()
+    }
+
+    /**
+     * Geometric interpolation between two cutoffs: [amount] 0 gives [from], 1
+     * gives [to].
+     *
+     * Geometric rather than linear because pitch is logarithmic — a cutoff
+     * moving in equal Hz steps sounds like it lurches through the bottom of its
+     * range and crawls through the top.
+     */
+    private fun glide(from: Double, to: Double, amount: Double): Double =
+        from * (to / from).pow(amount.coerceIn(0.0, 1.0))
+
+    /**
+     * Hands the low end from one track to the other, once, at the beat the
+     * planner chose.
+     *
+     * Below [BASS_SWAP_HZ] exactly one track is present at any instant: the
+     * incoming track arrives with its low end lifted out, and takes it over as
+     * the outgoing track's is lifted in turn. Ramped over [BASS_SWAP_WIDTH] of
+     * the fade rather than switched, because a 24 dB/octave filter appearing in
+     * one buffer is a transient of its own.
+     *
+     * The midrange is handled far more lightly than in [rideFilterSweep] but is
+     * no longer left alone, which it was. This style is chosen for pairs that
+     * are beat-matched and close in tempo, so the two tracks are *meant* to
+     * sound simultaneous — but "simultaneous" and "two lead vocals at once" are
+     * not the same thing, and only the bass was ever being separated. So the
+     * incoming track still enters with its body lifted, over a shorter window
+     * and from a lower corner, and the outgoing track loses its top in the last
+     * half, where it is already quiet enough that the change reads as it
+     * receding rather than as an effect.
+     */
