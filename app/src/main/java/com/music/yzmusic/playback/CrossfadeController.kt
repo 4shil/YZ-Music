@@ -1286,3 +1286,45 @@ class CrossfadeController(
      * half, where it is already quiet enough that the change reads as it
      * receding rather than as an effect.
      */
+    private fun rideBassSwap(progress: Float) {
+        val swapAt = render.bassSwapFraction.coerceIn(0.05, 0.95)
+        // 0 before the swap window, 1 after it: how much of the low end has
+        // changed hands.
+        val handover = ((progress - swapAt) / BASS_SWAP_WIDTH * 0.5 + 0.5).coerceIn(0.0, 1.0)
+        // The incoming track's own low end is already being held out by the
+        // swap, so whichever corner sits higher is the one doing the work.
+        // Scaled up by however much the two are actually singing over each other.
+        // A blend is chosen for pairs on a shared grid, which is the case where
+        // nothing about the arrangement separates two lead vocals — they sit in
+        // the same bar and the same range for the whole overlap — so the fixed
+        // corner that was here handled a marginal collision and a head-on one
+        // identically. At full collision the entry corner reaches
+        // [BLEND_ENTRY_CLASH_HIGH_PASS_HZ] and holds longer.
+        val clash = render.vocalOverlap.coerceIn(0.0, 1.0)
+        val entry = maxOf(
+            bassCutoff(1.0 - handover),
+            entryHighPass(
+                progress,
+                1.0,
+                glide(BLEND_ENTRY_HIGH_PASS_HZ, BLEND_ENTRY_CLASH_HIGH_PASS_HZ, clash),
+                BLEND_ENTRY_OPEN_BY + (BLEND_ENTRY_CLASH_OPEN_BY - BLEND_ENTRY_OPEN_BY) * clash,
+            ),
+        )
+        filters.incoming(TransitionFilterProcessor.OPEN_HZ, entry)
+        filters.outgoing(blendExitLowPass(progress, clash), bassCutoff(handover))
+    }
+
+    /**
+     * The outgoing track's low-pass through a beat-matched blend: open until
+     * [BLEND_EXIT_FROM], then closing to [BLEND_EXIT_LOW_PASS_HZ] by the end.
+     *
+     * Deliberately shallow. Enough to take the air and the sibilance off a voice
+     * that is on its way out, so it stops competing with the one arriving;
+     * nowhere near the [FILTER_FLOOR_HZ] that [rideFilterSweep] drives to, which
+     * would contradict the reason this style was chosen.
+     *
+     * [clash] both starts it earlier and takes it further, because "shallow" is
+     * the right default and the wrong answer for two choruses landing together.
+     */
+    private fun blendExitLowPass(progress: Float, clash: Double): Float {
+        val from = BLEND_EXIT_FROM + (BLEND_EXIT_CLASH_FROM - BLEND_EXIT_FROM) * clash
