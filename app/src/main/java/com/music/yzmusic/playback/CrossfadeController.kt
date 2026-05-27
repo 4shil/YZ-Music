@@ -660,3 +660,84 @@ class CrossfadeController(
         val player = active()
         val currentItem = player.currentMediaItem
         val nextIndex = player.nextMediaItemIndex
+        val nextItem = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex)
+        AppSettings.smartAnalysis.value = SmartAnalysis(
+            current = currentItem?.let { stateOf(it, analysisFor(it)) } ?: TrackAnalysisState.WAITING,
+            next = nextItem?.let { stateOf(it, analysisFor(it)) } ?: TrackAnalysisState.WAITING,
+        )
+    }
+
+    /**
+     * Where one track stands, for the stats line. "Analysing" is asked for
+     * first because a track can be in flight while a superseded provisional
+     * result is already on record, and the work in progress is the more useful
+     * thing to say about it.
+     */
+    private fun stateOf(item: MediaItem, analysis: TrackAnalysis): TrackAnalysisState = when {
+        // Usable first, and a pass in flight *second*. The other order was
+        // right up to the point a head-only result started arriving before the
+        // whole-track one: a track measured off its opening reads as analysed,
+        // then finishes caching, then has the full pass run over it to replace
+        // the provisional numbers — and reported "analysing" again throughout.
+        // Going backwards from analysed reads as something having broken, when
+        // what is happening is a better answer being computed. Confidence on one
+        // such track went 0.39 to 0.94 and its cue moved from 0.1s to 9.5s.
+        analysis.isUsable ->
+            if (analysisRunningFor(item)) TrackAnalysisState.REFINING else TrackAnalysisState.ANALYSED
+        analysisRunningFor(item) -> TrackAnalysisState.ANALYSING
+        // A recorded-but-unusable result is the analyzer's way of saying it
+        // tried and got nothing, and that it will not try again — it writes a
+        // ready-but-empty entry precisely so the track stops being retried. A
+        // track nothing has looked at yet has no status at all, which is the
+        // only case that is still merely waiting.
+        analysis.status == TrackAnalysis.STATUS_READY -> TrackAnalysisState.FAILED
+        else -> TrackAnalysisState.WAITING
+    }
+
+    /**
+     * The next queue item's own duration.
+     *
+     * Media3 fills a timeline window's duration in when the item is *prepared*,
+     * which for the track after this one happens a few seconds before it starts
+     * playing. So for almost the whole of the current track this answered zero —
+     * and zero is not a harmless "don't know" downstream. It reaches
+     * [com.music.yzmusic.playback.smart.TrackAnalyzer.request] as the next
+     * track's duration, and with no duration to check a sibling copy against the
+     * analyzer will only read the rendition the cache key resolves to *right
+     * now*, which with source substitution on is the `#alt` entry — while the
+     * copy actually on disk is the plain one its own head fetch just pulled
+     * down. Nothing matches, the pass returns silently, and it does that on every
+     * tick for the rest of the track. Measured: a fully cached next track sat
+     * unread for three minutes and was analysed eight seconds before the fade it
+     * was meant to inform, having been analysable the whole time.
+     *
+     * The runtime is on the item already — queued from a row that knew it, and
+     * carried on the playback URI as `d=` because a cross-source match is made on
+     * it (see `Song.matchQuery`). Reading it here costs nothing and is available
+     * from the moment the queue is set.
+     */
+    private fun nextItemDurationMs(nextIndex: Int, item: MediaItem): Long {
+        val timeline = active().currentTimeline
+        if (!timeline.isEmpty) {
+            timeline.getWindow(nextIndex, Timeline.Window()).durationMs
+                .takeIf { it != C.TIME_UNSET && it > 0 }
+                ?.let { return it }
+        }
+        return queuedDurationMs(item)
+    }
+
+    /**
+     * The runtime the queue row carried, in milliseconds, or 0 when the item
+     * doesn't state one — a local file, or a track queued without a duration.
+     *
+     * Deliberately forgiving: [Uri.getQueryParameter] throws on an opaque URI,
+     * and a missing or unparsable value is simply an absent duration rather than
+     * anything worth failing a tick over.
+     */
+    private fun queuedDurationMs(item: MediaItem): Long {
+        val uri = item.localConfiguration?.uri ?: return 0L
+        val seconds = runCatching { uri.getQueryParameter("d") }.getOrNull()?.toLongOrNull() ?: return 0L
+        return if (seconds > 0) seconds * 1000L else 0L
+    }
+
+    /** YZ Music doesn't carry album metadata on [MediaMetadata] yet, so [TransitionTrackInfo.album] stays blank. */
