@@ -84,3 +84,7 @@ object LastPlayed {
     @Serializable
     private data class StoredTrack(
         val id: String,
+        val title: String,
+        val artist: String,
+        val artwork: String? = null,
+        /** Whether AutoPlay queued it — the queue's sections outlive a restart. */
