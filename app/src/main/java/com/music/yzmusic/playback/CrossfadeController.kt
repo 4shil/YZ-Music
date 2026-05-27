@@ -293,3 +293,83 @@ class CrossfadeController(
      * blend rather than merely delaying it, so such a caller should wait for
      * this to clear rather than proceed anyway.
      */
+    fun isTransitioning(): Boolean = phase != Phase.IDLE
+
+    /**
+     * How long since the last transition finished, or null while none has.
+     *
+     * For the same caller as [isTransitioning], which needs a little more than
+     * that flag can give it. The flag clears on the tick the blend completes,
+     * so a source torn down and rebuilt the moment it clears puts its break in
+     * the audio a few hundred milliseconds after the incoming track finally
+     * stood alone — not a broken blend, but heard as one. A caller that wants
+     * the transition to have been *over* for a while, rather than merely to
+     * have ended, waits this out too.
+     *
+     * Says nothing about a transition still in flight — it reports whatever the
+     * one before it left behind — so [isTransitioning] stays the first question
+     * to ask.
+     */
+    fun msSinceTransition(): Long? =
+        settledAt.takeIf { it != 0L }?.let { SystemClock.elapsedRealtime() - it }
+
+    private val listener = object : Player.Listener {
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            // The listener moving the playhead is something no half-finished
+            // crossfade should survive. Nothing this class does registers here
+            // any more: the handoff is a role swap, not a seek.
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) bail()
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            when (reason) {
+                // Something replaced the queue out from under the fade — a new
+                // album, a new search result — so the tail still playing is a
+                // leftover of a session that no longer exists. Note that this
+                // does *not* fire when AutoPlay appends to the end, since the
+                // playing item doesn't change: extending the queue mid-fade is
+                // harmless and shouldn't cost the listener the blend.
+                Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED -> bail()
+                Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> bail()
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) = bail()
+    }
+
+    /**
+     * Keeps [listener] on whichever player is the session.
+     *
+     * It has to move rather than sit on both: arming loads a whole queue onto
+     * the standby, which Media3 reports as the playlist changing, and a listener
+     * attached there would read that as the queue being replaced out from under
+     * the very transition it is setting up.
+     */
+    private fun listenTo(target: ExoPlayer) {
+        if (listeningTo === target) return
+        listeningTo?.removeListener(listener)
+        target.addListener(listener)
+        listeningTo = target
+    }
+
+    fun start() {
+        listenTo(active())
+        scope.launch {
+            while (isActive) {
+                tick()
+                delay(
+                    when (phase) {
+                        Phase.IDLE -> IDLE_STEP_MS
+                        Phase.ARMING -> ARM_STEP_MS
+                        Phase.FADING -> FADE_STEP_MS
+                        Phase.BAILING -> BAIL_STEP_MS
+                    },
+                )
+            }
+        }
+    }
+
