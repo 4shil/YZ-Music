@@ -479,3 +479,36 @@ class CrossfadeController(
         }
 
         if (configuredFadeMs() <= 0L) return
+        val fade = fadeFor(duration)
+        if (fade <= 0L) return
+
+        val remaining = duration - player.currentPosition
+        // Arm early: the standby has to open the incoming track and buffer to
+        // its cue point, and that work has to be finished by the time the fade
+        // is due rather than started then.
+        if (remaining > fade + ARM_LEAD_MS) return
+
+        begin(fade, endMs = duration, smart = false)
+    }
+
+    /**
+     * Arms a Automix transition once its plan says the playhead is close
+     * enough to start arming for it.
+     *
+     * Reads the plan's timing (where the fade starts and how long it runs),
+     * where the incoming track should be cued
+     * ([com.music.yzmusic.playback.smart.TransitionPlan.incomingCueTime]),
+     * and the tempo-stretch to align it with the outgoing track
+     * ([com.music.yzmusic.playback.smart.TransitionPlan.incomingPlaybackRate])
+     * — see [driveLap], which applies both at the handoff — and the style the
+     * blend is rendered in
+     * ([com.music.yzmusic.playback.smart.TransitionPlan.transitionStyle]),
+     * which [rideFilters] turns into a filter ride or a bass swap over the same
+     * equal-power gain curve.
+     */
+    private fun considerSmartTransition(duration: Long) {
+        val player = active()
+        val currentItem = player.currentMediaItem ?: return
+        val nextIndex = player.nextMediaItemIndex
+        if (nextIndex == C.INDEX_UNSET) return
+        val nextItem = player.getMediaItemAt(nextIndex)
