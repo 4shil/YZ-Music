@@ -168,3 +168,12 @@ class ChunkedDataSource(
         return C.RESULT_END_OF_INPUT
     }
 
+    private fun closeChunk() {
+        if (chunkOpen) {
+            upstream.close()
+            chunkOpen = false
+        }
+    }
+
+    override fun getUri(): Uri? = upstream.uri ?: baseSpec?.uri
+
