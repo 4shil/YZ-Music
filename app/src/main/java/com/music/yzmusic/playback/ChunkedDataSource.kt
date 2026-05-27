@@ -56,3 +56,16 @@ class ChunkedDataSource(
     /** Set when the request can't be improved on, and is simply forwarded. */
     private var passthrough = false
 
+    override fun addTransferListener(transferListener: TransferListener) {
+        upstream.addTransferListener(transferListener)
+    }
+
+    /**
+     * The total size has to be known up front, or there is no way to say where
+     * the last range ends. Every progressive googlevideo URL carries it as
+     * `clen`, which costs nothing to read; anything else is forwarded as-is.
+     */
+    override fun open(dataSpec: DataSpec): Long {
+        baseSpec = dataSpec
+        position = dataSpec.position
+
