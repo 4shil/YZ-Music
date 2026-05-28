@@ -88,3 +88,12 @@ object LastPlayed {
         val artist: String,
         val artwork: String? = null,
         /** Whether AutoPlay queued it — the queue's sections outlive a restart. */
+        val auto: Boolean = false,
+        /**
+         * Where it plays from on disk, when that is anywhere. Not a detail the
+         * player needs to resume — [id] alone finds the file again either way —
+         * but it is what the UI reads to tell a track off the device from one
+         * off YouTube, and a restored queue that dropped it had the player's
+         * menu offering to rate, download and share a local file.
+         */
+        val local: String? = null,
