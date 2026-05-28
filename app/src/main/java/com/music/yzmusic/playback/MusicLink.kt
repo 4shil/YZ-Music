@@ -73,3 +73,21 @@ object MusicLink {
             // point of the Resume case: "play music" names nothing, and the
             // useful answer is to carry on with what was already on.
             MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> {
+                val query = intent.getStringExtra(SearchManager.QUERY).orEmpty().trim()
+                if (query.isEmpty()) LinkRequest.Resume else LinkRequest.Search(query, play = true)
+            }
+            else -> null
+        } ?: return false
+        intent.putExtra(EXTRA_CONSUMED, true)
+        _pending.value = request
+        return true
+    }
+
+    /**
+     * Called once the request has actually been acted on.
+     *
+     * By whoever acted, not by whoever set it — this object outlives the
+     * composition, and a request left standing would be served again by the
+     * next one, which is the shared song starting over on the first
+     * configuration change.
+     */
