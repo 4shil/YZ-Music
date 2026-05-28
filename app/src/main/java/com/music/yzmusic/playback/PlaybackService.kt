@@ -1784,3 +1784,171 @@ class PlaybackService : MediaSessionService() {
      */
     private fun lookForBetterCopy(player: ExoPlayer) {
         val item = player.currentMediaItem ?: return
+        val mediaId = item.mediaId
+        val uri = item.localConfiguration?.uri
+        val alreadyPending = QualityUpgrade.isPending(mediaId)
+        val shelved = QualityUpgrade.shelvedFor(mediaId)
+        if (shelved == null && !alreadyPending && !QualityUpgrade.couldStillUpgrade(mediaId, uri)) return
+        if (upgradeJob?.isActive == true) {
+            // Already hunting for this track. One left over from a track the
+            // queue has moved past is a different matter: it can only come
+            // back with an answer about a song nobody is listening to, and
+            // until it does it holds the slot the current track needs.
+            if (upgradeFor == mediaId) return
+            upgradeJob?.cancel()
+        }
+        upgradeFor = mediaId
+        if (alreadyPending) {
+            TrackLog.d("YZ Music", "looking again for a better copy of $mediaId", about = mediaId)
+        }
+        upgradeJob = scope.launch(TrackLog.about(mediaId)) {
+            // A previous visit to this track already did all the expensive
+            // parts and lost the swap to a skip. Nothing about the answer has
+            // gone stale — the stream is still parked and its bytes are still
+            // on disk — so this goes straight to the swap and skips the ten
+            // seconds of catalogue searching it would otherwise repeat.
+            if (shelved != null) {
+                TrackLog.d("YZ Music", "re-offering the upgrade already proved for $mediaId")
+                NerdStats.onLosslessRaceStart(mediaId)
+                try {
+                    swapIn(mediaId, shelved)
+                } finally {
+                    NerdStats.onLosslessRaceEnd(mediaId)
+                }
+                return@launch
+            }
+            // The runtime the decoder reports is the only measured evidence
+            // about what is playing, and everything downstream weighs
+            // candidates against it — so it is worth a short wait rather than
+            // a null. It is genuinely not known yet at some of the moments
+            // this is called from: a queue advance runs its transition before
+            // the item it moved onto has finished preparing.
+            val playingSeconds = withTimeoutOrNull(DURATION_SETTLE_MS) {
+                while (true) {
+                    val ms = withContext(Dispatchers.Main) {
+                        this@PlaybackService.player
+                            ?.takeIf { it.currentMediaItem?.mediaId == mediaId }
+                            ?.duration
+                            ?: 0L
+                    }
+                    if (ms > 0) return@withTimeoutOrNull (ms / 1000).toInt()
+                    delay(UPGRADE_PROVE_STEP_MS)
+                }
+                @Suppress("UNREACHABLE_CODE") null
+            }
+            // Re-asked rather than carried down from above, because the wait
+            // is long enough for the answer to have changed: the resolver runs
+            // on the loader thread and marks a track pending as it opens the
+            // source, which for a track being fetched is precisely what has to
+            // happen before the decoder can report the runtime waited for just
+            // above. Reading the flag from before the wait meant a freshly
+            // resolved track arrived here looking un-resolved, was handed to
+            // the cached-track path, was refused by it for being pending, and
+            // lost its upgrade until the next progress sample came round.
+            if (!QualityUpgrade.isPending(mediaId) &&
+                (uri == null || !adoptCachedTrack(mediaId, uri, playingSeconds))
+            ) {
+                return@launch
+            }
+            val better = withContext(Dispatchers.IO) {
+                QualityUpgrade.lookAgain(mediaId, playingSeconds)
+            } ?: return@launch
+            try {
+                swapIn(mediaId, better)
+            } finally {
+                // The badge comes down when the upgrade is done, not when the
+                // search that found it was — including the deliberate wait in
+                // [swapIn] before the audio is allowed to be cut. See
+                // [QualityUpgrade.lookAgain]. In `finally` because a queue
+                // that moves on cancels this job, and a cancelled swap has to
+                // put the badge out as surely as a completed one.
+                NerdStats.onLosslessRaceEnd(mediaId)
+            }
+        }
+    }
+
+    /**
+     * Decides whether a track nothing resolved is worth a second look, now that
+     * the decoder has settled enough to say what it is playing.
+     *
+     * Two questions that need the player rather than the queue entry:
+     *
+     *  - **What codec is actually coming out.** A cache entry can already hold
+     *    the FLAC a previous session upgraded to, and hunting a lossless copy
+     *    of a track that is already lossless buys a break in the audio for
+     *    nothing. An unknown codec is not read as "lossy": it means the
+     *    renderer has not been configured yet, so the track is left un-adopted
+     *    and the progress sampler asks again a few seconds later. A codec the
+     *    renderer is reporting for *some other track* gets the same treatment,
+     *    and has to, because it is indistinguishable from an answer — see
+     *    [audioFormatFor] for what it cost to read one on trust.
+     *  - **Whether the listener owns the file.** A downloaded track resolves to
+     *    its own copy on disk — see the resolving data source above, which
+     *    answers it before the module race is ever reached, so a download has
+     *    never been a candidate for substitution. Reproduced here because this
+     *    path skips that resolver entirely; without it the second look would
+     *    spend data replacing a file the user deliberately saved.
+     *
+     * @param durationSec the runtime the decoder reports, waited for by the
+     *   caller — needed here to turn the size of the cache entry into a
+     *   bitrate. See [cachedFloor].
+     */
+    private suspend fun adoptCachedTrack(mediaId: String, uri: Uri, durationSec: Int?): Boolean {
+        val format = withContext(Dispatchers.Main) {
+            player
+                ?.takeIf { it.currentMediaItem?.mediaId == mediaId && audioFormatFor == mediaId }
+                ?.audioFormat
+        } ?: return false
+        val mime = format.sampleMimeType ?: return false
+        val videoId = uri.getQueryParameter("v") ?: return false
+        val downloaded = com.music.yzmusic.download.Downloads.savedUri(this, videoId) != null
+        if (downloaded) return false
+        return QualityUpgrade.adoptUnresolved(
+            mediaId = mediaId,
+            uri = uri,
+            target = SourceResolver.targetIn(uri),
+            playingMime = mime,
+            playing = withContext(Dispatchers.IO) { cachedFloor(uri, format, durationSec) },
+        )
+    }
+
+    /**
+     * How good the bytes already on disk are, in the only terms a track nothing
+     * resolved can be measured in.
+     *
+     * Two measurements, in order of directness:
+     *
+     *  - **What the decoder says.** `Format.bitrate` is populated for the
+     *    containers that carry the field, which for what YZ Music plays means
+     *    MP4/AAC — the 320kbps copy a module served last session reports itself
+     *    exactly.
+     *  - **What the cache entry weighs.** Opus in WebM, which is what YouTube
+     *    serves and so what most base entries hold, states no bitrate at all;
+     *    but the rendition's full length is recorded in the cache index, and
+     *    bytes over seconds *is* a bitrate. Slightly high, because container
+     *    overhead counts toward the byte total and not toward the audio — which
+     *    errs toward leaving the track alone, the right direction for a figure
+     *    that decides whether to cut into playing audio.
+     *
+     * Null only when neither is available: an entry whose content length was
+     * never recorded, or a runtime the decoder never reported. That is the old
+     * behaviour of this path, and it is now the exception rather than the rule.
+     *
+     * The codec is deliberately not filled in. [StreamFormat.isLossless] reads
+     * it, and a name carried over from the decoder's mime type would have to be
+     * translated to be recognised — where being wrong means claiming a cached
+     * stream is already lossless and abandoning the upgrade. Only the bitrate
+     * is wanted here; [QualityUpgrade.adoptUnresolved] settles the lossless
+     * question separately, from the mime type itself.
+     */
+    private fun cachedFloor(uri: Uri, format: Format, durationSec: Int?): StreamFormat? {
+        format.bitrate.takeIf { it != Format.NO_VALUE && it > 0 }?.let {
+            return StreamFormat(kbps = it / 1000)
+        }
+        val seconds = durationSec?.takeIf { it > 0 } ?: return null
+        val bytes = AudioCache.contentLengthOf(uri).takeIf { it > 0 } ?: return null
+        return StreamFormat(kbps = (bytes * 8 / seconds / 1000).toInt())
+    }
+
+    /** Where the playing track stands, read off the player in one hop. */
+    private class SwapPoint(
