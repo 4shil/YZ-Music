@@ -33,3 +33,29 @@ object LastPlayed {
         // tracks by the end of an evening. Store a window around where we are
         // instead of the lot — the current track has to be inside it, and what
         // follows is what resuming actually plays.
+        val start = (index - KEEP_BEHIND).coerceIn(0, maxOf(0, songs.size - MAX_TRACKS))
+        val window = songs.subList(start, minOf(songs.size, start + MAX_TRACKS))
+        val stored = StoredQueue(
+            tracks = window.map {
+                StoredTrack(
+                    it.videoId,
+                    it.title,
+                    it.artist,
+                    it.thumbnailUrl,
+                    it.fromAutoplay,
+                    it.localUri,
+                    it.localPath,
+                    it.durationText,
+                )
+            },
+            index = (index - start).coerceIn(0, window.lastIndex),
+            positionMs = positionMs.coerceAtLeast(0L),
+        )
+        prefs.edit()
+            .putString(
+                KEY_QUEUE,
+                runCatching { json.encodeToString(StoredQueue.serializer(), stored) }.getOrNull(),
+            )
+            .apply()
+    }
+
