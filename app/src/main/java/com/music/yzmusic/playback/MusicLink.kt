@@ -107,3 +107,43 @@ object MusicLink {
      */
     fun parse(uri: Uri): LinkRequest? {
         val host = uri.host?.lowercase()?.removePrefix("www.") ?: return null
+        val segments = uri.pathSegments.orEmpty()
+        if (host == "youtu.be") {
+            return segments.firstOrNull()?.let(::track)
+        }
+        if (host != "youtube.com" && host != "music.youtube.com" && host != "m.youtube.com") {
+            return null
+        }
+        val list = uri.getQueryParameter("list")?.trim().orEmpty()
+        return when (segments.firstOrNull()) {
+            // A watch link often carries the playlist it was opened from as
+            // well. The video is what was tapped, so it wins; the list only
+            // stands in when the link names no video at all, which is how YT
+            // Music writes "play this album" links.
+            "watch" -> uri.getQueryParameter("v")?.let(::track) ?: playlist(list)
+            "playlist" -> playlist(list)
+            // A Short and an embed are both a bare id in the path.
+            "shorts", "embed", "v" -> segments.getOrNull(1)?.let(::track)
+            // `channel/UC…` is an artist; `browse/MPREb…` is a release. Both
+            // are browse ids already, so neither needs rewriting.
+            "channel", "browse" -> segments.getOrNull(1)?.takeIf { it.isNotBlank() }
+                ?.let(LinkRequest::Page)
+            "search" -> uri.getQueryParameter("q")?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { LinkRequest.Search(it, play = false) }
+            // A link to nothing in particular — music.youtube.com itself, an
+            // account page. Opening the app on its own tab is the right answer,
+            // and that has already happened by the time this is read.
+            else -> list.takeIf { it.isNotEmpty() }?.let { playlist(it) }
+        }
+    }
+
+    private fun track(videoId: String): LinkRequest.Track? =
+        videoId.trim().takeIf { it.isNotEmpty() }?.let(LinkRequest::Track)
+
+    /**
+     * A playlist id as the browse id its page is fetched under.
+     *
+     * `VL` is the prefix every playlist browse carries — an album's
+     * `OLAK5uy_…` share id included, which is the shape a "share this album"
+     * link out of YT Music actually has.
+     */
