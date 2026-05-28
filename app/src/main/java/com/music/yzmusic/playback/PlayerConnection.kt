@@ -75,3 +75,16 @@ data class PlayerState(
     val isLoading: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val queue: List<Song> = emptyList(),
+    val queueIndex: Int = 0,
+    /**
+     * Whether the queue has somewhere to go either side of the current track.
+     * Taken from the player rather than [queueIndex], so the wrap-around of
+     * repeat-all is already accounted for.
+     */
+    val hasPrevious: Boolean = false,
+    val hasNext: Boolean = false,
+)
+
+/** Binds to [PlaybackService] for the lifetime of the composition. */
+@Composable
+fun rememberMediaController(): MediaController? {
