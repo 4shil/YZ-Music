@@ -72,3 +72,29 @@ class DynamicLruCacheEvictor(
 
     override fun onCacheInitialized() = Unit
 
+    override fun onStartFile(cache: Cache, key: String, position: Long, length: Long) {
+        if (length != C.LENGTH_UNSET.toLong()) {
+            evictCache(cache, length)
+        }
+    }
+
+    override fun onSpanAdded(cache: Cache, span: CacheSpan) {
+        if (isHead(span) && protectedSize + span.length <= headBudgetBytes) {
+            protectedHeads.add(span)
+            protectedSize += span.length
+        } else {
+            leastRecentlyUsed.add(span)
+        }
+        currentSize += span.length
+        evictCache(cache, 0)
+    }
+
+    override fun onSpanRemoved(cache: Cache, span: CacheSpan) {
+        if (protectedHeads.remove(span)) {
+            protectedSize -= span.length
+        } else {
+            leastRecentlyUsed.remove(span)
+        }
+        currentSize -= span.length
+    }
+
