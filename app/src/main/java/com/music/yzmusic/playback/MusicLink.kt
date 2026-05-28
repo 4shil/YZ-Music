@@ -106,3 +106,4 @@ object MusicLink {
      * as through the browser.
      */
     fun parse(uri: Uri): LinkRequest? {
+        val host = uri.host?.lowercase()?.removePrefix("www.") ?: return null
