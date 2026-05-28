@@ -98,3 +98,13 @@ class DynamicLruCacheEvictor(
         currentSize -= span.length
     }
 
+    override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) {
+        onSpanRemoved(cache, oldSpan)
+        onSpanAdded(cache, newSpan)
+    }
+
+    /**
+     * Reclaims space right away when [maxBytes] drops, rather than waiting for
+     * the next write to notice — otherwise a lowered limit only takes effect
+     * whenever the listener next happens to play something.
+     */
