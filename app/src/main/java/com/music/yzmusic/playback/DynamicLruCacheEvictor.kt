@@ -108,3 +108,32 @@ class DynamicLruCacheEvictor(
      * the next write to notice — otherwise a lowered limit only takes effect
      * whenever the listener next happens to play something.
      */
+    fun applyNow(cache: Cache) = evictCache(cache, 0)
+
+    private fun evictCache(cache: Cache, requiredSpace: Long) {
+        while (currentSize + requiredSpace > maxBytes) {
+            if (leastRecentlyUsed.isNotEmpty()) {
+                cache.removeSpan(leastRecentlyUsed.first())
+                continue
+            }
+            // Nothing left but protected heads. Releasing the oldest back to
+            // ordinary LRU is what stops the exemption from becoming a way to
+            // wedge the cache above its own ceiling: the loop then evicts it on
+            // the next pass like any other span.
+            val oldest = protectedHeads.pollFirst() ?: return
+            protectedSize -= oldest.length
+            leastRecentlyUsed.add(oldest)
+        }
+    }
+
+    private companion object {
+        /** Twelve seconds of lossless, comfortably: what the head-only analysis pass reads. */
+        const val DEFAULT_HEAD_BYTES = 4L * 1024 * 1024
+
+        /**
+         * Total held back from eviction. Roughly a hundred compressed openings,
+         * or a couple of dozen lossless ones — enough that a session's worth of
+         * tracks stay analysable without meaningfully denting the cache.
+         */
+        const val DEFAULT_HEAD_BUDGET_BYTES = 96L * 1024 * 1024
+
