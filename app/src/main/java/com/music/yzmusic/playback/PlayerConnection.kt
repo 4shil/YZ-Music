@@ -72,3 +72,6 @@ data class PlayerState(
     val durationMs: Long = 0L,
     val error: String? = null,
     /** True while ExoPlayer is buffering — including our own stream-URL resolution. */
+    val isLoading: Boolean = false,
+    val repeatMode: Int = Player.REPEAT_MODE_OFF,
+    val queue: List<Song> = emptyList(),
