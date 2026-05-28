@@ -23,3 +23,13 @@ object LastPlayed {
     private lateinit var prefs: SharedPreferences
     private val json = Json { ignoreUnknownKeys = true }
 
+    fun init(context: Context) {
+        prefs = context.getSharedPreferences("bitchord_last_played", Context.MODE_PRIVATE)
+    }
+
+    fun save(songs: List<Song>, index: Int, positionMs: Long) {
+        if (songs.isEmpty()) return
+        // AutoPlay keeps extending the queue, so it can run to hundreds of
+        // tracks by the end of an evening. Store a window around where we are
+        // instead of the lot — the current track has to be inside it, and what
+        // follows is what resuming actually plays.
