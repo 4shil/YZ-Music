@@ -437,3 +437,100 @@ class PlaybackService : MediaSessionService() {
          * being pressed, and nothing happened — which is exactly what a
          * broken app looks like from the outside.
          */
+        override fun onPlayerError(error: PlaybackException) {
+            // The player this fired on, which is by definition the one the
+            // session is currently pointed at.
+            val exoPlayer = player ?: return
+            recoverFrom(error, exoPlayer)
+        }
+
+        // Nothing follows the last track, so there is no transition to
+        // pause on — the queue simply runs out and the timer is spent.
+        override fun onPlaybackStateChanged(state: Int) {
+            // The player this fired on, which is by definition the one the
+            // session is currently pointed at.
+            val exoPlayer = player ?: return
+            if (state == Player.STATE_ENDED) {
+                SleepTimer.cancel()
+                // The queue ran dry, so no transition will ever close the last
+                // track out. Without this its history entry keeps whatever
+                // watchtime the 30-second sampler happened to have reported and
+                // is never marked finished — so the one play most likely to be
+                // a full, deliberate listen is the one recorded as abandoned.
+                PlaybackTracker.onPlaybackFinished(lastPositionSeconds)
+                lastPositionSeconds = 0
+                // The last track finished with nothing after it, so no
+                // transition will ever close it out. Scrobble it now.
+                val lastSong = listenBrainzSong
+                if (lastSong != null && listenBrainzStartMs > 0L) {
+                    val lastStart = listenBrainzStartMs
+                    val lastDuration = listenBrainzDurationMs
+                        ?: exoPlayer.duration.takeIf { it > 0 }
+                    submitListenBrainzFinished(lastSong, lastStart, lastDuration)
+                }
+                listenBrainzSong = null
+                listenBrainzStartMs = 0L
+                listenBrainzDurationMs = null
+            }
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            val previous = lastRepeatMode
+            lastRepeatMode = repeatMode
+            // Repeat-all loops the queue as it stands; AutoPlay's tracks are the
+            // opposite of that — an endless supply of new ones — so they come
+            // back out first, and native REPEAT_MODE_ALL then wraps a plain
+            // queue exactly as it should. [loadAutoplayForCurrentTrack] leaves
+            // it alone for as long as repeat-all stays on.
+            //
+            // Done here rather than in the UI that used to do it because this is
+            // the only place that sees the *previous* mode, and taking the
+            // tracks back is only half the job: they have to go in again when
+            // the loop ends, or a listener who cycles repeat on and straight
+            // back off is left with a queue that simply stops after the playing
+            // track.
+            when {
+                repeatMode == Player.REPEAT_MODE_ALL -> stashAutoplayTracks()
+                previous == Player.REPEAT_MODE_ALL -> restoreAutoplayTracks()
+            }
+            // Turning repeat-all back off can leave the current item at the end
+            // of the queue, which is the same trigger as a normal transition.
+            loadAutoplayForCurrentTrack()
+        }
+
+        /**
+         * AutoPlay appends to the queue after the transition that ran it
+         * dry, so the track to read ahead for often only exists once the
+         * timeline has changed.
+         */
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            // The player this fired on, which is by definition the one the
+            // session is currently pointed at.
+            val exoPlayer = player ?: return
+            if (exoPlayer.isPlaying) prefetchAround(exoPlayer)
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                mediaSession?.setCustomLayout(notificationButtons())
+            }
+        }
+    }
+
+    /** Registered alongside [playbackListener], and moved with it. */
+    private val formatListener = object : AnalyticsListener {
+        override fun onAudioInputFormatChanged(
+            eventTime: AnalyticsListener.EventTime,
+            format: Format,
+            decoderReuseEvaluation: DecoderReuseEvaluation?,
+        ) {
+            // Taken off the event's own window rather than off the player,
+            // so it names the track this format arrived for even if the
+            // queue has moved on again since. See [audioFormatFor].
+            audioFormatFor = eventTime.mediaId()
+            // Ground truth for a real-device listening test: this is the
+            // renderer's own Format, straight off the decoder with none of
+            // the app's caching/upgrade logic in between, so it's the one
+            // line that can prove a "hi-res" session never quietly slid
+            // onto a lower-rate stream mid-track. `adb logcat -s DECODE:I`.
+            val khz = format.sampleRate.takeIf { it != Format.NO_VALUE }
+                ?.let { "%.1fkHz".format(Locale.ROOT, it / 1000.0) } ?: "?kHz"
+            val kbps = format.bitrate.takeIf { it != Format.NO_VALUE }
+                ?.let { "${it / 1000}kbps" } ?: "bitrate n/a"
