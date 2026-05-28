@@ -62,3 +62,14 @@ object MusicLink {
     val pending: StateFlow<LinkRequest?> = _pending.asStateFlow()
 
     /** Reads an incoming intent, and reports whether it carried a request. */
+    fun consume(intent: Intent?): Boolean {
+        if (intent == null || intent.getBooleanExtra(EXTRA_CONSUMED, false)) return false
+        val request = when (intent.action) {
+            Intent.ACTION_VIEW -> intent.data?.let(::parse)
+            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+                ?.let(::firstUrl)
+                ?.let { parse(Uri.parse(it)) }
+            // The assistant's "play <something>". An empty query is the whole
+            // point of the Resume case: "play music" names nothing, and the
+            // useful answer is to carry on with what was already on.
+            MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> {
