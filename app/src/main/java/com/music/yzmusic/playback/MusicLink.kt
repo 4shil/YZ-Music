@@ -147,3 +147,19 @@ object MusicLink {
      * `OLAK5uy_…` share id included, which is the shape a "share this album"
      * link out of YT Music actually has.
      */
+    private fun playlist(listId: String): LinkRequest.Page? {
+        if (listId.isEmpty()) return null
+        return LinkRequest.Page(if (listId.startsWith("VL")) listId else "VL$listId")
+    }
+
+    /**
+     * The first http(s) URL in shared text.
+     *
+     * Share sheets rarely send the bare link: YT Music sends the song's title
+     * and a newline before it, other apps wrap it in a sentence.
+     */
+    private fun firstUrl(text: String): String? =
+        URL_IN_TEXT.find(text)?.value
+
+    private val URL_IN_TEXT = Regex("""https?://\S+""")
+}
