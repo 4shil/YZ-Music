@@ -88,3 +88,8 @@ data class PlayerState(
 /** Binds to [PlaybackService] for the lifetime of the composition. */
 @Composable
 fun rememberMediaController(): MediaController? {
+    val context = LocalContext.current
+    var controller by remember { mutableStateOf<MediaController?>(null) }
+
+    DisposableEffect(context) {
+        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
