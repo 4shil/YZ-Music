@@ -59,3 +59,5 @@ object LastPlayed {
             .apply()
     }
 
+    fun load(): Snapshot? {
+        val raw = prefs.getString(KEY_QUEUE, null) ?: return null
