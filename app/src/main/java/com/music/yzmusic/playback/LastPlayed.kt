@@ -117,3 +117,15 @@ object LastPlayed {
 
     @Serializable
     private data class StoredQueue(
+        val tracks: List<StoredTrack>,
+        val index: Int,
+        val positionMs: Long,
+    )
+
+    /** How much of what's already been played is worth keeping for "previous". */
+    private const val KEEP_BEHIND = 10
+
+    private const val MAX_TRACKS = 60
+
+    private const val KEY_QUEUE = "queue"
+}
