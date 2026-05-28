@@ -534,3 +534,234 @@ class PlaybackService : MediaSessionService() {
                 ?.let { "%.1fkHz".format(Locale.ROOT, it / 1000.0) } ?: "?kHz"
             val kbps = format.bitrate.takeIf { it != Format.NO_VALUE }
                 ?.let { "${it / 1000}kbps" } ?: "bitrate n/a"
+            val depth = bitDepthOf(format.pcmEncoding)?.let { "${it}-bit" } ?: "?-bit"
+            TrackLog.i(
+                "DECODE",
+                "$audioFormatFor <- ${format.sampleMimeType} $khz $kbps $depth ${format.channelCount}ch",
+                about = audioFormatFor,
+            )
+            publishNerdStats()
+        }
+
+        /**
+         * The seam, measured rather than described. This fires when the
+         * audio track starts putting samples out again after the sink was
+         * flushed, which for a quality swap is the exact instant the music
+         * comes back — and the gap between it and the swap is the only
+         * number that says whether any of the work above paid off. Every
+         * other timing here brackets a fetch, and a fetch being fast has
+         * repeatedly said nothing about whether the listener heard a hole.
+         */
+        override fun onAudioPositionAdvancing(
+            eventTime: AnalyticsListener.EventTime,
+            playoutStartSystemTimeMs: Long,
+        ) {
+            val cutAt = swapCutAt ?: return
+            swapCutAt = null
+            TrackLog.d(
+                "YZ Music",
+                "swap seam: ${SystemClock.elapsedRealtime() - cutAt}ms of silence",
+                about = eventTime.mediaId(),
+            )
+        }
+
+        /**
+         * The three legs the seam breaks into, logged separately because
+         * they have entirely different fixes: getting the new source
+         * loaded and past the load control's gate, standing a decoder up,
+         * and opening an audio track. Only the first is ours to shorten.
+         */
+        override fun onPlaybackStateChanged(eventTime: AnalyticsListener.EventTime, state: Int) {
+            val cutAt = swapCutAt ?: return
+            if (state == Player.STATE_READY) {
+                TrackLog.d(
+                    "YZ Music",
+                    "swap leg: ready ${SystemClock.elapsedRealtime() - cutAt}ms after the cut",
+                    about = eventTime.mediaId(),
+                )
+            }
+        }
+
+        override fun onAudioDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMs: Long,
+        ) {
+            val cutAt = swapCutAt ?: return
+            TrackLog.d(
+                "YZ Music",
+                "swap leg: $decoderName stood up in ${initializationDurationMs}ms, " +
+                    "${SystemClock.elapsedRealtime() - cutAt}ms after the cut",
+                about = eventTime.mediaId(),
+            )
+        }
+    }
+
+    /**
+     * Which track an analytics event is about, taken off the event's own window.
+     *
+     * The player has moved on by the time some of these arrive — a format
+     * change for the outgoing track lands after the transition — so its
+     * `currentMediaItem` names the wrong one. The event carries the timeline it
+     * was raised against, which does not.
+     */
+    private fun AnalyticsListener.EventTime.mediaId(): String? = timeline
+        .takeIf { windowIndex < it.windowCount }
+        ?.getWindow(windowIndex, Timeline.Window())
+        ?.mediaItem
+        ?.mediaId
+
+    override fun onCreate() {
+        super.onCreate()
+
+        // First, because everything below assumes it is standing up fresh and
+        // one of the two ways this service starts does not give it that.
+        //
+        // A cold start runs in a new process, where the session-scoped state
+        // these two hold is empty anyway. A *warm* one doesn't: closing the app
+        // destroys the service while Android keeps the process to reuse, so
+        // without this a second service inherits the first one's idea of what
+        // was playing and what has already been asked about. That cost the
+        // reported bug all three of its symptoms — a badge reading "Lossless"
+        // over a player holding no bytes, and a track that had been upgraded to
+        // FLAC playing its cached Opus with no second look, permanently, because
+        // its id was still recorded as answered. Both are documented where the
+        // state lives.
+        NerdStats.forgetLastSession()
+        QualityUpgrade.forgetLastSession()
+
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider.Builder(this)
+                .setChannelId(CHANNEL_ID)
+                .setChannelName(R.string.playback_channel_name)
+                .build()
+                .apply { setSmallIcon(R.drawable.ic_notification_logo) },
+        )
+
+        // The player screen toggles QueueShuffle directly on its MediaController.
+        // Observe the shared state here so the notification's Shuffle icon and
+        // label follow that toggle immediately as well.
+        scope.launch {
+            QueueShuffle.enabled
+                .collectLatest {
+                    mediaSession?.setCustomLayout(notificationButtons())
+                }
+        }
+        scope.launch {
+            LikeState.overrides.collectLatest {
+                mediaSession?.setCustomLayout(notificationButtons())
+            }
+        }
+
+        // No user agent on the factory: the right one depends on which client
+        // minted the URL, so it is set per request below. Setting it here as
+        // well would not override that — OkHttpDataSource *appends* the
+        // factory's agent after the request's, and the fetch would go out
+        // carrying two contradictory User-Agent headers.
+        val resolvingFactory = ResolvingDataSource.Factory(
+            // Innermost, so it chunks the real googlevideo URL the resolver
+            // below has already substituted in — see [ChunkedDataSource] for
+            // why an open-ended read of one is worth avoiding.
+            ChunkedDataSource.Factory(OkHttpDataSource.Factory(Http.client), STREAM_CHUNK_BYTES),
+        ) { dataSpec ->
+            // Which track everything below is for, said once, because none of
+            // it would otherwise know: this runs on ExoPlayer's loader thread
+            // with a DataSpec and nothing else, and the work it starts — the
+            // source ladder, the module sandbox, a client walk — logs from
+            // places several layers deep that have no idea whose bytes they
+            // are fetching. Read-ahead means the track being resolved here is
+            // usually *not* the one playing, which is exactly why the lines
+            // have to say. See [TrackLog.about].
+            val about = TrackLog.about(mediaIdIn(dataSpec.uri))
+            // A source-backed track is resolved by whichever source can serve
+            // it, which is not necessarily the one it was queued from — see
+            // [SourceResolver.resolve]. Handled ahead of the YouTube path
+            // because these carry no `v` parameter and would otherwise fall
+            // straight through unresolved.
+            if (dataSpec.uri.authority == "source") {
+                val stream = runBlocking(about) {
+                    withTimeout(RESOLVE_TIMEOUT_MS) { SourceResolver.resolve(dataSpec.uri) }
+                } ?: throw java.io.IOException("No enabled source could serve ${dataSpec.uri.getQueryParameter("n")}")
+                NerdStats.onSourceStream(dataSpec.uri.getQueryParameter("t"), stream.format)
+                return@Factory dataSpec.buildUpon()
+                    .setUri(Uri.parse(stream.url))
+                    .setHttpRequestHeaders(stream.headers)
+                    .build()
+            }
+            val videoId = dataSpec.uri.getQueryParameter("v")
+                ?: return@Factory dataSpec
+            // An upgraded item carries a marker and its stream has already
+            // been found — see [QualityUpgrade]. Answered before anything
+            // else, and without re-resolving: this exact URL is what the
+            // player was told it was getting when it agreed to the swap.
+            QualityUpgrade.forcedStream(dataSpec.uri)?.let { upgraded ->
+                // An audition opens this same stream before a note of the one
+                // playing has been touched — see [auditionUpgrade] — so what it
+                // is about to be handed describes a swap that has not happened
+                // and may never. Recording it here would light "Lossless" over
+                // the lossy stream still coming out of the speaker. The real
+                // open, moments later, records it.
+                val proving = QualityUpgrade.isAuditioning(videoId)
+                if (!proving) NerdStats.onSourceStream(videoId, upgraded.format)
+                // Logged because the alternative — a swap that silently never
+                // reached its stream — is indistinguishable in the logs from
+                // one that reached it and got nothing back, and the two have
+                // opposite fixes.
+                TrackLog.d(
+                    "YZ Music",
+                    "${if (proving) "auditioning" else "serving"} upgraded $videoId " +
+                        "from ${Uri.parse(upgraded.url).host} " +
+                        "at ${dataSpec.position} (${upgraded.format.summary})",
+                    about = videoId,
+                )
+                return@Factory dataSpec.buildUpon()
+                    .setUri(Uri.parse(upgraded.url))
+                    .setHttpRequestHeaders(upgraded.headers)
+                    .build()
+            }
+            // A downloaded copy is *not* substituted here, deliberately. This
+            // point is inside the HTTP-only half of the chain — below
+            // DefaultDataSource, which has already given up on dispatching by
+            // scheme, and below the cache bypass that keeps local files from
+            // being written to disk a second time. A content:// URI returned
+            // from here reaches OkHttp, which refuses it as a malformed URL.
+            // Which copy of a track to play is settled where the item is built
+            // instead: see [Song.toMediaItem].
+            // Whoever is already filling this track's cache entry keeps it.
+            // Everything below decides between servers holding *different
+            // files*, and this method is called again for every re-open of a
+            // track — including the continuation fetch when playback runs off
+            // the end of the cached bytes. Deciding afresh each time is how
+            // the middle of an MP4 ended up appended to a WebM. See
+            // [StreamChoice].
+            StreamChoice.of(videoId)?.let { serving ->
+                // What the stream claims to be, restated on every open rather
+                // than only on the one that chose it.
+                //
+                // The race below is what used to report this, and it was enough
+                // while the race was the only way a substitution could be made.
+                // Read-ahead now pins one before the track is reached, so a
+                // warmed track arrives *here* on its very first open and never
+                // reaches the race at all — leaving the player with a 320kbps
+                // stream and nothing on record saying so, and the quality badge
+                // reading blank until the decoder got far enough to measure it
+                // for itself.
+                //
+                // Only when the format states something. A plain YouTube choice
+                // is remembered with an empty one, and writing that over a
+                // claim some other path made would be worse than saying nothing.
+                if (serving.format != StreamFormat()) {
+                    NerdStats.onSourceStream(videoId, serving.format)
+                }
+                return@Factory dataSpec.buildUpon()
+                    .setUri(Uri.parse(serving.url))
+                    .setHttpRequestHeaders(serving.headers)
+                    .build()
+            }
+            // A track queued from YouTube may be held by a source the user
+            // ranked above it — see [SourceResolver.substituteForYouTube] and
+            // [raceYouTubeOrModule]. Only worth the extra lookup when
+            // something actually outranks YouTube; otherwise this is the
+            // plain resolve every build before this one made.
+            if (!SourceResolver.canSubstituteForYouTube()) {
