@@ -91,3 +91,18 @@ object MusicLink {
      * next one, which is the shared song starting over on the first
      * configuration change.
      */
+    fun handled() {
+        _pending.value = null
+    }
+
+    /**
+     * What a YouTube or YouTube Music URL points at, or null for one this app
+     * has nothing to show for.
+     *
+     * Deliberately forgiving about the host: `music.youtube.com`,
+     * `www.youtube.com`, `m.youtube.com` and `youtu.be` all address the same
+     * catalogue with the same ids, and a link is just as likely to arrive
+     * through a share sheet — where the manifest's host list never applies —
+     * as through the browser.
+     */
+    fun parse(uri: Uri): LinkRequest? {
