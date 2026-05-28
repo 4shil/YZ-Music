@@ -124,3 +124,38 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
         val player = controller ?: return@DisposableEffect onDispose {}
 
         fun sync(error: String? = null) {
+            val item = player.currentMediaItem
+            // Synced here too, so seeking while paused or buffering still moves
+            // the scrubber (the poll loop only runs on play).
+            position.positionMs = player.currentPosition.coerceAtLeast(0L)
+            state = state.copy(
+                song = item?.toSong(),
+                isPlaying = player.isPlaying,
+                durationMs = player.duration.coerceAtLeast(0L),
+                error = error,
+                isLoading = player.playbackState == Player.STATE_BUFFERING,
+                repeatMode = player.repeatMode,
+                queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toSong() },
+                queueIndex = player.currentMediaItemIndex,
+                hasPrevious = player.hasPreviousMediaItem(),
+                hasNext = player.hasNextMediaItem(),
+            )
+        }
+
+        val listener = object : Player.Listener {
+            override fun onEvents(p: Player, events: Player.Events) = sync(state.error)
+            override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) {
+                sync(error?.let { "Playback failed: ${it.errorCodeName}" })
+            }
+        }
+        player.addListener(listener)
+        sync()
+        onDispose { player.removeListener(listener) }
+    }
+
+    // Only while the app is on screen. The poll exists to move a scrubber, and
+    // a scrubber behind a locked screen is not being read — but the loop is a
+    // plain `delay`, so without this it went on making two binder round-trips a
+    // second to the media session for the whole time the phone was in a pocket.
+    // Nothing is lost by stopping: `sync` above runs on the controller's own
+    // events, and the first thing that happens on the way back is a fresh read.
