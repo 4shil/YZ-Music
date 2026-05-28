@@ -1087,3 +1087,231 @@ class PlaybackService : MediaSessionService() {
     private fun toggleFavoriteFromNotification(videoId: String) {
         favoriteActionJob?.cancel()
         val previous = LikeState.overrides.value[videoId] ?: LikeStatus.INDIFFERENT
+        val target = if (previous == LikeStatus.LIKE) {
+            LikeStatus.INDIFFERENT
+        } else {
+            LikeStatus.LIKE
+        }
+
+        // Match the player UI: update both surfaces immediately, then reconcile
+        // the optimistic state with YouTube in the background.
+        LikeState.set(videoId, target)
+        mediaSession?.setCustomLayout(notificationButtons())
+        favoriteActionJob = scope.launch {
+            YtMusicRepository.rate(videoId, target)
+                .onFailure {
+                    LikeState.set(videoId, previous)
+                    mediaSession?.setCustomLayout(notificationButtons())
+                    TrackLog.w("YZ Music", "notification favorite failed: ${it.message}", about = videoId)
+                }
+        }
+    }
+
+    /**
+     * Both players, built identically. Only [ownsSession] differs, and only at
+     * construction — it moves at every handoff, see [setSessionOwner].
+     *
+     * They share the media source factory, so whichever one is arming reads from
+     * the same on-disk cache the other is playing out of rather than
+     * re-resolving a stream URL for audio that is already local.
+     */
+    private fun buildPlayer(
+        spatial: SpatialAudioProcessor,
+        filter: TransitionFilterProcessor,
+        ownsSession: Boolean,
+    ): ExoPlayer = ExoPlayer.Builder(this)
+        .setRenderersFactory(silenceSkippingRenderers(spatial, filter))
+        .setMediaSourceFactory(requireNotNull(mediaSourceFactory))
+        .setLoadControl(farBufferingLoadControl())
+        .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
+        .setHandleAudioBecomingNoisy(ownsSession)
+        // Back restarts the track once you're this far into it; only a
+        // press before that steps to the previous one.
+        .setMaxSeekToPreviousPositionMs(BACK_RESTARTS_AFTER_MS)
+        .build()
+
+    /**
+     * Moves the session onto the player the crossfade has just started the
+     * incoming track on. This is the whole of the handoff: no seek, no
+     * re-buffer, and no audio rendered twice.
+     *
+     * Order matters in one place — focus is released on the outgoing player
+     * *before* the incoming one asks for it, so the app never holds two focus
+     * requests at once and never briefly holds none.
+     */
+    private fun adoptPlayer(outgoing: ExoPlayer, incoming: ExoPlayer) {
+        setSessionOwner(outgoing, owns = false)
+        setSessionOwner(incoming, owns = true)
+
+        outgoing.removeListener(playbackListener)
+        outgoing.removeAnalyticsListener(formatListener)
+        // The fields move before the listeners are attached, so anything the
+        // first callback reads already describes the new arrangement.
+        player = incoming
+        spare = outgoing
+        val heldFilter = activeFilter
+        activeFilter = spareFilter
+        spareFilter = heldFilter
+        incoming.addListener(playbackListener)
+        incoming.addAnalyticsListener(formatListener)
+
+        mediaSession?.player = SessionPlayer(incoming, requireNotNull(crossfade))
+
+        // The queue moving on used to arrive here as an item transition on the
+        // one player that owned the queue. It cannot any more — the incoming
+        // track started as its own player's *first* item, which fires on a
+        // player nothing was listening to yet — so the bookkeeping that hung off
+        // that callback is driven explicitly instead. Without this the crossfade
+        // would silently stop scrobbling, stop writing history, stop honouring
+        // "sleep after this song" and stop reading ahead.
+        onTrackBecameCurrent(
+            incoming.currentMediaItem,
+            previousEnded = true,
+            reason = Player.MEDIA_ITEM_TRANSITION_REASON_AUTO,
+            alreadyAudible = true,
+        )
+        // Autoplay replenishment: ensure stale state from outgoing player cannot
+        // suppress or interfere with the newly adopted player.
+        autoplayLoadJob?.cancel()
+        autoplayLoadJob = null
+        autoplaySeed = null
+        loadAutoplayForCurrentTrack()
+        mediaSession?.setCustomLayout(notificationButtons())
+    }
+
+    /**
+     * Only one player may handle audio focus at a time.
+     *
+     * Two focus-handling players in one process fight each other: the standby
+     * taking focus as it starts would have Media3 pause the player that lost it,
+     * cutting the outgoing track dead instead of fading it. Focus follows the
+     * session, and so does "becoming noisy" — unplugging headphones should pause
+     * the song you are listening to, which is whichever one the session is on.
+     */
+    private fun setSessionOwner(target: ExoPlayer, owns: Boolean) {
+        target.setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ owns)
+        target.setHandleAudioBecomingNoisy(owns)
+    }
+
+    /**
+     * Where a tap on the session lands. Media3 uses this both as the media
+     * notification's contentIntent and as the session activity handed to the
+     * platform MediaSession.
+     *
+     * This is not cosmetic on One UI: Samsung's Now Bar / Live Notification
+     * chip is a launcher for the session, so a session that advertises nowhere
+     * to go is skipped and only the plain shade notification survives. Same
+     * reason the notification itself was previously un-tappable.
+     */
+    private fun sessionActivity(): PendingIntent = PendingIntent.getActivity(
+        this,
+        0,
+        Intent(this, MainActivity::class.java)
+            .setAction(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            // MainActivity is singleTask, so this resumes the existing task
+            // rather than stacking a second copy of the UI.
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    private fun registerCurrentPlay() {
+        player?.currentMediaItem?.mediaId?.let(PlaybackTracker::onPlaying)
+    }
+
+    /**
+     * Everything that has to happen when a different song becomes the one
+     * playing: history, scrobbles, ListenBrainz, the sleep timer, read-ahead
+     * and the second look for a better copy.
+     *
+     * Called from two places, and it has to be, because there are now two ways
+     * for the current song to change. ExoPlayer's own item transition covers
+     * the ordinary ones — the queue advancing, a skip, a repeat. A crossfade
+     * covers none of them: the incoming track starts life as the *first* item
+     * of the other player, which fires a transition on a player nothing is
+     * listening to yet, so [adoptPlayer] calls this by hand at the handoff.
+     * Before that split existed this logic lived inside the callback, and
+     * moving to two players would have silently stopped every crossfaded track
+     * from being scrobbled, recorded, or read ahead for.
+     *
+     * @param previousEnded whether the song being replaced ran to its end, as
+     *   opposed to being skipped past. Only an ended song is a listen.
+     * @param alreadyAudible whether the track was already sounding when it
+     *   became current, which is only true of a crossfade handoff.
+     */
+    private fun onTrackBecameCurrent(
+        mediaItem: MediaItem?,
+        previousEnded: Boolean,
+        reason: Int,
+        alreadyAudible: Boolean = false,
+    ) {
+        val exoPlayer = player ?: return
+        // A *different* track is a clean slate for [recoverFrom], and so is the
+        // same track becoming current for any reason other than that method's
+        // own retry. The distinction is the whole of the reported loading loop.
+        //
+        // This was an unconditional clear, on the reasoning that the count exists
+        // to stop one broken stream looping rather than to hold a grudge for the
+        // session — and that reasoning is right about the listener pressing play
+        // again, which is why it is kept below. What it missed is that "a track
+        // became current" is not the same event as "something other than the
+        // retry happened": ExoPlayer fires a transition for PLAYLIST_CHANGED and
+        // for SEEK, and [recoverFrom]'s recovery *is* a seek — so the counter was
+        // reset by the very retries it was counting. The report shows four resets
+        // in 2m41s, each followed by a fresh "attempt 1", eight failures against
+        // a budget of two, and roughly twenty-seven full resolve walks for one
+        // unplayable track. [retryingMediaId] is the one case that must not
+        // reset; everything else still does.
+        val becameCurrent = mediaItem?.mediaId
+        if (becameCurrent == null || becameCurrent != retryingMediaId) {
+            recoveries.clear()
+        }
+        retryingMediaId = null
+
+        // Where the wait starts, for the log in onIsPlayingChanged — unless
+        // there was no wait. A crossfaded track has been audible for as long as
+        // it has been current, so `onIsPlayingChanged` will never fire for it
+        // and an armed timer would sit there until some unrelated buffering
+        // blip tripped it, reporting a wait of seconds for a track that started
+        // instantly. Measured one at 16871ms.
+        trackSelectedAt = if (alreadyAudible) null else SystemClock.elapsedRealtime()
+        if (alreadyAudible) {
+            TrackLog.d(
+                "YZ Music",
+                "TIMING first audio: 0ms, the crossfade covered it",
+                about = mediaItem?.mediaId,
+            )
+        }
+        // And the same instant on the wall clock, which is the one
+        // logcat stamps its lines with — see [TrackLog].
+        mediaItem?.mediaId?.let(TrackLog::onTrackStarted)
+        TrackLog.d(
+            "YZ Music",
+            "TIMING track selected: ${mediaItem?.mediaId} (reason=$reason)",
+            about = mediaItem?.mediaId,
+        )
+
+        // currentPosition already belongs to the new item by now, so
+        // the outgoing track is closed out on the last sampled value.
+        PlaybackTracker.onTrackChanged(lastPositionSeconds)
+        lastPositionSeconds = 0
+
+        // Scrobbling: stop old song, start new song
+        scrobbleManager?.onSongStop()
+        // And the local record, which needs the transition even when the track
+        // id doesn't change: repeat-one plays the same song again, and without
+        // this the second play through is a continuation of the first and is
+        // never counted.
+        ListeningRecorder.onStopped()
+        val newSong = mediaItem?.toSong()
+        val durationMs = exoPlayer.duration.takeIf { it > 0 }
+        if (exoPlayer.isPlaying) {
+            scrobbleManager?.onSongStart(newSong, durationMs)
+        }
+
+        // ListenBrainz: submit finished for old song, playing_now for new song.
+        // The finished listen only counts when the track actually ended —
+        // an auto-advance, a repeat, or a crossfade at the very end. A
+        // manual skip (SEEK) means the song wasn't listened to, so it must
+        // not be scrobbled.
+        val ended = previousEnded
