@@ -93,3 +93,34 @@ fun rememberMediaController(): MediaController? {
 
     DisposableEffect(context) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+        val future = MediaController.Builder(context, token).buildAsync()
+        future.addListener(
+            { controller = runCatching { future.get() }.getOrNull() },
+            ContextCompat.getMainExecutor(context),
+        )
+        onDispose {
+            MediaController.releaseFuture(future)
+            controller = null
+        }
+    }
+    return controller
+}
+
+/** Routes the player-screen AutoPlay button through the playback service. */
+fun MediaController.toggleAutoplay() {
+    sendCustomCommand(
+        SessionCommand(ACTION_TOGGLE_AUTOPLAY, Bundle.EMPTY),
+        Bundle.EMPTY,
+    )
+}
+
+/** Mirrors the controller into Compose state, polling position while playing. */
+@Composable
+fun rememberPlayerState(controller: MediaController?): PlayerState {
+    val position = remember { PlaybackPosition() }
+    var state by remember { mutableStateOf(PlayerState(position = position)) }
+
+    DisposableEffect(controller) {
+        val player = controller ?: return@DisposableEffect onDispose {}
+
+        fun sync(error: String? = null) {
