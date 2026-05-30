@@ -1,0 +1,25 @@
+﻿package com.music.yzmusic.playback
+
+import android.content.Intent
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+/**
+ * A request from outside the app to open the full player.
+ *
+ * Tapping a widget's artwork should land on the now-playing sheet, and there is
+ * nothing to hand that intent to: whether the sheet is up is `showNowPlaying`, a
+ * `remember`ed boolean inside `YZMusicApp`, which only exists once the
+ * composition is running and which
+ * [MainActivity][com.music.yzmusic.MainActivity] cannot reach. Because the
+ * activity is `singleTask`, the intent also arrives down two different paths
+ * depending on whether the app happened to be alive — `onCreate` for a cold
+ * launch, `onNewIntent` for every other time — so both relay through here and
+ * the composition watches this.
+ */
+object PlayerDeepLink {
+
+    /** Set on the widget's artwork intent. Nothing else sets it. */
+    const val EXTRA_OPEN_PLAYER = "yzmusic.openPlayer"
+
