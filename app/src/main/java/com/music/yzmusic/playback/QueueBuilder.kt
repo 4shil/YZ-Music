@@ -33,3 +33,11 @@ object QueueBuilder {
     fun extend(existing: List<Song>, candidates: List<Song>, limit: Int): List<Song> {
         val taken = existing.toMutableList()
         val perArtist = mutableMapOf<String, Int>()
+        val seedArtists = existing.lastOrNull()?.artist?.let(::artistSet).orEmpty()
+        val out = mutableListOf<Song>()
+
+        // A mix pairs all but every track with its own music-video upload —
+        // the same recording under a different id, titled far enough apart
+        // ("Dildaara (Stand By Me)" against "Lyrical Video: Dildara Song")
+        // that no title match will catch it. The catalogue cut is the one a
+        // music app wants; videos only stand in when there is nothing else.
