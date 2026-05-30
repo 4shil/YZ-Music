@@ -538,3 +538,12 @@ object QualityUpgrade {
     }
 
     /** The same URI, marked so that Media3 rebuilds the source and the cache keys it apart. */
+    fun upgradedUri(uri: String): String = "$uri&$MARKER=$UPGRADED"
+
+    /**
+     * The suffix that keeps an upgraded track's bytes off the copy it
+     * replaced — see [AudioCache]'s key factory for why sharing one entry
+     * between two renditions corrupts both.
+     */
+    fun cacheTag(uri: Uri): String? = uri.getQueryParameter(MARKER)
+}
