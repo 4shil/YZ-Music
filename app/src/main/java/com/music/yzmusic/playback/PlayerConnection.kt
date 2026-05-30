@@ -201,3 +201,89 @@ fun MediaItem.toSong() = Song(
 )
 
 /** @see Song.fromAutoplay */
+val MediaItem.fromAutoplay: Boolean
+    get() = mediaMetadata.extras?.getBoolean(EXTRA_FROM_AUTOPLAY) == true ||
+        mediaMetadata.extras?.getBoolean("bitchord.fromAutoplay") == true
+
+/**
+ * Marks a queue entry as AutoPlay's rather than the user's. Carried on the
+ * MediaItem so it survives the trip through the session — the queue belongs to
+ * the player, and the UI only ever sees it back through a MediaController.
+ */
+private const val EXTRA_FROM_AUTOPLAY = "yzmusic.fromAutoplay"
+
+/**
+ * The artist and album pages this track hangs under, when they are known.
+ *
+ * Carried so they survive the round trip through the session: the player's own
+ * menu backfills them with a lookup when they are missing (see MainActivity's
+ * `links`), but a queue restored after a restart, or a track read back by the
+ * service, has only what the item carries.
+ */
+private const val EXTRA_ARTIST_ID = "yzmusic.artistId"
+private const val EXTRA_ALBUM_ID = "yzmusic.albumId"
+
+/** @see Song.localUri */
+private const val EXTRA_LOCAL_URI = "yzmusic.localUri"
+
+/** @see Song.localPath */
+private const val EXTRA_LOCAL_PATH = "yzmusic.localPath"
+
+/**
+ * How long the track runs, as the row that queued it said.
+ *
+ * On the item rather than left to [MediaMetadata.durationMs] because that field
+ * is the *player's* to state, and the player takes its own figure from the
+ * decoder. This one is the claim a cross-source match is made on — see
+ * [TrackMatcher] — and the two disagree often enough that overwriting either
+ * with the other loses information. Carried so that [toSong] can give it back,
+ * which is what [LastPlayed] saves and what puts `&d=` on a restored track's
+ * playback URI.
+ */
+private const val EXTRA_DURATION = "yzmusic.durationText"
+
+/**
+ * Where AutoPlay's section of the queue begins, and so where a track queued by
+ * hand belongs — above the mix, below everything the user picked.
+ *
+ * Read as "the first of AutoPlay's tracks still to come", which is what keeps
+ * it below the playing track even when the mix itself is what's playing: the
+ * tracks of it already behind you count as played, and the section starts
+ * again below the needle. Tracks put in by hand there — "Play next" while the
+ * mix runs — stay above it too, for the same reason.
+ *
+ * The queue panel draws its AutoPlay heading at this same index.
+ */
+fun autoplaySectionStart(fromAutoplay: List<Boolean>, currentIndex: Int): Int {
+    val after = (currentIndex + 1).coerceIn(0, fromAutoplay.size)
+    return (after until fromAutoplay.size).firstOrNull { fromAutoplay[it] }
+        ?: fromAutoplay.size
+}
+
+fun MediaController.autoplaySectionStart(): Int = autoplaySectionStart(
+    fromAutoplay = (0 until mediaItemCount).map { getMediaItemAt(it).fromAutoplay },
+    currentIndex = currentMediaItemIndex,
+)
+
+/**
+ * Custom scheme; PlaybackService resolves the real stream URL at play time.
+ *
+ * A video-tagged [Song] is expected to already have been swapped for its
+ * catalogue audio release by [com.music.yzmusic.data.YtMusicRepository.resolveAudio]
+ * before this is called — the queue, history and the notification should
+ * never see the video upload's id or title, only whatever the audio match
+ * resolved to (or the video's own audio, as the deliberate fallback when no
+ * match was found).
+ */
+/**
+ * MP4-family containers (m4a/aac/amr/wma/...) store their header or trailing
+ * metadata in a way that needs backward seeking to parse, which the
+ * content:// route (ContentDataSource) doesn't reliably support — the same
+ * bytes read fine as a plain file. Formats like flac/mp3/ogg/webm already
+ * seek correctly through content:// and are left alone.
+ */
+private val DIRECT_FILE_URI_EXTENSIONS = setOf(
+    "m4a", "m4b", "m4p", "mp4", "aac", "3ga", "3gp", "3gpp",
+    "alac", "amr", "awb", "wma", "aif", "aiff", "ac3", "dts",
+)
+
