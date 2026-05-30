@@ -339,3 +339,100 @@ fun Song.toMediaItem(): MediaItem {
     // which is the one a resumed queue takes.
     val offlineUri = localUri?.takeUnless(Downloads::isMissingLocalFile)
         ?: Downloads.verifiedSavedUri(videoId)
+    val uriString = offlineUri ?: when {
+        videoId.startsWith("content://") || videoId.startsWith("file://") -> videoId
+        // Title, artist and runtime ride along in the URI because they are what
+        // a cross-source match is made on, and the resolver runs on ExoPlayer's
+        // loader thread with nothing but a DataSpec in hand — see
+        // [SourceResolver.resolve]. Read-ahead resolves tracks that aren't the
+        // current item, so reaching back for the session's metadata isn't an
+        // option either.
+        sourceTrack != null -> SourceRegistry.trackUri(sourceTrack.first, sourceTrack.second)
+            .let { "$it${matchQuery()}" }
+        // The same three fields, for the same reason, on the YouTube path: a
+        // source ranked above YouTube gets offered this track before YouTube
+        // resolves it — see [SourceResolver.substituteForYouTube] — and that
+        // match is made on them, which the loader thread has no other way to
+        // reach.
+        else -> "yzmusic://watch?v=$videoId${matchQuery()}"
+    }
+    return MediaItem.Builder()
+        .setMediaId(videoId)
+        .setUri(resolvePlaybackUri(uriString, localPath))
+    .setMediaMetadata(
+        MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(artist)
+            // The release this track came off, when whoever queued it knew.
+            //
+            // A native field rather than an extra because Media3 bundles this
+            // one across the session on its own, and because the lock screen and
+            // Android Auto both draw it — a track queued from an album page had
+            // the name in hand all along and was arriving at those surfaces
+            // without it. It is also what the Replay's album chart is counted
+            // on: read back off the player, a track with no album here is a
+            // track that cannot be filed under one.
+            .setAlbumTitle(albumName)
+            // Sized here rather than left as stored: this is what the lock
+            // screen, the notification and Android Auto draw, all of them
+            // large, and none of them go back for a better copy later.
+            .setArtworkUri(artworkAt(NOTIFICATION_ART_PX)?.toUri())
+            // System media surfaces (One UI's Now Bar, Android Auto, Assistant)
+            // classify a session by its media type; untyped sessions get treated
+            // as generic audio and lose the music-specific card.
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
+            // What a queue entry has to carry about itself: which section of
+            // the queue it belongs to, whether it is playing off the device,
+            // and how long the row that queued it said it runs. The uri two
+            // lines up answers the second question but does not survive the
+            // trip back out — Media3 leaves a MediaItem's localConfiguration
+            // out of the bundle it sends to a MediaController — so without this
+            // a track playing from a file reaches the UI looking like any other
+            // YouTube track, and the player's menu offers to rate, download and
+            // share it.
+            //
+            // Set for every track rather than only the local and AutoPlay ones,
+            // because the runtime applies to all of them: gated on those two, a
+            // plain YouTube track carried no extras at all, so [toSong] read
+            // back a null duration, [LastPlayed] stored a null, and the restored
+            // queue lost the `&d=` its matching depends on.
+            .apply {
+                if (fromAutoplay || offlineUri != null || durationText != null ||
+                    artistId != null || albumId != null
+                ) {
+                    setExtras(
+                        bundleOf(
+                            EXTRA_FROM_AUTOPLAY to fromAutoplay,
+                            EXTRA_LOCAL_URI to offlineUri,
+                            EXTRA_LOCAL_PATH to localPath,
+                            EXTRA_DURATION to durationText,
+                            EXTRA_ARTIST_ID to artistId,
+                            EXTRA_ALBUM_ID to albumId,
+                        ),
+                    )
+                }
+            }
+            .build(),
+    )
+    .build()
+}
+
+/**
+ * Which track a playback URI is for, as a media id — the inverse of the URI
+ * [toMediaItem] builds, as far as the identity goes.
+ *
+ * Needed because most of what this app does to a track happens somewhere that
+ * has only the URI: the resolver runs on ExoPlayer's loader thread with a
+ * DataSpec in hand, and read-ahead means the track being fetched is usually not
+ * the one playing. That is what makes it the answer to "whose log line is this"
+ * — see [com.music.yzmusic.data.TrackLog.about].
+ *
+ * Deliberately not the cache key, which looks similar and is not the same
+ * thing: that one splits a track's renditions apart on purpose and spells a
+ * source-backed track differently again, so filing lines under it would scatter
+ * one song's story across several names.
+ */
+fun mediaIdIn(uri: Uri): String? = if (uri.authority == "source") {
+    val configId = uri.getQueryParameter("s")
