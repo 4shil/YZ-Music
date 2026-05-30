@@ -3006,3 +3006,158 @@ class PlaybackService : MediaSessionService() {
                     secret = snapshot.secret,
                     sessionKey = snapshot.sessionKey,
                 )
+                val manager = scrobbleManager ?: ScrobbleManager(scope).also {
+                    scrobbleManager = it
+                }
+                manager.minSongDuration = snapshot.minDuration
+                manager.scrobbleDelayPercent = snapshot.delayPercent
+                manager.scrobbleDelaySeconds = snapshot.delaySeconds
+                manager.useNowPlaying = snapshot.nowPlaying
+
+                player?.let { exoPlayer ->
+                    if (exoPlayer.isPlaying) {
+                        manager.onPlayerStateChanged(
+                            isPlaying = true,
+                            song = exoPlayer.currentMediaItem?.toSong(),
+                            durationMs = exoPlayer.duration.takeIf { it > 0 },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private data class ScrobblingSnapshot(
+        val lastfmEnabled: Boolean,
+        val scrobbleEnabled: Boolean,
+        val nowPlaying: Boolean,
+        val sessionKey: String,
+        val apiKey: String,
+        val secret: String,
+        val endpoint: String,
+        val minDuration: Int,
+        val delayPercent: Float,
+        val delaySeconds: Int,
+    )
+
+    // ---- Discord Rich Presence -------------------------------------------------
+
+    /**
+     * Keeps the gateway connection in step with the settings that decide whether
+     * there should be one, and re-pushes the presence when the settings that
+     * decide what it *says* change.
+     *
+     * Two collectors rather than one because the two do different work. The
+     * account and the master switch can only be honoured by building or tearing
+     * down a connection; everything else is a field in a payload that can be
+     * re-sent over the connection already open. Combining them would reconnect
+     * the socket every time the user typed a character into a button label.
+     */
+    private fun observeDiscord() {
+        scope.launch {
+            combine(
+                AppSettings.discordToken,
+                AppSettings.discordRpcEnabled,
+            ) { token, enabled -> token.takeIf { enabled && it.isNotBlank() } }
+                .distinctUntilChanged()
+                .collectLatest { token ->
+                    // Torn down before anything is built, so switching accounts
+                    // can't leave the old one's socket up publishing under a
+                    // profile the user has just disconnected.
+                    discordUpdateJob?.cancel()
+                    discordRpc?.let { rpc ->
+                        val wasUp = discordPresenceUp
+                        discordPresenceUp = false
+                        // On IO, not on this collector's main thread: the
+                        // teardown closes a socket, and closing one gracefully
+                        // — which is what flushes the presence-clear queued on
+                        // the line above — blocks until the frame is away.
+                        //
+                        // Bounded, and that is the point rather than a
+                        // precaution. This runs on the way to *replacing*
+                        // [discordRpc], so for as long as it takes the field is
+                        // null and the feature is off: a teardown that hung —
+                        // which one waiting on an unreachable socket did — read
+                        // to the user as a switch that had stopped working
+                        // altogether until the app was restarted.
+                        withContext(Dispatchers.IO + NonCancellable) {
+                            withTimeoutOrNull(DISCORD_TEARDOWN_TIMEOUT_MS) {
+                                if (wasUp) runCatching { rpc.close() }
+                            }
+                            runCatching { rpc.closeRPC() }
+                        }
+                    }
+                    discordRpc = null
+
+                    if (token == null) return@collectLatest
+                    discordRpc = DiscordRPC(this@PlaybackService, token)
+                    // A presence that only appeared at the next track change
+                    // would make turning the switch on look like it had done
+                    // nothing for the length of a song.
+                    player?.takeIf { it.isPlaying }?.let(::pushDiscordPresence)
+                }
+        }
+
+        // The card's own contents, plus the playback rate — which is not
+        // cosmetic here: the timestamps are wall-clock instants with the rate
+        // divided out, so a change to it invalidates a presence already up.
+        scope.launch {
+            // Explicit <Any, _> for the same reason as [observeScrobbling]:
+            // mixed element types, and the reified vararg combine() otherwise
+            // infers an intersection type. Compared as a list rather than a
+            // joined string so two different settings can't stringify alike.
+            combine<Any, List<Any>>(
+                AppSettings.discordUseDetails,
+                AppSettings.discordStatus,
+                AppSettings.discordActivityType,
+                AppSettings.discordActivityName,
+                AppSettings.discordButton1Text,
+                AppSettings.discordButton1Visible,
+                AppSettings.discordButton2Text,
+                AppSettings.discordButton2Visible,
+                AppSettings.playbackSpeed,
+            ) { it.toList() }
+                .distinctUntilChanged()
+                // Dropped so the collector's first emission — which arrives at
+                // startup, before anything is playing — isn't treated as a
+                // change the user made.
+                .drop(1)
+                .collect {
+                    player?.takeIf { p -> p.isPlaying }?.let(::pushDiscordPresence)
+                }
+        }
+
+        // A network coming back, which is the other half of surviving a spell in
+        // the background: the gateway heals itself, but its retry backoff climbs
+        // to a minute, and a listener who walked back into Wi-Fi shouldn't watch
+        // a blank profile for that long. Nudging it here collapses the wait.
+        //
+        // [AppSettings.meteredConnection] is null only while there is no active
+        // network, so null -> non-null is exactly "we are online again". A
+        // metered/unmetered flip is worth acting on too: the socket does not
+        // survive a transport handover, and the old one may not have noticed yet.
+        scope.launch {
+            AppSettings.meteredConnection
+                .drop(1)
+                .collect { metered ->
+                    if (metered == null) return@collect
+                    val rpc = discordRpc ?: return@collect
+                    withContext(Dispatchers.IO) { runCatching { rpc.wakeUp() } }
+                    // Re-pushed rather than left to the gateway's own replay,
+                    // because a handover can strand the socket in a state where
+                    // it believes it is still connected: the push is what makes
+                    // it prove otherwise.
+                    if (discordPresenceUp) {
+                        player?.takeIf { p -> p.isPlaying }?.let(::pushDiscordPresence)
+                    }
+                }
+        }
+    }
+
+    /**
+     * Publishes the track [exoPlayer] is on as the user's Discord presence.
+     *
+     * A no-op with no connection, which is the ordinary case — most people will
+     * never connect an account, and this is called from the middle of every
+     * track change.
+     */
