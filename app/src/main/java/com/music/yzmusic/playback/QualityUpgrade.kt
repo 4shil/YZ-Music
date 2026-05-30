@@ -310,3 +310,69 @@ object QualityUpgrade {
      * @return true if the track is now pending, i.e. worth calling
      *   [lookAgain] for.
      */
+    fun adoptUnresolved(
+        mediaId: String,
+        uri: Uri,
+        target: TrackMatcher.Target,
+        playingMime: String?,
+        playing: StreamFormat?,
+    ): Boolean {
+        if (!couldStillUpgrade(mediaId, uri)) return false
+        // [asked] is set only on the two *verdicts* below, not on adoption.
+        // Both are facts about the bytes on disk and the row that queued them,
+        // neither changes while the track plays, and neither is worth
+        // re-deciding every five seconds. A track that gets adopted needs no
+        // entry here at all: [pending] keeps [couldStillUpgrade] off it for
+        // exactly as long as the question is genuinely open, and marking it
+        // answered before it has been asked is what made a skip permanent.
+        if (NerdStats.isLosslessMime(playingMime)) {
+            asked += mediaId
+            // The codec is named because this line is a dead end — the track is
+            // in [asked] by now and will never be offered an upgrade again — and
+            // without it there is no way to tell a correct verdict from one
+            // reached on the previous track's format.
+            TrackLog.d(
+                TAG,
+                "'${target.title}' is already playing $playingMime from cache; no second look needed",
+                about = mediaId,
+            )
+            return false
+        }
+        if (target.title.isBlank()) {
+            asked += mediaId
+            return false
+        }
+        pending[mediaId] = Pending(target, inFlight = null, playing = playing)
+        NerdStats.onLosslessRaceStart(mediaId)
+        TrackLog.d(
+            TAG,
+            "'${target.title}' is playing ${playing?.summary ?: "an unmeasured stream"} from cache " +
+                "and was never resolved; looking for a better copy",
+            about = mediaId,
+        )
+        return true
+    }
+
+    /**
+     * Looks for a stream that actually satisfies the request, for a track
+     * already playing.
+     *
+     * The track stays in [NerdStats.racingLossless] when this returns a stream
+     * — the caller ends it once the swap has landed or been given up on. The
+     * badge describes the *upgrade*, not the search behind it, and those stop
+     * being the same thing as soon as the search can finish before the track
+     * it was for comes round. That is now the ordinary case: a track is
+     * resolved while its predecessor plays, so by the time a listener is
+     * hearing it the lookup has often been sitting on the answer for a minute.
+     * Ended here, "Upgrading Quality" was drawn for the few milliseconds
+     * between the track becoming current and this returning, and the audio
+     * then changed five seconds later with nothing on screen having said so.
+     *
+     * @param playingDurationSec the runtime the *decoder* reports, which is
+     *   the one thing here that is measured rather than claimed. A candidate
+     *   has to match it — see [SourceResolver.upgradeFor].
+     * @return the better stream, or null if there isn't one, in which case
+     *   this track is never asked about again.
+     */
+    suspend fun lookAgain(mediaId: String, playingDurationSec: Int?): SourceStream? {
+        val waiting = pending[mediaId] ?: return null
