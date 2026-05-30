@@ -43,3 +43,13 @@ object PlayerDeepLink {
         _pending.value = true
         return true
     }
+
+    /**
+     * Called once the player has actually been opened.
+     *
+     * The flag has to be cleared by whoever acts on it, not by whoever set it:
+     * this object outlives the composition, so a request left standing would be
+     * served again by the next composition — which is to say, the sheet would
+     * spring back open the first time the activity was recreated after the user
+     * dismissed it.
+     */
