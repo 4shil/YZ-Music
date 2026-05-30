@@ -126,3 +126,11 @@ object QualityUpgrade {
     private val shelved = ConcurrentHashMap<String, SourceStream>()
 
     /** Keeps a proved-but-unused upgrade for [mediaId] against a return visit. */
+    fun shelve(mediaId: String, stream: SourceStream) {
+        shelved[mediaId] = stream
+        // The answer was yes. Recording it as a settled question is what would
+        // stop [couldStillUpgrade] ever offering the track again.
+        asked -= mediaId
+    }
+
+    /** The upgrade already proved for [mediaId], if one ran out of track. */
