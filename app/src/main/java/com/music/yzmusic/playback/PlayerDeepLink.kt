@@ -23,3 +23,13 @@ object PlayerDeepLink {
     /** Set on the widget's artwork intent. Nothing else sets it. */
     const val EXTRA_OPEN_PLAYER = "yzmusic.openPlayer"
 
+    private val _pending = MutableStateFlow(false)
+
+    /** Whether a request is outstanding. Cleared by [handled]. */
+    val pending: StateFlow<Boolean> = _pending.asStateFlow()
+
+    /** Reads an incoming intent, and reports whether it asked for the player. */
+    fun consume(intent: Intent?): Boolean {
+        if (intent == null) return false
+        val wantsPlayer = intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false) ||
+            intent.getBooleanExtra("bitchord.openPlayer", false)
