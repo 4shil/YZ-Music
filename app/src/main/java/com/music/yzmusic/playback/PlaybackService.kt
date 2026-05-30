@@ -1952,3 +1952,216 @@ class PlaybackService : MediaSessionService() {
 
     /** Where the playing track stands, read off the player in one hop. */
     private class SwapPoint(
+        val item: MediaItem,
+        val uri: String,
+        val position: Long,
+        val duration: Long,
+    )
+
+    /**
+     * Replaces the playing track's audio with [stream], keeping the position.
+     *
+     * The break this causes is the whole cost of the feature, so the guards
+     * are worth more than the swap is:
+     *
+     *  - The track must still be the one the search was started for. A skip
+     *    during the lookup makes the answer worthless, not merely late.
+     *  - There has to be enough of it left to be worth interrupting. Cutting
+     *    the last few seconds of a song to improve the last few seconds of a
+     *    song is a straight loss.
+     *  - **The replacement has to be ready before anything is taken away.**
+     *    See [auditionUpgrade]; this is what the break costs, so it is what
+     *    the cut is bought against.
+     *
+     * The mechanism is [MediaItem.buildUpon] with a marked URI rather than a
+     * new item: Media3 only rebuilds a media source when the replacement's
+     * playback URI differs, so an item rebuilt identically would be accepted
+     * and quietly keep playing the old stream.
+     */
+    private suspend fun swapIn(mediaId: String, stream: SourceStream) {
+        val at = withContext(Dispatchers.Main) { swapPointFor(mediaId) } ?: return
+        if (at.duration > 0 && at.duration - at.position < UPGRADE_MIN_REMAINING_MS) {
+            TrackLog.d("YZ Music", "upgrade abandoned: only ${at.duration - at.position}ms of the track left")
+            return
+        }
+
+        val upgradedUri = QualityUpgrade.upgradedUri(at.uri)
+        // Whether the rendition entry already holds *this* stream's bytes,
+        // asked before [force] overwrites the record of what filled it. True
+        // only for a shelved upgrade being re-offered, where throwing the entry
+        // away would mean paying for the same megabytes twice — and where
+        // keeping it is safe for the one reason the discard exists: the file
+        // under that key came from this very URL.
+        val alreadyFilled = QualityUpgrade.forcedStream(Uri.parse(upgradedUri))?.url == stream.url
+        // Parked before the audition rather than at the swap: the silent player
+        // reaches its bytes through the same resolving data source the real one
+        // does, and that is where a marked URI is turned back into a stream.
+        QualityUpgrade.force(mediaId, stream)
+        val warmedThrough = auditionUpgrade(mediaId, at, upgradedUri, stream, alreadyFilled)
+        if (warmedThrough == null) {
+            // Nothing was cut, so there is nothing to put back: the listener
+            // keeps the stream they already had and never learns this
+            // happened. Which is the point — this is the failure that used to
+            // arrive as a break in the audio followed by the same lossy stream
+            // returning a few seconds later. Dropping the parked stream stops
+            // [QualityUpgrade.forcedStream] serving a URL that has just failed
+            // to prove itself.
+            QualityUpgrade.forget(mediaId)
+            withContext(Dispatchers.IO) { AudioCache.discardRendition(Uri.parse(upgradedUri)) }
+            return
+        }
+
+        // There used to be an unconditional five-second hold here, keyed off the
+        // track's own position, so that an upgrade arriving with the first note
+        // could not cut the song a millisecond in. Its own reasoning said it was
+        // "almost always already past by now", and that turned out to be the
+        // whole story: by the time this line is reached the search, the stream
+        // lookup and the audition have all run, and the audition alone spends
+        // seconds on the network. So the guard was not usually deciding to wait
+        // — it was adding its five seconds to whatever the swap had already
+        // cost, on exactly the tracks that had been quickest to find a better
+        // copy. Removed rather than shortened: it is the crossfade grace below
+        // that protects the case an upgrade can genuinely spoil, and it does so
+        // by asking whether a transition actually happened rather than assuming
+        // one might have.
+        //
+        // Never cut into a crossfade in flight. `replaceMediaItem` tears the
+        // session player's source down and rebuilds it — CrossfadeController
+        // is either syncing its tail player's position against that same
+        // source (arming), riding a ~90ms handoff between the two (lapping),
+        // or ramping volume off the incoming track's own position (fading),
+        // and all three read a session-player discontinuity as either an
+        // unrecognised seek (bail, with an audible ramp-out) or a progress
+        // calculation reset to whatever position the new source opens at.
+        // Either way the blend breaks rather than merely waits.
+        //
+        // Bounded so a stuck flag can never leave the upgrade waiting forever;
+        // past the timeout this falls through to the same check made again,
+        // authoritatively, below — so an unusually long-running crossfade
+        // still gets one more look rather than being forced through.
+        //
+        // This loop is only the coarse wait. [crossfade] is read again inside
+        // the `withContext` below with no suspension between that read and
+        // `replaceMediaItem` — both run on the same single-threaded Main
+        // dispatcher [scope] does — so that second check is the one this
+        // logic actually depends on for correctness, not this one.
+        var waitedForCrossfade = 0L
+        while (withContext(Dispatchers.Main) { crossfade?.isTransitioning() } == true &&
+            waitedForCrossfade < UPGRADE_CROSSFADE_WAIT_TIMEOUT_MS
+        ) {
+            delay(UPGRADE_CROSSFADE_POLL_MS)
+            waitedForCrossfade += UPGRADE_CROSSFADE_POLL_MS
+        }
+
+        // Nor the instant one ends. The loop above releases on the tick the
+        // blend completes, and a swap made there lands its cut a few hundred
+        // milliseconds after the incoming track finally stood alone: the
+        // listener hears the mix land and the music stop, in that order, which
+        // reads as the transition having broken rather than as a track quietly
+        // getting better. This is the one delay on this path, and it is why the
+        // blanket one above it could go: a hold measured from the track's own
+        // start never covered this case anyway, since an Automix hands over at a
+        // cue point that can be well past it.
+        //
+        // Keyed off when a transition last ended rather than off whether the
+        // loop above actually waited, so the same grace covers an upgrade
+        // shelved by the check below and re-offered moments later — the same
+        // swap, the same few seconds after the same blend, arriving by a
+        // different route. And nothing is held back on a track nowhere near a
+        // transition: the reading is then already long past the grace.
+        withContext(Dispatchers.Main) { crossfade?.msSinceTransition() }?.let { since ->
+            if (since < UPGRADE_AFTER_CROSSFADE_MS) {
+                val settle = UPGRADE_AFTER_CROSSFADE_MS - since
+                TrackLog.d("YZ Music", "upgrade for $mediaId holding ${settle}ms; a transition just ended")
+                delay(settle)
+            }
+        }
+
+        withContext(Dispatchers.Main) {
+            val now = swapPointFor(mediaId)
+            if (crossfade?.isTransitioning() == true) {
+                // Caught right before the swap that would have broken it —
+                // everything spent proving this stream is still worth keeping
+                // for next time rather than throwing away, exactly like the
+                // "queue moved on" case just below.
+                QualityUpgrade.shelve(mediaId, stream)
+                TrackLog.d("YZ Music", "upgrade for $mediaId shelved: a crossfade was still running")
+                return@withContext
+            }
+            if (now == null) {
+                // The queue moved on between the upgrade being proved and the
+                // swap being made — a skip, or a track that ran out. Everything
+                // this cost is still in hand, so it goes on the shelf rather
+                // than in the bin; see [QualityUpgrade.shelve]. Logged because
+                // this used to be the one exit here that left no trace at all,
+                // and from the logs "found a FLAC, cached it, swapped nothing"
+                // was indistinguishable from never having looked.
+                QualityUpgrade.shelve(mediaId, stream)
+                TrackLog.d("YZ Music", "upgrade for $mediaId proved but the queue moved on; shelved")
+                return@withContext
+            }
+            val player = player ?: return@withContext
+            if (now.duration > 0 && now.duration - now.position < UPGRADE_MIN_REMAINING_MS) {
+                TrackLog.d("YZ Music", "upgrade abandoned: only ${now.duration - now.position}ms of the track left")
+                QualityUpgrade.forget(mediaId)
+                return@withContext
+            }
+            // The parked stream can be taken away underneath a swap in flight:
+            // a playback failure on the *old* stream runs [recoverFrom], which
+            // forgets the pending upgrade along with everything else it clears.
+            // Swapping onto a marked URI with nothing parked behind it would
+            // send the resolver off to find a stream of its own and write it
+            // into the rendition entry the audition just filled — two files,
+            // one key, which is the corruption the audition exists to avoid.
+            if (QualityUpgrade.forcedStream(Uri.parse(upgradedUri)) == null) {
+                TrackLog.d("YZ Music", "upgrade abandoned: its stream was dropped while it was being proved")
+                return@withContext
+            }
+            // Not fatal, just slower than intended, and worth being able to see
+            // in a log: the audition buffers ahead of a moving target and can
+            // only lose that race on a connection that is barely keeping up.
+            if (now.position > warmedThrough) {
+                TrackLog.d(
+                    "YZ Music",
+                    "upgrade landing at ${now.position}ms, past the ${warmedThrough}ms warmed for it",
+                )
+            }
+
+            // Read before the swap overwrites it — see [watchUpgrade]'s
+            // NerdStats cleanup for why the pre-upgrade claim has to be
+            // captured here rather than looked up again on revert.
+            val previousFormat = NerdStats.declaredFormat(mediaId)
+            swappingMediaId = mediaId
+            swapCutAt = SystemClock.elapsedRealtime()
+            player.replaceMediaItem(
+                player.currentMediaItemIndex,
+                now.item.buildUpon().setUri(upgradedUri).build(),
+            )
+            player.seekTo(player.currentMediaItemIndex, now.position)
+            player.prepare()
+            QualityUpgrade.unshelve(mediaId)
+            TrackLog.d("YZ Music", "upgraded to ${stream.format.summary} at ${now.position}ms")
+            watchUpgrade(mediaId, now.uri, now.position, now.duration, previousFormat)
+            // The opening again, this time sized for Automix rather than for
+            // a container header.
+            //
+            // An upgraded rendition is only ever fetched from the swap point
+            // onward, so its first seconds are the one region nothing downloads
+            // on its own — [UPGRADE_HEADER_BYTES] covers the header and stops
+            // well short of enough *audio* to measure. A megabyte of lossless is
+            // four seconds, against the twelve the analyzer needs, so a track
+            // that upgrades early could never be analysed from any rendition:
+            // the lossless copy had no audio at its head and the copy it
+            // replaced was discarded.
+            //
+            // After the swap and off the main thread, because nothing waits on
+            // it — the upgrade is already audible and this only decides whether
+            // the *next* transition can be a real mix.
+            launch(Dispatchers.IO) {
+                AudioCache.warmRange(Uri.parse(upgradedUri), 0, ANALYSIS_HEAD_BYTES)
+            }
+        }
+    }
+
+    /** Main thread. Null unless [mediaId] is still current and still un-upgraded. */
+    private fun swapPointFor(mediaId: String): SwapPoint? {
