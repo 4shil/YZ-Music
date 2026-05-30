@@ -58,3 +58,17 @@ class PlaybackPosition internal constructor() {
 /** Snapshot of playback state, driven by the MediaController. */
 data class PlayerState(
     val song: Song? = null,
+    val isPlaying: Boolean = false,
+    /**
+     * The playhead. A field rather than a value: its identity never changes, so
+     * carrying it here costs no invalidation — see [PlaybackPosition].
+     */
+    val position: PlaybackPosition = PlaybackPosition(),
+    /**
+     * Left here rather than moved alongside the position: it settles once per
+     * track, and [mutableStateOf] compares structurally, so the poll writing it
+     * back unchanged every tick invalidates nothing.
+     */
+    val durationMs: Long = 0L,
+    val error: String? = null,
+    /** True while ExoPlayer is buffering — including our own stream-URL resolution. */
