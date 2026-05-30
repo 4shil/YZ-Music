@@ -3225,3 +3225,408 @@ class PlaybackService : MediaSessionService() {
     /** Sends a ListenBrainz "now playing" update for the current track. */
     private fun submitListenBrainzPlayingNow(song: Song, positionMs: Long, durationMs: Long?) {
         val lbEnabled = AppSettings.scrobblingAvailable && AppSettings.listenBrainzEnabled.value
+        val lbToken = AppSettings.listenBrainzToken.value
+        if (!lbEnabled || lbToken.isBlank()) return
+        scope.launch {
+            ListenBrainzManager.submitPlayingNow(lbToken, song, positionMs, durationMs)
+        }
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+        mediaSession
+
+    /**
+     * Called by Android when the user swipes this app's task away from the
+     * recent apps screen.
+     *
+     * When [AppSettings.stopOnTaskRemoved] is on we stop the player and let the
+     * service die naturally; otherwise we leave it running in the background so
+     * music continues past the swipe, which is the default Android behaviour for
+     * a foreground-service-backed media session.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (AppSettings.stopOnTaskRemoved.value) {
+            // Both, or a swipe-away mid-crossfade leaves the outgoing track
+            // playing on its own out of a service that is on its way out.
+            eachPlayer { it.stop() }
+            stopSelf()
+        }
+    }
+
+
+    override fun onDestroy() {
+        // Last chance to record the resume point, while the player still exists.
+        saveQueue()
+        // And to leave the widgets showing a play button. Nothing else reports a
+        // swipe-away, so a widget left on the home screen would sit there with a
+        // pause glyph on a service that no longer exists.
+        publishWidgetState(playing = false)
+        AudioCache.cancel()
+        trackAnalyzer.release()
+        // The YouTube Music history entry for whatever was playing, closed out
+        // on the same terms as the ListenBrainz submit below: a swipe-away never
+        // fires STATE_ENDED, and the tracker's own scope outlives this service,
+        // so the ping still goes out after the service scope is cancelled.
+        PlaybackTracker.onPlaybackFinished(
+            player?.currentPosition?.div(1000) ?: lastPositionSeconds,
+        )
+        // Also the last chance to close out the track that was playing — a
+        // swipe-away or stop never fires STATE_ENDED, so the session would
+        // otherwise end with an un-scrobbled song. This must not ride on the
+        // service scope: it is cancelled a few lines down, and the request
+        // should still reach ListenBrainz.
+        val lastSong = listenBrainzSong
+        if (lastSong != null && listenBrainzStartMs > 0L) {
+            val lbEnabled =
+                AppSettings.scrobblingAvailable && AppSettings.listenBrainzEnabled.value
+            val lbToken = AppSettings.listenBrainzToken.value
+            if (lbEnabled && lbToken.isNotBlank()) {
+                val lastStart = listenBrainzStartMs
+                val lastDuration = player?.duration?.takeIf { it > 0 }
+                CoroutineScope(Dispatchers.IO).launch {
+                    ListenBrainzManager.submitFinished(
+                        lbToken, lastSong, lastStart, System.currentTimeMillis(), lastDuration,
+                    )
+                }
+            }
+        }
+        scrobbleManager?.destroy()
+        scrobbleManager = null
+        // Last chance to get the current track's minutes onto disk: the scope is
+        // cancelled a few lines down and the sampler goes with it.
+        ListeningRecorder.onStopped()
+        // Discord, on the same terms as the ListenBrainz submit above: the
+        // service scope is cancelled a few lines down, and a presence left up
+        // would advertise a track that stopped when the process did — until
+        // Discord noticed the socket had gone, which can take minutes.
+        discordRpc?.let { rpc ->
+            discordRpc = null
+            val wasUp = discordPresenceUp
+            discordPresenceUp = false
+            CoroutineScope(Dispatchers.IO).launch {
+                withTimeoutOrNull(DISCORD_TEARDOWN_TIMEOUT_MS) {
+                    if (wasUp) runCatching { rpc.close() }
+                }
+                runCatching { rpc.closeRPC() }
+            }
+        }
+        scope.cancel()
+        crossfade?.release()
+        crossfade = null
+        mediaSession?.release()
+        mediaSession = null
+        player?.removeListener(playbackListener)
+        player?.removeAnalyticsListener(formatListener)
+        player?.release()
+        player = null
+        // Released too, and not conditionally: mid-crossfade it is holding a
+        // decoder and an open audio track of its own, and the service going away
+        // is not a reason to leave either behind.
+        spare?.release()
+        spare = null
+        super.onDestroy()
+    }
+
+    /**
+     * What the MediaSession, and so every control surface, actually talks to.
+     *
+     * Two behaviours are grafted onto the player here rather than left to
+     * ExoPlayer's defaults:
+     *
+     * **Back restarts the track.** ExoPlayer already implements
+     * restart-then-skip in [Player.seekToPrevious], gated on
+     * `maxSeekToPreviousPosition`. External surfaces don't use it:
+     * [DefaultMediaNotificationProvider] binds its previous button to
+     * `COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM`, which skips unconditionally. So
+     * that command is redirected rather than left to behave differently
+     * depending on which back button was pressed.
+     *
+     * **A skip cancels the crossfade.** Blending is for a track running out,
+     * not for one being changed: told to move on, the listener wants the song
+     * they were on to stop, not to keep playing over the one they asked for.
+     * So every skip tells [CrossfadeController] to drop whatever is in flight
+     * and then moves the queue plainly.
+     *
+     * Command availability is deliberately untouched — mutating it through a
+     * [ForwardingPlayer] means intercepting listener callbacks too. The one
+     * consequence is the first track of a queue, where ExoPlayer withholds
+     * `COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM` for want of a previous item: back
+     * stays inert on those surfaces, exactly as it already was. In the app it
+     * restarts, since that path asks for `COMMAND_SEEK_TO_PREVIOUS`.
+     */
+    private class SessionPlayer(
+        player: Player,
+        private val crossfade: CrossfadeController,
+    ) : ForwardingPlayer(player) {
+
+        override fun seekToPreviousMediaItem() {
+            crossfade.onSkipRequested()
+            wrappedPlayer.seekToPrevious()
+        }
+
+        override fun seekToNextMediaItem() {
+            crossfade.onSkipRequested()
+            wrappedPlayer.seekToNextMediaItem()
+        }
+
+        override fun seekToNext() {
+            crossfade.onSkipRequested()
+            wrappedPlayer.seekToNext()
+        }
+    }
+
+    private companion object {
+        /**
+         * Shared by both players. Identical on purpose: they take turns being
+         * the session, and a difference here would be an audible change of
+         * routing at the handoff.
+         */
+        val AUDIO_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+
+        const val CHANNEL_ID = "bitchord_playback"
+        const val SESSION_ID = "YZMusicPlayback"
+        const val ACTION_TOGGLE_FAVORITE = "com.music.yzmusic.action.TOGGLE_FAVORITE"
+
+        /** How often played-seconds are sampled off the player. */
+        const val PROGRESS_SAMPLE_MS = 5_000L
+
+        /**
+         * How long a Discord teardown may spend clearing the presence before the
+         * socket is closed out from under it.
+         *
+         * Closing the gateway ends the session, which clears the card on
+         * Discord's side anyway — the explicit clear only makes it immediate. So
+         * this is a bound on politeness, not on correctness, and it is short
+         * because whatever is tearing down is waiting on it.
+         */
+        const val DISCORD_TEARDOWN_TIMEOUT_MS = 3_000L
+
+        /**
+         * Size of each range the player fetches. The same figure read-ahead
+         * uses, and for the same reason — see [ChunkedDataSource].
+         */
+        const val STREAM_CHUNK_BYTES = 2L * 1024 * 1024
+
+        /** Shortest gap "skip silence" is allowed to touch. */
+        const val MIN_SILENCE_US = 1_000_000L
+
+        /** Past any song, so the byte ceiling is what stops loading. */
+        const val FAR_BUFFER_MS = 15 * 60 * 1000
+
+        /** ~6 minutes at 160kbps: a whole track, for all but the longest. */
+        const val FAR_BUFFER_BYTES = 8 * 1024 * 1024
+
+        /**
+         * A short nudge backwards, and no more: this shares the byte ceiling
+         * above with the read-ahead it would otherwise starve.
+         */
+        const val BACK_BUFFER_MS = 30 * 1000
+
+        /** Enough to cover the decoder's own latency, not seconds of dead air. */
+        const val START_PLAYBACK_MS = 500
+
+        /** More room after a stall than at the start — see the load control. */
+        const val RESUME_PLAYBACK_MS = 2_000
+
+        /**
+         * Outer cap on stream resolution. Individual client calls and probes
+         * have their own timeouts, but iterating all seven plus the NewPipe
+         * fallback can accumulate far beyond what a listener should wait.
+         *
+         * The NewPipe fallback alone — a scrape of the watch page, shaped
+         * harder than anything else this app asks Google for — routinely
+         * takes 45-90s on its own when every player client is bot-checked, a
+         * state that has become the common case rather than the rare one. A
+         * cap shorter than that doesn't bound the wait; it cancels the
+         * resolve just as it was about to succeed, and the retry that
+         * follows restarts the same slow walk from zero, so the listener
+         * waits *longer* under a tighter cap than a looser one.
+         */
+        const val RESOLVE_TIMEOUT_MS = 120_000L
+
+        /**
+         * Cap on offering a YouTube track to a higher-ranked source.
+         *
+         * Nothing like [RESOLVE_TIMEOUT_MS], because the two are not the same
+         * kind of wait: that one bounds the only way to hear the track, this
+         * one bounds an optional upgrade over a stream YouTube will serve
+         * anyway. Generous enough for a cold module — index fetch, JS
+         * download, engine init, search, then the stream URL — and short
+         * enough that a dead server costs a pause rather than a stall.
+         */
+        const val SUBSTITUTE_TIMEOUT_MS = 20_000L
+
+        /**
+         * How much of a track has to be left for a mid-track quality swap to
+         * be worth the break in the audio it costs.
+         */
+        const val UPGRADE_MIN_REMAINING_MS = 20_000L
+
+        /** How often to recheck [CrossfadeController.isTransitioning] while an upgrade waits on one. */
+        const val UPGRADE_CROSSFADE_POLL_MS = 250L
+
+        /**
+         * Longest an upgrade waits on a crossfade before giving up and
+         * checking once more, authoritatively, right at the swap point. Well
+         * past the longest transition either mode plans — 12s for a manual
+         * crossfade, or a Automix's own beat-bounded overlap, plus its arm
+         * lead — so this is a guard against something stuck, not a limit
+         * expected to bind in the ordinary case.
+         */
+        const val UPGRADE_CROSSFADE_WAIT_TIMEOUT_MS = 20_000L
+
+        /**
+         * How long a transition has to have been over before an upgrade may cut
+         * into the track it handed to.
+         *
+         * Not a second guard on the same thing as
+         * [UPGRADE_CROSSFADE_WAIT_TIMEOUT_MS]'s loop, which only keeps the swap
+         * out of a blend *in flight*. This is about the moment just after one:
+         * the mix resolves, and the music stops a quarter of a second later for
+         * a rebuild the listener has no reason to connect to bitrate. Long
+         * enough for the new track to have established itself as the thing
+         * playing, short enough that an upgrade is not being meaningfully
+         * delayed — and it applies only where a transition actually ran, so the
+         * ordinary swap, minutes from any blend, is as immediate as it was.
+         */
+        const val UPGRADE_AFTER_CROSSFADE_MS = 5_000L
+
+        /**
+         * How long a replacement gets to report a length before it is
+         * disbelieved.
+         *
+         * This is silence, not patience: the swap has already cut the audio,
+         * and the track sits in `STATE_BUFFERING` for the whole of it before
+         * the old stream comes back. It was cut from eight seconds to two and
+         * a half on the strength of "a replacement that works reports its
+         * length in well under a tenth of this" — which was true of what the
+         * swap landed on at the time, and is not true of a FLAC. Measured
+         * here, an upgrade to a 16-bit Qobuz stream was still buffering its
+         * first chunk when the window closed:
+         *
+         * ```
+         *   upgrade reverted: replacement reports -9223372036854775807ms
+         *     against 259141ms (state=2, buffered=5002ms)
+         * ```
+         *
+         * — a working FLAC thrown away for being slower to open than a lossy
+         * MP4, which is the one thing this feature exists to fetch. The
+         * failure the short window was protecting against is caught by state
+         * now rather than by the clock (see [watchUpgrade]), so the ceiling
+         * only bounds the genuinely stuck case, and can afford to be long
+         * enough for a large file over a phone connection.
+         */
+        const val UPGRADE_PROVE_MS = 10_000L
+        const val UPGRADE_PROVE_STEP_MS = 200L
+
+        /**
+         * How long an upgrade gets to prove itself before the swap is dropped.
+         *
+         * Nothing like [UPGRADE_PROVE_MS], and for one reason: that window is
+         * silence and this one is music. The audition runs on a player nobody
+         * is listening to while the old stream plays through the whole of it,
+         * so the only thing a longer ceiling costs is a decoder held open a
+         * few seconds more. Generous enough for a cold hi-res FLAC over a
+         * phone connection, since a stream slow to open is exactly the one
+         * this feature exists to fetch and exactly the one the old
+         * cut-then-wait order threw away.
+         */
+        const val UPGRADE_AUDITION_MS = 25_000L
+
+        /**
+         * How far past the listener an upgrade has to be buffered before it is
+         * allowed to take over.
+         *
+         * This is the number that makes the swap inaudible. Everything inside
+         * this window is on disk by the time the real player asks for it, so
+         * the seam is a decoder init rather than a round trip to a CDN. It has
+         * to cover the drift as well: the track keeps playing while the
+         * audition buffers, so the swap lands some seconds past where the
+         * audition started, and a window shorter than the audition takes would
+         * put the swap point back on the network. Twelve seconds is comfortably
+         * more than either.
+         */
+        const val UPGRADE_PREBUFFER_MS = 12_000L
+
+        /**
+         * How much of the upgraded file's opening is fetched before the
+         * audition starts — see [AudioCache.warmRange] for why the audition
+         * cannot be relied on to leave it behind.
+         *
+         * A megabyte because a FLAC header is not a header: STREAMINFO is 34
+         * bytes, but the seek table, the tags and an embedded cover in front of
+         * the first audio frame routinely run to hundreds of kilobytes, and a
+         * range that stops short of the first frame buys nothing at all.
+         */
+        const val UPGRADE_HEADER_BYTES = 1L * 1024 * 1024
+
+        /**
+         * Opening fetched after an upgrade so the track stays analysable. Four
+         * megabytes is a little over twelve seconds of lossless — the shortest
+         * window Automix's head pass accepts — and many times that for a
+         * compressed rendition, which simply finishes sooner.
+         */
+        const val ANALYSIS_HEAD_BYTES = 4L * 1024 * 1024
+
+        /**
+         * The audition's own buffer, in time and in bytes.
+         *
+         * Both well past [FAR_BUFFER_MS]'s byte ceiling, and deliberately: this
+         * player has to end up [UPGRADE_PREBUFFER_MS] ahead of a position that
+         * keeps moving while it works, so what it needs is the window plus
+         * however long it took to fill — and at 4.6Mbit/s a hi-res FLAC eats
+         * eight megabytes in under fifteen seconds. Transient, and freed with
+         * the player a moment later.
+         */
+        const val AUDITION_BUFFER_MS = 40_000
+
+        const val AUDITION_BUFFER_BYTES = 24 * 1024 * 1024
+
+        /**
+         * The pause between releasing the audition player and swapping onto
+         * what it cached. Same reason as [RECOVERY_DELAY_MS] — Media3 lets go
+         * of a cache entry as the source is released, not as the call returns —
+         * and free here, because the old stream is still playing.
+         */
+        const val AUDITION_RELEASE_MS = 250L
+
+        /**
+         * How long the second look waits for the playing track to report its
+         * own length before giving up and going on the claimed one.
+         *
+         * Costs nothing when it isn't needed — a prepared track answers on the
+         * first poll — and it runs with the music still playing, so what it
+         * spends is patience rather than silence.
+         */
+        const val DURATION_SETTLE_MS = 8_000L
+
+        /**
+         * How far the replacement's length may sit from the length already
+         * known for this track. Anything past this is a different file, or a
+         * broken one, and either way not what is being listened to.
+         */
+        const val UPGRADE_LENGTH_SLACK_MS = 3_000L
+
+        /** How many times one track is picked up off the floor — see [recoverFrom]. */
+        const val MAX_RECOVERIES = 2
+
+        /**
+         * How far into an exception's causes a resolver verdict is looked for.
+         * Media3 wraps twice on this path and the coroutine machinery may add
+         * one; nothing nests deeper. See [permanentReason].
+         */
+        const val PERMANENT_CAUSE_DEPTH = 8
+
+        /**
+         * The pause before a retry. Media3 refuses to remove a cache entry a
+         * reader still holds, and the reader is let go asynchronously as the
+         * failed source is released, so the discard needs a moment to land
+         * before the same track is asked for again.
+         */
+        const val RECOVERY_DELAY_MS = 350L
+    }
+}
