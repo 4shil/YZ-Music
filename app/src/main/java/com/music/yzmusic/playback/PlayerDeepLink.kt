@@ -23,3 +23,8 @@ object PlayerDeepLink {
     /** Set on the widget's artwork intent. Nothing else sets it. */
     const val EXTRA_OPEN_PLAYER = "yzmusic.openPlayer"
 
+    private val _pending = MutableStateFlow(false)
+
+    /** Whether a request is outstanding. Cleared by [handled]. */
+    val pending: StateFlow<Boolean> = _pending.asStateFlow()
+
