@@ -765,3 +765,265 @@ class PlaybackService : MediaSessionService() {
             // something actually outranks YouTube; otherwise this is the
             // plain resolve every build before this one made.
             if (!SourceResolver.canSubstituteForYouTube()) {
+                val streamUrl = try {
+                    runBlocking(about) {
+                        withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    throw java.io.IOException("Stream resolution timed out for $videoId", e)
+                }
+                // googlevideo names the client that minted the URL inside the
+                // URL itself, and compares it against the request that comes
+                // back for the bytes. A mismatch is answered with a throttled
+                // trickle or a 403 rather than an error worth the name, so the
+                // fetch is dressed as whatever the URL says it should be.
+                val headers = PlayerClient.forStreamUrl(streamUrl).mediaHeaders()
+                // Recorded even though only one server can answer here: a
+                // source enabled from Settings mid-track flips the branch
+                // above under a half-filled cache entry, and the entry would
+                // then be finished by a different file.
+                StreamChoice.remember(videoId, SourceStream(streamUrl, headers = headers), substituted = false)
+                return@Factory dataSpec.buildUpon()
+                    .setUri(Uri.parse(streamUrl))
+                    .setHttpRequestHeaders(headers)
+                    .build()
+            }
+            val won = runBlocking(about) {
+                resolveWithModulePriority(
+                    videoId = videoId,
+                    target = SourceResolver.targetIn(dataSpec.uri),
+                )
+            }
+            when (won) {
+                is Resolved.Module -> {
+                    NerdStats.onSourceStream(videoId, won.stream.format)
+                    StreamChoice.remember(videoId, won.stream, substituted = true)
+                    dataSpec.buildUpon()
+                        .setUri(Uri.parse(won.stream.url))
+                        .setHttpRequestHeaders(won.stream.headers)
+                        .build()
+                }
+                // A module could have served this and didn't — it missed, its
+                // server was slow, or the lookup ran out of budget. The last
+                // of those is worth chasing rather than accepting: measured
+                // here, a module's stream URL arrived 66ms after the live path
+                // gave up on it, and the difference between a FLAC and a
+                // YouTube Opus stream came down to that. The second look has
+                // no such deadline, so what was nearly in hand is asked for
+                // again while the fallback plays.
+                is Resolved.YouTube -> {
+                    val headers = PlayerClient.forStreamUrl(won.url).mediaHeaders()
+                    StreamChoice.remember(videoId, SourceStream(won.url, headers = headers), substituted = false)
+                    dataSpec.buildUpon()
+                        .setUri(Uri.parse(won.url))
+                        .setHttpRequestHeaders(headers)
+                        .build()
+                }
+            }
+        }
+        // Read-ahead resolves streams through the same chain the player does.
+        val defaultDataSourceFactory = DefaultDataSource.Factory(this, resolvingFactory)
+        AudioCache.setUpstream(defaultDataSourceFactory)
+        mediaSourceFactory = DefaultMediaSourceFactory(AudioCache.playbackFactory(defaultDataSourceFactory))
+            .setLoadErrorHandlingPolicy(PermanentAwareLoadErrorPolicy())
+
+        val exoPlayer = buildPlayer(spatialAudioProcessorA, transitionFilterA, ownsSession = true)
+        val sparePlayer = buildPlayer(spatialAudioProcessorB, transitionFilterB, ownsSession = false)
+        player = exoPlayer
+        spare = sparePlayer
+        // Both sinks feed the same session id, so the system equalizer and any
+        // other effect attached to the app applies to whichever player happens
+        // to be audible. Without it a crossfade would audibly change EQ halfway
+        // through, and again at every handoff.
+        sparePlayer.audioSessionId = exoPlayer.audioSessionId
+
+        AppSettings.audioSessionId.value = exoPlayer.audioSessionId
+        applySettings(exoPlayer)
+        applySettings(sparePlayer)
+        observeSettings()
+        observeScrobbling()
+        observeDiscord()
+        watchSleepTimer()
+        // Before the listener below is attached, so loading the queue doesn't
+        // read as a track change and set the read-ahead going.
+        restoreLastQueue(exoPlayer)
+        // …but the widgets do want to know: a service woken by a widget's own
+        // play button has just recovered the track they should be showing, and
+        // nothing else in this class will mention it until playback starts.
+        publishWidgetState()
+
+        // History pings fire once a track is actually audible — both when
+        // playback starts and when the queue moves on while already playing.
+        lastRepeatMode = exoPlayer.repeatMode
+        exoPlayer.addListener(playbackListener)
+        loadAutoplayForCurrentTrack()
+
+        // Only the analytics listener reports the format the audio renderer was
+        // configured with. Treated as a trigger rather than a source: the
+        // publisher reads the format off the player, so it can't go stale
+        // against the track the bitrate is looked up for.
+        exoPlayer.addAnalyticsListener(formatListener)
+
+        reportProgress()
+
+        val controller = CrossfadeController(
+            scope,
+            active = { requireNotNull(player) },
+            standby = { requireNotNull(spare) },
+            onHandoff = ::adoptPlayer,
+            analysisFor = { item -> trackAnalyzer.analysisFor(item.mediaId) },
+            requestAnalysis = { item, durationMs ->
+                item.localConfiguration?.uri?.let { uri ->
+                    trackAnalyzer.request(item.mediaId, uri, durationMs / 1000.0)
+                }
+            },
+            // "Incoming" and "outgoing" are roles, not players. The controller
+            // only ever filters after the handoff, by which point the incoming
+            // track is on the session player and the outgoing one is on the
+            // spare — so these read the role fields fresh on every call rather
+            // than closing over an instance that will have changed hands.
+            filters = object : TransitionFilters {
+                override fun incoming(lowPassHz: Float, highPassHz: Float) =
+                    activeFilter.setCutoffs(lowPassHz, highPassHz)
+
+                override fun outgoing(lowPassHz: Float, highPassHz: Float) =
+                    spareFilter.setCutoffs(lowPassHz, highPassHz)
+            },
+            analysisRunningFor = { item -> trackAnalyzer.isAnalysing(item.mediaId) },
+        )
+        crossfade = controller
+        controller.start()
+
+        mediaSession = MediaSession.Builder(this, SessionPlayer(exoPlayer, controller))
+            .setId(SESSION_ID)
+            .setSessionActivity(sessionActivity())
+            .setCallback(sessionCallback)
+            .build()
+        mediaSession?.setCustomLayout(notificationButtons())
+    }
+
+    /**
+     * The one custom layout advertised to all Media3 control surfaces.
+     *
+     * AutoPlay is deliberately not here. It stays a player-screen control: the
+     * session command remains available so [toggleAutoplay] still routes through
+     * this service, it just isn't offered as a notification button.
+     */
+    private fun notificationButtons(): List<CommandButton> {
+        val favorite = CommandButton.Builder(
+            if (LikeState.overrides.value[player?.currentMediaItem?.mediaId] == LikeStatus.LIKE) {
+                CommandButton.ICON_HEART_FILLED
+            } else {
+                CommandButton.ICON_HEART_UNFILLED
+            },
+        )
+            .setSessionCommand(favoriteCommand)
+            .setDisplayName("Favorite")
+            .build()
+        val shuffleEnabled = QueueShuffle.enabled.value
+        val shuffle = CommandButton.Builder(
+            if (shuffleEnabled) {
+                CommandButton.ICON_SHUFFLE_ON
+            } else {
+                CommandButton.ICON_SHUFFLE_OFF
+            },
+        )
+            .setSessionCommand(shuffleCommand)
+            .setDisplayName(if (shuffleEnabled) "Shuffle off" else "Shuffle on")
+            .build()
+        return listOf(favorite, shuffle)
+    }
+
+    private fun toggleShuffleFromNotification() {
+        player?.let(QueueShuffle::toggle)
+        mediaSession?.setCustomLayout(notificationButtons())
+    }
+
+    private fun toggleAutoplayFromNotification() {
+        val enabled = !AppSettings.autoplay.value
+        AppSettings.setAutoplay(enabled)
+        if (enabled) {
+            autoplayLoadJob?.cancel()
+            autoplayLoadJob = null
+            autoplaySeed = null
+            loadAutoplayForCurrentTrack()
+        } else {
+            autoplayLoadJob?.cancel()
+            autoplayLoadJob = null
+            autoplaySeed = null
+            dropAutoplayTracksFromQueue()
+            // Switching AutoPlay off is the listener saying they don't want
+            // those tracks; leaving a stash behind would put them back the next
+            // time repeat-all ended.
+            repeatAllStash = emptyList()
+            repeatAllStashSeed = null
+        }
+        mediaSession?.setCustomLayout(notificationButtons())
+    }
+
+    /**
+     * Tops the queue back up to [MAX_QUEUED_AUTOPLAY] AutoPlay-suggested tracks
+     * ahead of whatever is currently playing. Run on every track change rather
+     * than only once the queue runs dry, so a freshly played suggestion is
+     * replaced by a new one appended after the ones still waiting instead of
+     * everything arriving in one burst at the end of the queue.
+     */
+    private fun loadAutoplayForCurrentTrack() {
+        val exoPlayer = player ?: return
+        if (!AppSettings.autoplay.value || exoPlayer.repeatMode == Player.REPEAT_MODE_ALL) {
+            return
+        }
+        val current = exoPlayer.currentMediaItem?.toSong() ?: return
+        if (AppSettings.dontRepeatSuggestions.value) sessionSongHistory += current
+        val queuedAutoplay = (exoPlayer.currentMediaItemIndex + 1 until exoPlayer.mediaItemCount)
+            .count { exoPlayer.getMediaItemAt(it).fromAutoplay }
+        if (queuedAutoplay >= AUTOPLAY_LOW_WATER_MARK) return
+        val needed = MAX_QUEUED_AUTOPLAY - queuedAutoplay
+        if (needed <= 0) return
+        if (autoplaySeed == current.videoId && autoplayLoadJob?.isActive == true) {
+            TrackLog.d("YZ Music", "AUTOPLAY_DUPLICATE_SUPPRESSED: already active for ${current.videoId}", about = current.videoId)
+            return
+        }
+        autoplaySeed = current.videoId
+        TrackLog.d("YZ Music", "AUTOPLAY_START: seed=${current.videoId}, queuedAutoplay=$queuedAutoplay, needed=$needed", about = current.videoId)
+        autoplayLoadJob = scope.launch {
+            val queueSongs = (0 until exoPlayer.mediaItemCount)
+                .map { exoPlayer.getMediaItemAt(it).toSong() }
+            val existing = if (AppSettings.dontRepeatSuggestions.value) {
+                queueSongs + sessionSongHistory
+            } else {
+                queueSongs
+            }
+            loadAutoplayTracks(existing, current, needed)
+                .onSuccess { resolved ->
+                    val activePlayer = player ?: return@onSuccess
+                    if (!AppSettings.autoplay.value ||
+                        activePlayer.currentMediaItem?.mediaId != current.videoId
+                    ) {
+                        TrackLog.d("YZ Music", "AUTOPLAY_SKIPPED: player state changed before insertion", about = current.videoId)
+                        return@onSuccess
+                    }
+                    val currentQueueIds = (0 until activePlayer.mediaItemCount)
+                        .mapNotNull { activePlayer.getMediaItemAt(it).mediaId }
+                        .toSet()
+                    val toAppend = resolved.filter { it.videoId !in currentQueueIds }
+                    if (toAppend.isNotEmpty()) {
+                        activePlayer.addMediaItems(toAppend.map { it.toMediaItem() })
+                        TrackLog.d("YZ Music", "AUTOPLAY_APPENDED: ${toAppend.size} items (queue size now ${activePlayer.mediaItemCount})", about = current.videoId)
+                    }
+                    if (AppSettings.dontRepeatSuggestions.value) sessionSongHistory += resolved
+                }
+                .onFailure {
+                    TrackLog.w("YZ Music", "AUTOPLAY_FETCH_FAILURE: notification autoplay failed: ${it.message}", about = current.videoId)
+                }
+        }
+    }
+
+    /**
+     * Takes back what AutoPlay queued and hasn't played yet — what switching
+     * AutoPlay off means for a queue it has already been extending. Removed
+     * from the bottom up so the indexes ahead of each removal still hold, and
+     * handed back in queue order for the one caller that intends to put them
+     * in again.
+     */
+    private fun dropAutoplayTracksFromQueue(): List<MediaItem> {
