@@ -1027,3 +1027,63 @@ class PlaybackService : MediaSessionService() {
      * in again.
      */
     private fun dropAutoplayTracksFromQueue(): List<MediaItem> {
+        val exoPlayer = player ?: return emptyList()
+        val dropped = mutableListOf<MediaItem>()
+        for (index in exoPlayer.mediaItemCount - 1 downTo exoPlayer.currentMediaItemIndex + 1) {
+            val item = exoPlayer.getMediaItemAt(index)
+            if (!item.fromAutoplay) continue
+            dropped += item
+            exoPlayer.removeMediaItem(index)
+        }
+        return dropped.reversed()
+    }
+
+    /** Clears the queue's AutoPlay tail for the duration of repeat-all, keeping it to put back. */
+    private fun stashAutoplayTracks() {
+        val exoPlayer = player ?: return
+        // Only ever taken once per stretch of repeat-all: cycling
+        // OFF -> ALL -> ONE -> OFF sets the mode three times, and the second
+        // and third of those must not overwrite a full stash with the empty
+        // queue tail the first one left behind.
+        if (repeatAllStash.isNotEmpty()) return
+        val dropped = dropAutoplayTracksFromQueue()
+        if (dropped.isEmpty()) return
+        repeatAllStash = dropped
+        repeatAllStashSeed = exoPlayer.currentMediaItem?.mediaId
+    }
+
+    /**
+     * Puts the stashed AutoPlay tracks back when repeat-all ends.
+     *
+     * Refused, rather than forced, in the cases where the stash no longer
+     * describes the queue: AutoPlay switched off while the loop ran, or the
+     * loop played on past the track the stash was taken behind. Both leave
+     * [loadAutoplayForCurrentTrack] to fill the queue the ordinary way.
+     */
+    private fun restoreAutoplayTracks() {
+        val exoPlayer = player ?: return
+        val stashed = repeatAllStash
+        val seed = repeatAllStashSeed
+        repeatAllStash = emptyList()
+        repeatAllStashSeed = null
+        // The seed is stale now either way, so the queue can be topped up again
+        // for this track — without this the guard in [loadAutoplayForCurrentTrack]
+        // reads a track it has already loaded for and returns, which is how a
+        // queue whose stash was refused ended up with nothing after it at all.
+        autoplayLoadJob?.cancel()
+        autoplayLoadJob = null
+        autoplaySeed = null
+        if (stashed.isEmpty() || !AppSettings.autoplay.value) return
+        if (exoPlayer.currentMediaItem?.mediaId != seed) return
+        // A track the listener queued by hand during the loop is not queued
+        // twice for having been in the mix before it.
+        val present = (0 until exoPlayer.mediaItemCount)
+            .mapTo(mutableSetOf()) { exoPlayer.getMediaItemAt(it).mediaId }
+        val restored = stashed.filter { it.mediaId !in present }
+        if (restored.isEmpty()) return
+        exoPlayer.addMediaItems(restored)
+    }
+
+    private fun toggleFavoriteFromNotification(videoId: String) {
+        favoriteActionJob?.cancel()
+        val previous = LikeState.overrides.value[videoId] ?: LikeStatus.INDIFFERENT
