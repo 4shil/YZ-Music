@@ -521,3 +521,20 @@ object QualityUpgrade {
     // ── Handing the stream to the player ────────────────────────────────────
 
     /** Parks [stream] for [mediaId], to be picked up when the item is reopened. */
+    fun force(mediaId: String, stream: SourceStream) {
+        forced[mediaId] = stream
+    }
+
+    /**
+     * The upgraded stream for a request carrying the [MARKER], or null.
+     *
+     * Read rather than consumed: ExoPlayer reopens a source more than once
+     * over a track's life — a seek past the buffer, a resumed playback, a
+     * cache miss — and each of those has to arrive at the same bytes.
+     */
+    fun forcedStream(uri: Uri): SourceStream? {
+        if (uri.getQueryParameter(MARKER) != UPGRADED) return null
+        return uri.getQueryParameter("v")?.let(forced::get)
+    }
+
+    /** The same URI, marked so that Media3 rebuilds the source and the cache keys it apart. */
