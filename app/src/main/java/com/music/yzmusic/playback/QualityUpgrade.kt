@@ -166,3 +166,147 @@ object QualityUpgrade {
      * that is already everything that was asked for, and marking one pending
      * would light the badge for a search with no possible outcome.
      */
+    fun settledForLess(
+        mediaId: String,
+        target: TrackMatcher.Target,
+        inFlight: Deferred<SourceStream?>? = null,
+        playing: StreamFormat? = null,
+    ): Boolean {
+        // Not gated on the request being lossless. A source ranked above
+        // YouTube can be worth swapping to on bitrate alone — see
+        // [SourceResolver.worthSwapping] — and requiring lossless here meant a
+        // lookup that was still running got cancelled outright the moment
+        // YouTube won the race, so a 320kbps source never finished and never
+        // played. [SourceResolver.upgradeFor] applies the real quality bar.
+        if (target.title.isBlank() ||
+            mediaId in refused ||
+            !SourceResolver.canSubstituteForYouTube()
+        ) {
+            inFlight?.cancel()
+            return false
+        }
+        pending[mediaId] = Pending(target, inFlight, playing)
+        NerdStats.onLosslessRaceStart(mediaId)
+        TrackLog.d(
+            TAG,
+            if (inFlight != null) {
+                "'${target.title}' started on the fallback; its lookup is still running"
+            } else {
+                "below request for '${target.title}'; will look again during playback"
+            },
+            about = mediaId,
+        )
+        return true
+    }
+
+    /** Whether [mediaId] is worth a second look — and hasn't already had one. */
+    fun isPending(mediaId: String?) = mediaId != null && pending.containsKey(mediaId)
+
+    /**
+     * Tracks whose upgrade broke the playback it was supposed to improve.
+     *
+     * A swapped-in stream that fails to serve its bytes costs a cut in the
+     * audio and a recovery, and the search that produced it is deterministic —
+     * ask again and the same catalogue returns the same dead URL. Nothing here
+     * expires on a timer: the entry is worth exactly as long as the player that
+     * broke on it, and [forgetLastSession] is what draws that line. It used to
+     * read "cleared with the rest when the process goes", which is a lifetime
+     * this map does not have — see there.
+     */
+    private val refused = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    /**
+     * Stops offering [mediaId] any further upgrades this session — its last
+     * one is what killed it. Called from the recovery path; see
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService].
+     */
+    fun refuseUpgrades(mediaId: String) {
+        refused += mediaId
+        TrackLog.d(TAG, "$mediaId broke on its upgrade; no more swaps for it", about = mediaId)
+    }
+
+    /**
+     * Tracks that have already had their second look, whether it found
+     * anything or not.
+     *
+     * [pending] cannot answer this on its own, because [lookAgain] empties it
+     * as the question is asked: by the next progress sample a track that has
+     * been asked about and a track that was never a candidate look identical.
+     * That distinction costs nothing on the resolve path — nothing marks a
+     * track pending twice — but it is the whole difference for
+     * [adoptUnresolved], which is offered the same playing track every five
+     * seconds for as long as it lasts.
+     */
+    private val asked = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    /**
+     * Whether [mediaId] is worth *evaluating* for a second look, given that
+     * nothing has resolved it.
+     *
+     * The cheap half of [adoptUnresolved], split out because it is asked on the
+     * main thread every progress sample while the other half has to wait for
+     * the decoder to settle first. Everything here is a fact about the queue
+     * entry and the settings; nothing here touches the network.
+     */
+    fun couldStillUpgrade(mediaId: String, uri: Uri?): Boolean {
+        if (uri == null || uri.getQueryParameter("v") == null) return false
+        // Already upgraded: this *is* the better copy.
+        if (uri.getQueryParameter(MARKER) != null) return false
+        if (mediaId in asked || mediaId in refused || pending.containsKey(mediaId)) return false
+        // Same widening as [settledForLess]: a track playing off the cache is
+        // worth a second look whenever anything outranks YouTube, not only
+        // when lossless was asked for.
+        return SourceResolver.canSubstituteForYouTube()
+    }
+
+    /**
+     * Marks a track that is playing without ever having been resolved.
+     *
+     * [settledForLess] is reached from the resolving data source, which is the
+     * only place that knows what was asked for and what came back — and which
+     * a track playing off the disk cache never reaches at all. `CacheDataSource`
+     * wraps the resolver rather than the other way round, so bytes already on
+     * disk are served without a resolve, without a lookup, and so without
+     * anything marking the track worth a second look. The tracks that hit this
+     * hardest are the ones restored into the queue at startup: their bytes were
+     * written by a previous process, so nothing in *this* one has ever asked a
+     * module about them, and they would play at last session's bitrate for the
+     * rest of the session and every session after it, while a freshly queued
+     * copy of the same song upgraded within seconds.
+     *
+     * @param playingMime what the *decoder* says about the bytes it is being
+     *   fed, and it must be this track's — see
+     *   [PlaybackService.audioFormatFor][com.music.yzmusic.playback.PlaybackService].
+     *   The one thing worth not doing here is hunting a lossless copy of a
+     *   track that is already playing one, which is exactly what a cache entry
+     *   written by a previous session's successful upgrade holds.
+     * @param playing how good those bytes are, for
+     *   [SourceResolver.worthSwapping] to weigh candidates against — measured
+     *   off the decoder or off the cache entry's own size, never from a
+     *   resolver figure, because there was no resolve.
+     *
+     *   This used to be hardcoded null, on the reasoning that a lossy stream
+     *   from the cache cannot say what bitrate it is and an unknown floor is
+     *   the conservative choice. It is not conservative; it is a floor nothing
+     *   lossy clears, which quietly narrowed the whole path to lossless-only.
+     *   Measured on the track that was reported — 'The Night We Met', upgraded
+     *   to Tidal's AAC 320 in one session and restarted into its YouTube Opus:
+     *
+     *   ```
+     *     17:39:47.471  90DKXLbzLto <- audio/opus 48.0kHz bitrate n/a
+     *     17:39:47.518  is playing from cache and was never resolved; looking…
+     *     17:39:55      three candidates, each "offered 320 kbps; looking further"
+     *     ——— nothing ———
+     *   ```
+     *
+     *   The second look ran, found the same 320kbps copy it had swapped in
+     *   twenty minutes earlier, and [SourceResolver.worthSwapping] dropped all
+     *   three on `playing?.kbps ?: return false`. There is no lossless copy of
+     *   that track behind any configured module — the one advertising FLAC in
+     *   search serves AAC from its stream endpoint — so the listener got the
+     *   "Upgrading Quality" badge, then silence on it, then Opus for the rest
+     *   of the session. Against the real floor the gain is 320 − ~160, which
+     *   clears [SourceResolver.worthSwapping]'s minimum twice over.
+     * @return true if the track is now pending, i.e. worth calling
+     *   [lookAgain] for.
+     */
