@@ -64,3 +64,14 @@ object QualityUpgrade {
      * own candidates.
      */
     private data class Pending(
+        val target: TrackMatcher.Target,
+        val inFlight: Deferred<SourceStream?>? = null,
+        /**
+         * What the listener is actually hearing — the yardstick a lossy
+         * candidate is measured against in [SourceResolver.worthSwapping].
+         * Known by the time a track is marked pending: whichever stream won
+         * the race has already named its format, and a track adopted from the
+         * cache without a race has one measured for it — see
+         * [adoptUnresolved]. Null only when neither could, and an unknown
+         * floor is one nothing lossy clears.
+         */
