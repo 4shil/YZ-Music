@@ -134,3 +134,35 @@ object QualityUpgrade {
     }
 
     /** The upgrade already proved for [mediaId], if one ran out of track. */
+    fun shelvedFor(mediaId: String): SourceStream? = shelved[mediaId]
+
+    /**
+     * Takes [mediaId]'s upgrade off the shelf — it has happened.
+     *
+     * Without this the entry outlives the swap it describes, and the next time
+     * the listener comes back to the track it is offered again: the item URI
+     * already carries the marker, so the swap declines, and the decline is read
+     * as another missed one and shelved afresh.
+     */
+    fun unshelve(mediaId: String) {
+        shelved.remove(mediaId)
+    }
+
+    /**
+     * Records that [mediaId] is playing on less than was asked for — whether
+     * that is a lossy stream a module handed over, or YouTube's own because no
+     * module answered in time.
+     *
+     * Called from the resolving data source, which is the only place that
+     * knows both what was requested and what actually came back. The track
+     * stays in [NerdStats.racingLossless] from here until the second look
+     * finishes, so the player keeps saying "Loading lossless" rather than
+     * going blank and then possibly changing its mind — the badge should
+     * describe the search that is genuinely still running, and go out for good
+     * once the answer is known to be no.
+     *
+     * Does nothing unless lossless is what the connection and the settings
+     * currently add up to. There is no such thing as an upgrade from a stream
+     * that is already everything that was asked for, and marking one pending
+     * would light the badge for a search with no possible outcome.
+     */
