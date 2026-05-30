@@ -436,3 +436,20 @@ fun Song.toMediaItem(): MediaItem {
  */
 fun mediaIdIn(uri: Uri): String? = if (uri.authority == "source") {
     val configId = uri.getQueryParameter("s")
+    val trackId = uri.getQueryParameter("t")
+    if (configId != null && trackId != null) SourceRegistry.trackKey(configId, trackId) else null
+} else {
+    uri.getQueryParameter("v")
+}
+
+fun MediaController.playSongs(songs: List<Song>, startIndex: Int) {
+    if (songs.isEmpty()) return
+    // A queue started while shuffle is on goes in shuffled rather than being
+    // played out of order — see [QueueShuffle]. The track the user picked still
+    // leads, so it ends up at the top instead of at [startIndex].
+    val shuffled = QueueShuffle.enabled.value
+    val queue = if (shuffled) QueueShuffle.startingOrder(songs, startIndex) else songs
+    setMediaItems(queue.map { it.toMediaItem() }, if (shuffled) 0 else startIndex, 0L)
+    prepare()
+    play()
+}
