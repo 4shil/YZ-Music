@@ -159,3 +159,45 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
     // second to the media session for the whole time the phone was in a pocket.
     // Nothing is lost by stopping: `sync` above runs on the controller's own
     // events, and the first thing that happens on the way back is a fresh read.
+    val foreground = rememberIsForeground()
+    LaunchedEffect(controller, state.isPlaying, foreground) {
+        while (controller != null && state.isPlaying && foreground) {
+            position.positionMs = controller.currentPosition.coerceAtLeast(0L)
+            val duration = controller.duration.coerceAtLeast(0L)
+            if (duration != state.durationMs) state = state.copy(durationMs = duration)
+            delay(500)
+        }
+    }
+    return state
+}
+
+/**
+ * The inverse of [toMediaItem], as far as a MediaItem can carry a [Song].
+ *
+ * It has to round-trip losslessly for everything [LastPlayed] stores, because
+ * the queue it saves is read back out of the *player* — so a field dropped here
+ * is a field that does not survive a restart, however carefully it is
+ * persisted. That is what happened to [Song.durationText]: stored, restored,
+ * and always null, because this function never carried it back off the item in
+ * the first place.
+ */
+fun MediaItem.toSong() = Song(
+    videoId = mediaId,
+    title = mediaMetadata.title?.toString().orEmpty(),
+    artist = mediaMetadata.artist?.toString().orEmpty(),
+    thumbnailUrl = mediaMetadata.artworkUri?.toString(),
+    durationText = mediaMetadata.extras?.getString(EXTRA_DURATION)
+        ?: mediaMetadata.extras?.getString("bitchord.durationText"),
+    artistId = mediaMetadata.extras?.getString(EXTRA_ARTIST_ID)
+        ?: mediaMetadata.extras?.getString("bitchord.artistId"),
+    albumId = mediaMetadata.extras?.getString(EXTRA_ALBUM_ID)
+        ?: mediaMetadata.extras?.getString("bitchord.albumId"),
+    albumName = mediaMetadata.albumTitle?.toString(),
+    fromAutoplay = this.fromAutoplay,
+    localUri = mediaMetadata.extras?.getString(EXTRA_LOCAL_URI)
+        ?: mediaMetadata.extras?.getString("bitchord.localUri"),
+    localPath = mediaMetadata.extras?.getString(EXTRA_LOCAL_PATH)
+        ?: mediaMetadata.extras?.getString("bitchord.localPath"),
+)
+
+/** @see Song.fromAutoplay */
