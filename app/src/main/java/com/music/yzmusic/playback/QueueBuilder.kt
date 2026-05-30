@@ -31,3 +31,5 @@ object QueueBuilder {
      * already queued, nothing repeated, at most [limit] tracks.
      */
     fun extend(existing: List<Song>, candidates: List<Song>, limit: Int): List<Song> {
+        val taken = existing.toMutableList()
+        val perArtist = mutableMapOf<String, Int>()
