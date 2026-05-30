@@ -304,3 +304,38 @@ private fun resolvePlaybackUri(uriString: String, localPath: String?): String {
  * simply omits it and the match is made on title and artist alone, as it was
  * before.
  */
+private fun Song.matchQuery(): String = buildString {
+    append("&n=").append(Uri.encode(title))
+    append("&a=").append(Uri.encode(artist))
+    TrackMatcher.secondsOf(durationText)?.let { append("&d=").append(it) }
+}
+
+fun Song.toMediaItem(): MediaItem {
+    val sourceTrack = SourceRegistry.parseTrackKey(videoId)
+    // A row from search or a playlist carries no file of its own, but the track
+    // may still be on disk from a download — see [Downloads.saved].
+    //
+    // Answered *here*, where the item is built, rather than in the player's
+    // stream resolver, because everything downstream decides what to do by the
+    // scheme the item arrives with: [AudioCache.playbackFactory] sends file and
+    // content URIs past the disk cache instead of writing a second copy of
+    // them, and DefaultDataSource picks ContentDataSource off the same scheme.
+    // A local URI substituted further down lands inside the half of the chain
+    // that only speaks HTTP, where OkHttp rejects it as a malformed URL — which
+    // is what a downloaded track played from search used to do, four times over,
+    // before giving up.
+    //
+    // Both halves are checked, not just the record: a claim about a folder this
+    // app does not own — see [Downloads] — outlives the file it names whenever
+    // one is deleted from a file manager, and trusting either unchecked sent the
+    // player a `file://` uri to a path that had simply stopped existing.
+    //
+    // [localUri] needs it just as much as the lookup does, and for a reason that
+    // is easy to miss: it is not only set from a folder read that just verified
+    // the file. It also round-trips off the player's own item through
+    // [MediaItem.toSong], and is persisted and restored by [LastPlayed] — so a
+    // queue restored after a restart carries whatever was true whenever it was
+    // last saved. Checking only the lookup leaves exactly that path unguarded,
+    // which is the one a resumed queue takes.
+    val offlineUri = localUri?.takeUnless(Downloads::isMissingLocalFile)
+        ?: Downloads.verifiedSavedUri(videoId)
