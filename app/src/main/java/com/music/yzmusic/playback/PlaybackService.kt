@@ -2355,3 +2355,270 @@ class PlaybackService : MediaSessionService() {
         // upgrading over, buffering outruns playback and this converges in a
         // couple of seconds; on one where it doesn't, the swap would have
         // stalled anyway and the timeout is the right answer.
+        val wantedThrough = (player?.currentPosition ?: 0L) + UPGRADE_PREBUFFER_MS
+        // The only reason to settle for less: there is no more track to buffer.
+        //
+        // `isLoading` was tried here as a second escape — "the loader has
+        // stopped of its own accord, so this is as good as it gets" — and it
+        // was wrong every single time. [ChunkedDataSource] closes and reopens
+        // the upstream every two megabytes, and `isLoading` goes false in the
+        // gap between one range finishing and the next being asked for. A poll
+        // landing in that gap read it as a full buffer, so every upgrade was
+        // declared ready with roughly one chunk in hand and the swap then
+        // landed seconds past the end of it, back on the network:
+        //
+        // ```
+        //   upgrade to FLAC proved in 8701ms, buffered through 32496ms
+        //   upgrade landing at 39889ms, past the 32496ms warmed for it
+        // ```
+        if (buffered >= wantedThrough || audition.bufferedPercentage >= 100) {
+            return Audition.Ready(buffered)
+        }
+        return Audition.Waiting
+    }
+
+    /**
+     * The throwaway player an upgrade is proved on.
+     *
+     * Shares the media source factory, and therefore the disk cache, with the
+     * real one — which is the entire point: what this fetches is what the real
+     * player reads a moment later. Deliberately plainer than the two players
+     * [buildPlayer] builds, because nothing here is ever heard: stock
+     * renderers, no spatial processor, no audio session, no focus, no session.
+     *
+     * The one thing it does not share is the load control. [farBufferingLoadControl]
+     * stops at [FAR_BUFFER_BYTES], which is sized for a player that only has to
+     * stay ahead of itself; this one has to buffer past a *moving* target —
+     * [UPGRADE_PREBUFFER_MS] beyond wherever the listener has got to by the time
+     * it finishes — and eight megabytes is under fifteen seconds of hi-res FLAC,
+     * which the drift alone can eat. Held for seconds and then released with the
+     * player.
+     */
+    private fun buildAuditionPlayer(): ExoPlayer = ExoPlayer.Builder(this)
+        .setMediaSourceFactory(requireNotNull(mediaSourceFactory))
+        .setLoadControl(
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    /* minBufferMs = */ AUDITION_BUFFER_MS,
+                    /* maxBufferMs = */ AUDITION_BUFFER_MS,
+                    /* bufferForPlaybackMs = */ START_PLAYBACK_MS,
+                    /* bufferForPlaybackAfterRebufferMs = */ START_PLAYBACK_MS,
+                )
+                .setTargetBufferBytes(AUDITION_BUFFER_BYTES)
+                .build(),
+        )
+        .build()
+        .apply {
+            playWhenReady = false
+            volume = 0f
+        }
+
+    /**
+     * Puts the old stream back if the upgraded one turns out to be broken.
+     *
+     * Learned the hard way: a swapped-in source that comes up short — a
+     * truncated body, a CDN that answers a range request with something other
+     * than the file — does not raise an error. It reports no duration, plays
+     * for a few seconds and hits end-of-stream, and ExoPlayer does the correct
+     * thing with a track that has ended, which is to advance to the next one.
+     * The listener's song simply vanishes eight seconds in. That is a far worse
+     * outcome than the lossy stream this was trying to improve on, so the new
+     * source has to prove itself against the length the old one already knew
+     * before it is allowed to keep the track.
+     */
+    private fun watchUpgrade(
+        mediaId: String,
+        previousUri: String,
+        position: Long,
+        previousDuration: Long,
+        previousFormat: StreamFormat?,
+    ) {
+        if (previousDuration <= 0) return
+        scope.launch(TrackLog.about(mediaId)) {
+            val agreed = withTimeoutOrNull(UPGRADE_PROVE_MS) {
+                while (true) {
+                    val current = player?.takeIf { it.currentMediaItem?.mediaId == mediaId }
+                        ?: return@withTimeoutOrNull false
+                    val now = current.duration
+                    if (now > 0) return@withTimeoutOrNull abs(now - previousDuration) <= UPGRADE_LENGTH_SLACK_MS
+                    // The failure this whole check exists for, caught when it
+                    // happens rather than at the ceiling: a replacement that
+                    // came up short does not raise an error, it reaches the
+                    // end of what it has and reports the track as over. That
+                    // is a decisive no, and waiting out the rest of the window
+                    // for it only delays the old stream coming back.
+                    if (current.playbackState == Player.STATE_ENDED) return@withTimeoutOrNull false
+                    delay(UPGRADE_PROVE_STEP_MS)
+                }
+                @Suppress("UNREACHABLE_CODE") false
+            }
+            if (agreed == true) return@launch
+            val player = player ?: return@launch
+            val item = player.currentMediaItem ?: return@launch
+            if (item.mediaId != mediaId) return@launch
+            // State and buffered position alongside the length: a replacement
+            // that loaded and disagreed about the track looks identical here
+            // to one that never loaded at all, and only the second is a fault
+            // in the stream rather than a wrong match.
+            TrackLog.w(
+                "YZ Music",
+                "upgrade reverted: replacement reports ${player.duration}ms against " +
+                    "${previousDuration}ms (state=${player.playbackState}, " +
+                    "buffered=${player.bufferedPosition}ms)",
+            )
+            QualityUpgrade.forget(mediaId)
+            // The FLAC/whatever claim recorded when the swap went out is no
+            // longer what's playing — restore what was declared before it
+            // (or clear it, if nothing was), so "stats for nerds" doesn't
+            // keep calling the fallback lossless after the upgrade it
+            // borrowed that claim from got reverted.
+            if (previousFormat != null) {
+                NerdStats.onSourceStream(mediaId, previousFormat)
+            } else {
+                NerdStats.clearDeclared(mediaId)
+            }
+            swappingMediaId = mediaId
+            val abandoned = item.localConfiguration?.uri
+            player.replaceMediaItem(
+                player.currentMediaItemIndex,
+                item.buildUpon().setUri(previousUri).build(),
+            )
+            player.seekTo(player.currentMediaItemIndex, position)
+            player.prepare()
+            // Whatever the replacement wrote is a prefix of a file nothing will
+            // ever finish, under a key the *next* upgrade of this track would
+            // key to as well — see [AudioCache.discardRendition]. Off the main
+            // thread and behind the same pause a recovery takes, because the
+            // source just released still holds the entry for a moment.
+            abandoned?.let {
+                launch(Dispatchers.IO) {
+                    delay(RECOVERY_DELAY_MS)
+                    AudioCache.discardRendition(it)
+                }
+            }
+        }
+    }
+
+    /** What [resolveWithModulePriority] settled on. */
+    private sealed interface Resolved {
+        data class Module(val stream: SourceStream) : Resolved
+        data class YouTube(val url: String) : Resolved
+    }
+
+    /**
+     * Resolves a YouTube-queued track by racing the higher-ranked modules
+     * against YouTube itself, and handing whatever the modules are still doing
+     * to [QualityUpgrade] if YouTube gets there first.
+     *
+     * Nobody gets a head start. An earlier version gave the modules six
+     * seconds of silence to answer in before the fallback was even *asked*
+     * for, on the reasoning that a module answering inside that window plays
+     * with no seam in it. What that actually bought, on every track the
+     * modules were slow on, was six seconds of nothing followed by a YouTube
+     * client walk starting from cold — the wait and the seam, rather than one
+     * or the other. Starting both at once removes the first of those: the
+     * track begins as soon as *anything* can serve it.
+     *
+     * The speculative resolve this reinstates was dropped once before, for a
+     * real reason — it is several round trips to `youtubei.googleapis.com`
+     * competing for the same radio and connection pool as the lookup beside
+     * it, and on a track the modules do have, that work is thrown away. What
+     * changed is that it is no longer speculative: YouTube is now the expected
+     * outcome for anything the modules don't answer quickly, so its walk is on
+     * the critical path rather than hedging one. It is also coalesced and
+     * cached — see [StreamResolver.resolve] — so even a discarded walk warms
+     * the URL this track will want if the upgrade later falls through.
+     *
+     * A module that wins the race outright still wins the track, which is the
+     * one thing worth keeping from the old head start: the lossless copy plays
+     * from the first note and there is no swap at all. That is a narrower
+     * window than it sounds, and deliberately so — read-ahead warms the
+     * YouTube URL for the queue (see [AudioCache.prefetchQueue]), so on a
+     * track that was read ahead the fallback answers in milliseconds and
+     * almost always wins. The swap is the ordinary path now; playing from the
+     * first note is the prize for a module quick enough to beat a cached URL.
+     *
+     * A lookup that loses is not cancelled. It is handed over still running,
+     * because it is not wrong, only late, and the thing it is about to return
+     * is exactly the stream that would have played seamlessly had it been
+     * quicker. It finishes on its own time and the track swaps up to it
+     * mid-song, which is the trade this whole path exists to make: a short
+     * break in the audio, in exchange for the listener hearing something now
+     * rather than waiting in silence for the good copy.
+     */
+    private suspend fun resolveWithModulePriority(
+        videoId: String,
+        target: TrackMatcher.Target,
+    ): Resolved {
+        // A substitute already broke this track once — see
+        // [StreamChoice.refuseSubstitutes]. Racing the modules again would find
+        // the same catalogue holding the same unplayable URL, so there is
+        // nothing to race: YouTube is the one answer here that hasn't failed.
+        // Skipped entirely rather than merely deprioritised, because a lookup
+        // that loses is handed to [QualityUpgrade] rather than dropped, and
+        // handing over the search that just cost three attempts would only
+        // schedule a fourth.
+        if (StreamChoice.substitutesRefused(videoId)) {
+            return Resolved.YouTube(StreamResolver.resolve(videoId))
+        }
+        NerdStats.onLosslessRaceStart(videoId)
+        // Both legs are parented to the service's scope rather than to the
+        // caller, so neither inherits whose track this is — see
+        // [TrackLog.about]. Without it the module walk and the client walk both
+        // log from a scope that knows nothing, which is most of what a resolve
+        // has to say about itself.
+        val lookup = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
+            withTimeoutOrNull(SUBSTITUTE_TIMEOUT_MS) { SourceResolver.substituteForYouTube(target) }
+        }
+        // Started now rather than after the modules have had their say, and
+        // wrapped rather than thrown from: it is awaited only on the paths
+        // that need it, and an async that fails without ever being awaited is
+        // an unhandled exception in this service's scope.
+        val fallback = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
+            runCatching { StreamResolver.resolve(videoId) }
+        }
+
+        // First past the post. A null because [lookup] won is a module miss; a
+        // null because [fallback] won means YouTube has a URL and the modules
+        // are still looking — [lookup.isActive] below is what tells those
+        // apart, which is the question the old head start answered by timing
+        // out rather than by asking.
+        val quick: SourceStream? = select {
+            lookup.onAwait { it }
+            // A fallback that finished without a URL has not won anything.
+            //
+            // This clause used to yield null unconditionally, which treats "the
+            // YouTube walk is over" as "YouTube has a URL" — true only while
+            // failing was the slow outcome. It no longer is: [StreamResolver]
+            // now answers a known-unplayable track immediately, so the losing
+            // leg crosses the line first and, before this, took the track down
+            // with it while a module lookup that was about to succeed was still
+            // running. Exactly the case in the report — an age-gated track that
+            // YouTube would never serve and a catalogue that had it all along.
+            fallback.onAwait { resolved -> if (resolved.isSuccess) null else lookup.await() }
+        }
+
+        if (quick != null) {
+            // The modules got there first, so the YouTube walk is genuinely
+            // spare work now. Cancelling drops only this service's wait on it;
+            // [StreamResolver] parents the walk itself elsewhere and lets it
+            // finish into its own cache.
+            fallback.cancel()
+            // Everything that was asked for, ahead of the fallback: the
+            // ordinary good case, and the one with no seam in it.
+            if (!quick.belowRequest) {
+                NerdStats.onLosslessRaceEnd(videoId)
+                return Resolved.Module(quick)
+            }
+            // Less than was asked for — but a lossy copy from a module still
+            // beats going back to YouTube for one. Worth a second look, and
+            // with this lookup already finished that look starts from scratch.
+            val settled = QualityUpgrade.settledForLess(
+                mediaId = videoId,
+                target = target,
+                playing = quick.format,
+            )
+            if (!settled) NerdStats.onLosslessRaceEnd(videoId)
+            return Resolved.Module(quick)
+        }
+
