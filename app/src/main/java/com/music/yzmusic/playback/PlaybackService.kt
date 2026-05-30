@@ -1315,3 +1315,472 @@ class PlaybackService : MediaSessionService() {
         // manual skip (SEEK) means the song wasn't listened to, so it must
         // not be scrobbled.
         val ended = previousEnded
+        val prevSong = listenBrainzSong
+        val prevStart = listenBrainzStartMs
+        if (prevSong != null && ended && prevStart > 0L) {
+            submitListenBrainzFinished(prevSong, prevStart, listenBrainzDurationMs)
+        }
+        listenBrainzSong = newSong
+        listenBrainzStartMs = if (exoPlayer.isPlaying) System.currentTimeMillis() else 0L
+        listenBrainzDurationMs = durationMs
+        if (newSong != null && exoPlayer.isPlaying) {
+            submitListenBrainzPlayingNow(newSong, 0L, durationMs)
+        }
+
+        // Discord: the whole of "live updating" for a card whose bar Discord
+        // draws itself. Only a track change needs a new presence; the countdown
+        // in between is Discord's own arithmetic.
+        if (exoPlayer.isPlaying) pushDiscordPresence(exoPlayer)
+
+        // "Sleep after this song": the queue moving on by itself is the
+        // moment the track the user meant has finished. REPEAT counts
+        // too, or the timer would never fire with repeat-one on.
+        if (ended && SleepTimer.afterTrack.value) {
+            exoPlayer.pause()
+            SleepTimer.cancel()
+        }
+        if (exoPlayer.isPlaying) registerCurrentPlay()
+        prefetchAround(exoPlayer)
+        // The second look belongs to the track it was started for; the
+        // queue moving on ends it, whatever it had found — and starts
+        // the new track's own, which nothing else here would. The
+        // track arriving has usually been resolved already, by
+        // ExoPlayer preparing the next item while this one played, so
+        // it is pending by now; the ones that aren't are picked up by
+        // the sampler in [reportProgress].
+        upgradeJob?.cancel()
+        lookForBetterCopy(exoPlayer)
+        saveQueue()
+        // Covers crossfades too: a blended advance never reaches
+        // onMediaItemTransition, and [adoptPlayer] calls this handler by hand.
+        publishWidgetState()
+        // Cleared rather than re-published. The renderer is still
+        // configured for the track that just ended at this point, so
+        // reading the format here reports the *previous* song — which
+        // is how a lossy track spent its whole resolve showing the
+        // "Hi-Res Lossless" badge the track before it had earned.
+        // Nothing measured is better than something wrong, and the
+        // gap is exactly when "Loading lossless" should be showing
+        // instead. The periodic sampler below and
+        // onAudioInputFormatChanged both re-publish once the decoder
+        // has actually settled on this track, so the same-format case
+        // the old call was here to cover is still covered.
+        NerdStats.current.value = null
+    }
+
+    /**
+     * Loads the queue from the last session so the app opens on the track it
+     * was left on, rather than with nothing in the mini player.
+     *
+     * Deliberately no `prepare()`. Preparing would resolve the stream — a
+     * NewPipe extraction over the network — on every cold start, for a track
+     * that may never be played, and would post a media notification for a
+     * session nobody has touched yet (Media3 shows one as soon as the player
+     * leaves IDLE with a non-empty queue). Left idle, restoring costs nothing:
+     * [MediaSession] routes every play request through
+     * `Util.handlePlayButtonAction`, which prepares an idle player first, so
+     * the mini player, the notification and Bluetooth all resume from here
+     * without knowing the queue was cold.
+     */
+    private fun restoreLastQueue(player: ExoPlayer) {
+        val last = LastPlayed.load() ?: return
+        player.setMediaItems(
+            last.songs.map { it.toMediaItem() },
+            last.index,
+            last.positionMs,
+        )
+    }
+
+    /** The background hunt for a better copy of whatever is playing. */
+    private var upgradeJob: Job? = null
+
+    /** Which track [upgradeJob] is hunting for — see [lookForBetterCopy]. */
+    private var upgradeFor: String? = null
+
+    /**
+     * How many times each track has been picked up off the floor, so a stream
+     * that fails the same way every time stops rather than loops. Reset when
+     * the queue genuinely moves on, not when a track merely re-prepares.
+     */
+    private val recoveries = mutableMapOf<String, Int>()
+
+    /**
+     * The track [recoverFrom] is about to seek-and-prepare, so that the
+     * transition its own retry may fire can be told from the queue moving on or
+     * the listener asking again — see [onTrackBecameCurrent]. Cleared by the
+     * transition it describes, the same way [swappingMediaId] is.
+     */
+    private var retryingMediaId: String? = null
+
+    /**
+     * Media3's retry budget, with one thing added: a load error that cannot
+     * succeed on a second attempt does not get one.
+     *
+     * There was no policy here at all, which meant
+     * [DefaultLoadErrorHandlingPolicy] — three tries at a 1s/2s/3s backoff,
+     * against *any* IOException. Stacked on top of this service's own
+     * [MAX_RECOVERIES] counter and read-ahead's independent resolves, that is
+     * where the "infinite loading" came from: the app logged
+     * "leaving it alone" after its third attempt, and then Media3 quietly
+     * started a fourth on its own schedule — visible in the report as a full
+     * resolve walk beginning with no track selection before it, forty seconds
+     * after the app had given up. Nothing in the log named it, because nothing
+     * in the app had asked for it.
+     *
+     * Only [StreamResolver.PermanentlyUnplayableException] is refused, and it is
+     * refused rather than delayed because the resolver has already established
+     * the answer cannot change — it is the type it uses to say exactly that.
+     * Everything else keeps the default behaviour, which is right: a shaped
+     * response or a dropped connection is worth another go.
+     */
+    private class PermanentAwareLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
+        override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+            if (isPermanent(loadErrorInfo.exception)) return C.TIME_UNSET
+            return super.getRetryDelayMsFor(loadErrorInfo)
+        }
+
+        private fun isPermanent(error: Throwable?): Boolean {
+            var cause = error
+            var depth = 0
+            while (cause != null && depth++ < CAUSE_DEPTH) {
+                if (cause is StreamResolver.PermanentlyUnplayableException) return true
+                cause = cause.cause?.takeIf { it !== cause }
+            }
+            return false
+        }
+
+        private companion object {
+            /** Media3 and the coroutine machinery both wrap; nothing nests deeper than this. */
+            const val CAUSE_DEPTH = 8
+        }
+    }
+
+    /**
+     * Puts a track that died mid-read back on its feet.
+     *
+     * Two things get thrown away before trying again, because both have been
+     * seen to be the actual fault and neither is visible from the exception:
+     *
+     *  - The cached bytes. An entry filled from two different files reads
+     *    fine until playback reaches the seam and then throws forever, and no
+     *    number of retries against the same entry will do anything else.
+     *  - The choice of who serves the track. If the source that was picked is
+     *    the one handing over something unreadable, resolving again from
+     *    scratch is the only way to land anywhere else.
+     *
+     * The position is kept: this should look like a hiccup, not like the song
+     * starting over.
+     */
+    private fun recoverFrom(error: PlaybackException, player: ExoPlayer) {
+        val item = player.currentMediaItem ?: return
+        val mediaId = item.mediaId
+        val uri = item.localConfiguration?.uri
+        val position = player.currentPosition.coerceAtLeast(0L)
+        val attempts = recoveries.getOrDefault(mediaId, 0) + 1
+        recoveries[mediaId] = attempts
+        TrackLog.w(
+            "YZ Music",
+            "playback failed for $mediaId at ${position}ms (${error.errorCodeName}), attempt $attempts",
+            error,
+            about = mediaId,
+        )
+        // A local file that is not there is the one failure retrying cannot
+        // touch, and the only one where the fix is to stop asking for the file.
+        //
+        // Everything below this point recovers a *stream*: it discards cached
+        // bytes, releases the choice of who serves the track, and prepares the
+        // same item again. Against `file:///…/Drake - Janice STFU.m4a` that is
+        // all wasted — the uri is baked into the item already in the timeline,
+        // so `prepare()` reopens the identical dead path and fails identically.
+        // Observed as eight `ERROR_CODE_IO_FILE_NOT_FOUND`s in three seconds
+        // against a download whose file had been deleted from a file manager,
+        // ending in a track that simply refused to play.
+        //
+        // Rebuilding the item without its local uri is what turns that into a
+        // stream, and dropping the record is what stops the next play walking
+        // into the same hole. Deliberately ahead of the verdict and the attempt
+        // budget below: this is not an attempt spent, it is a different source.
+        if (error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND &&
+            restreamMissingLocalFile(player, item, uri, position)
+        ) {
+            return
+        }
+        // Giving up on the *retry*, not on everything below it.
+        //
+        // A track that has exhausted its attempts is not finished with.
+        // [recoveries] is cleared the moment any track becomes current, so the
+        // listener who presses play again gets a fresh count — and used to get,
+        // along with it, the exact URL that had just failed three times.
+        // [StreamChoice] outlives this method by [StreamChoice.TTL_MS], and the
+        // resolving factory reads it *before* it resolves anything, so the
+        // replay failed instantly and in silence: no resolve logged, no lookup
+        // attempted, and none of the refusals recorded below ever consulted,
+        // because reaching them means getting as far as resolving. Fifteen
+        // minutes of a track that cannot be played and does not even try, which
+        // to the listener is a track that is permanently broken. Reported as
+        // "sometimes songs don't play even if I've played it before", and the
+        // 1.4 log of one shows it exactly — a selection, five seconds, a 404,
+        // and not one resolver line in between.
+        //
+        // So everything from here to the discard runs either way, and only the
+        // seek-and-prepare at the end is skipped.
+        //
+        // A verdict counts as exhausting the attempts immediately. The resolver
+        // only throws [StreamResolver.PermanentlyUnplayableException] once it has
+        // established that no client, no session and no extraction can serve the
+        // track, so the two further attempts this would otherwise spend are two
+        // more full walks for an answer already in hand — and in the report they
+        // were exactly that, at roughly seventeen youtubei requests each.
+        val verdict = permanentReason(error)
+        val givingUp = verdict != null || attempts > MAX_RECOVERIES
+        if (verdict != null) {
+            TrackLog.w("YZ Music", "$mediaId cannot be played: $verdict", about = mediaId)
+        } else if (givingUp) {
+            TrackLog.w("YZ Music", "$mediaId has failed $attempts times; leaving it alone", about = mediaId)
+        }
+        // The upgraded rendition goes with the cache entry it lived in, so the
+        // marker on the URI would otherwise point at nothing.
+        QualityUpgrade.forget(mediaId)
+        // A track that died on an upgraded URI died on the *upgrade*, and it
+        // must not be offered that same swap again the moment it recovers.
+        // Left unrecorded, the second look starts over on the retry, finds the
+        // same FLAC at the same dead URL, cuts the audio for it again, and
+        // fails again — twice more before [MAX_RECOVERIES] stops it. Observed
+        // on a Tidal URL answering ERROR_CODE_IO_BAD_HTTP_STATUS.
+        if (uri?.let(QualityUpgrade::cacheTag) != null) {
+            QualityUpgrade.refuseUpgrades(mediaId)
+        }
+        // Whatever failed took its claimed format with it. The stream that
+        // recovers is a different one and has not promised anything yet, so
+        // leaving the old claim behind is how a badge earned by a FLAC ends up
+        // sitting over the Opus that replaced it.
+        NerdStats.clearDeclared(mediaId)
+        // A track that died on a substituted stream died on the *substitution*,
+        // and the retry must not be free to make the same one again. The lookup
+        // behind it is deterministic and, by the second attempt, cached — so it
+        // wins the race against YouTube by the same margin it won it the first
+        // time and hands back the identical dead URL, until [MAX_RECOVERIES]
+        // stops trying. That is a track that never plays at all while a working
+        // YouTube URL sits in [StreamResolver]'s cache, resolved and unused.
+        // The same reasoning as [QualityUpgrade.refuseUpgrades] above, for the
+        // substitution that happens *before* the first note rather than after.
+        // Read before the forget below, which is what clears the evidence.
+        uri?.getQueryParameter("v")?.takeIf(StreamChoice::isSubstitute)?.let { videoId ->
+            StreamChoice.refuseSubstitutes(videoId)
+            TrackLog.w(
+                "YZ Music",
+                "$videoId broke on a substituted stream; YouTube serves it for now",
+                about = mediaId,
+            )
+            // And no swapping back to it mid-song either: the second look asks
+            // the same catalogues the same question and would cut the audio that
+            // just recovered to land on the same refusal.
+            QualityUpgrade.refuseUpgrades(videoId)
+        }
+        uri?.getQueryParameter("v")?.let(StreamChoice::forget)
+        scope.launch(TrackLog.about(mediaId)) {
+            // Long enough for the released source to let go of the cache keys
+            // about to be removed, short enough to read as a stutter.
+            delay(RECOVERY_DELAY_MS)
+            uri?.let { withContext(Dispatchers.IO) { AudioCache.discard(it) } }
+            // The bytes go even when nothing is going to be prepared after
+            // them. A half-filled entry whose owner has just been forgotten is
+            // the seam this file's [StreamChoice] note is about: the next play
+            // resolves freely, lands on a different source, and streams it into
+            // the middle of the last one. Releasing the choice without dropping
+            // the bytes would trade one stuck track for a corrupt one.
+            if (givingUp) {
+                // A track nobody can play must not leave the player parked in
+                // IDLE on it. Nothing else in this service calls prepare() again,
+                // so before this the queue simply stopped: the notification kept
+                // showing the song, the play button kept doing nothing, and from
+                // the outside that is indistinguishable from a hung app — which
+                // is what the report describes and what "it was stuck on my
+                // phone too" means. Moving on is the only honest answer, and it
+                // is only safe to do for a verdict: a track that merely ran out
+                // of attempts may still be playable when the listener presses
+                // play, and skipping past it would silently eat it.
+                if (verdict != null) withContext(Dispatchers.Main) { skipPastUnplayable(mediaId, verdict) }
+                return@launch
+            }
+            withContext(Dispatchers.Main) {
+                val player = this@PlaybackService.player ?: return@withContext
+                if (player.currentMediaItem?.mediaId != mediaId) return@withContext
+                TrackLog.d("YZ Music", "retrying $mediaId from ${position}ms")
+                // Claimed before the seek, so the transition it may fire is
+                // recognised as this retry rather than read as a fresh start and
+                // handed a fresh attempt budget.
+                retryingMediaId = mediaId
+                player.seekTo(player.currentMediaItemIndex, position)
+                player.prepare()
+            }
+        }
+    }
+
+    /**
+     * Swaps a track whose downloaded file has gone missing back onto a stream,
+     * in place and at the same position.
+     *
+     * The file was downloaded and then deleted from under the app — a file
+     * manager, a cleaner, a wiped SD card — leaving [Downloads]' record pointing
+     * at nothing. [Song.toMediaItem] checks that record before it builds an
+     * item, but only at build time: an item already sitting in the timeline was
+     * built when the file was still there, and a queue restored by [LastPlayed]
+     * carries the same stale uri back across a restart. This is the other end of
+     * that, and the only one that can see the file is gone rather than guess.
+     *
+     * The record goes first, then the item is rebuilt from its own metadata with
+     * the local uri stripped, which sends [Song.toMediaItem] down its streaming
+     * branch. Position is kept, so this reads as the hiccup [recoverFrom] is
+     * written around rather than the song starting over.
+     *
+     * @return false when this is not that situation and the caller should carry
+     *   on with its ordinary stream recovery — including the case where stripping
+     *   the local uri changes nothing, which is a device-library track whose
+     *   mediaId *is* the missing file and for which there is no stream to fall
+     *   back to. Returning true there would be a swap that fixes nothing, on a
+     *   loop.
+     */
+    private fun restreamMissingLocalFile(
+        player: ExoPlayer,
+        item: MediaItem,
+        uri: Uri?,
+        position: Long,
+    ): Boolean {
+        val scheme = uri?.scheme
+        if (scheme != "file" && scheme != "content") return false
+        val mediaId = item.mediaId
+
+        Downloads.forgetMissing(mediaId)
+        val restreamed = item.toSong().copy(localUri = null, localPath = null).toMediaItem()
+        if (restreamed.localConfiguration?.uri == uri) {
+            TrackLog.w(
+                "YZ Music",
+                "$mediaId is a local file that is gone and has no stream behind it",
+                about = mediaId,
+            )
+            return false
+        }
+
+        TrackLog.w(
+            "YZ Music",
+            "$mediaId was downloaded but $uri is gone; streaming it instead",
+            about = mediaId,
+        )
+        // Not claimed as [retryingMediaId], unlike the seek-and-prepare retry
+        // below: that flag exists to stop a retry against the *same* stream
+        // refilling its own attempt budget, and this is a different source
+        // entirely. Letting the transition clear the count is the right answer
+        // here — a stream that has never been tried deserves the full budget.
+        recoveries.remove(mediaId)
+        player.replaceMediaItem(player.currentMediaItemIndex, restreamed)
+        player.seekTo(player.currentMediaItemIndex, position)
+        player.prepare()
+        return true
+    }
+
+    /**
+     * Leave a track the resolver has ruled out and carry on down the queue.
+     *
+     * The item is left in place rather than removed: the listener queued it, and
+     * the reason it cannot be played is usually temporary in a way this service
+     * cannot see the end of — signing in clears an age gate, and travelling
+     * clears a region block. Removing it would quietly rewrite a queue on the
+     * strength of a ten-minute verdict.
+     *
+     * With nothing after it there is nowhere to go, and stopping is then the
+     * correct end state rather than a failure to recover: the error stays on the
+     * player, which is what puts a message in front of the listener — see
+     * `rememberPlayerState` in
+     * [PlayerConnection][com.music.yzmusic.playback.PlayerConnection].
+     */
+    private fun skipPastUnplayable(mediaId: String, reason: String) {
+        val exoPlayer = player ?: return
+        if (exoPlayer.currentMediaItem?.mediaId != mediaId) return
+        if (!exoPlayer.hasNextMediaItem()) {
+            TrackLog.w("YZ Music", "$reason — and nothing after it in the queue", about = mediaId)
+            return
+        }
+        TrackLog.w("YZ Music", "$reason — skipping to the next track", about = mediaId)
+        exoPlayer.seekToNextMediaItem()
+        // No play() here: an error does not clear playWhenReady, so prepare()
+        // resumes exactly as far as the listener had asked for. Calling play()
+        // would un-pause a queue they had paused.
+        exoPlayer.prepare()
+    }
+
+    /**
+     * Why [error] means "never", or null if it only means "not just now".
+     *
+     * Unwrapped by hand because the classification is the resolver's and the
+     * exception has been through Media3's loader by the time it arrives:
+     * `ExoPlaybackException` wrapping `Loader.UnexpectedLoaderException` wrapping
+     * what the resolver actually threw. A shallow `is` check sees only the
+     * outermost of those three.
+     */
+    private fun permanentReason(error: Throwable?): String? {
+        var cause = error
+        var depth = 0
+        while (cause != null && depth++ < PERMANENT_CAUSE_DEPTH) {
+            if (cause is StreamResolver.PermanentlyUnplayableException) {
+                return cause.message ?: "This track cannot be played"
+            }
+            cause = cause.cause?.takeIf { it !== cause }
+        }
+        return null
+    }
+
+    /**
+     * The track whose item this service is about to replace under it, so that
+     * [Player.Listener.onMediaItemTransition] can tell a quality swap from the
+     * queue actually moving on. Cleared by the transition it describes.
+     */
+    private var swappingMediaId: String? = null
+
+    /**
+     * When the audio was last cut for a quality swap, so the analytics listener
+     * can say how long it stayed cut. Null except across a swap.
+     */
+    private var swapCutAt: Long? = null
+
+    /**
+     * The track [ExoPlayer.getAudioFormat] is currently describing.
+     *
+     * `audioFormat` is a property of the *renderer*, not of the queue item, and
+     * it keeps naming the outgoing track's codec until the renderer has read a
+     * sample of the incoming one. Anything that asks "what is playing right
+     * now" in the moments after a transition is therefore told about the track
+     * before it, and [adoptCachedTrack] is asked exactly there — a queue
+     * advance is one of the places [lookForBetterCopy] runs from.
+     *
+     * Observed: 'Harleys In Hawaii' came up fifteen milliseconds after the
+     * queue moved onto it, twenty seconds after the previous track had been
+     * upgraded to FLAC. The renderer still said `audio/flac`, so a WebM Opus
+     * stream — verified by the `1A 45 DF A3` on its cache entry — was written
+     * off as "already lossless from cache" and, because that verdict is
+     * recorded once and for good, never offered an upgrade again for the rest
+     * of the session.
+     */
+    private var audioFormatFor: String? = null
+
+    /**
+     * Starts the second look for the playing track, if it settled for less
+     * than was asked for — see [QualityUpgrade].
+     *
+     * Runs at most once per track: [QualityUpgrade.lookAgain] drops the track
+     * from its pending set whatever the answer, so the repeated calls this
+     * gets cost nothing after the first. It needs to be called from several
+     * places for that reason — a track becomes eligible at a different moment
+     * depending on how it was reached. Called only from
+     * `onIsPlayingChanged`, it fired for the first track of a session and for
+     * nothing after it: the queue advancing while already playing is not a
+     * change in `isPlaying`, so every track but the first kept a lookup that
+     * had already found its FLAC and was never asked for it.
+     *
+     * Eligibility has two sources, because being resolved and being played are
+     * not the same event. A track the resolver saw is already marked; a track
+     * served from the disk cache was never resolved at all and is judged here
+     * instead — see [adoptCachedTrack] and [QualityUpgrade.adoptUnresolved].
+     */
+    private fun lookForBetterCopy(player: ExoPlayer) {
+        val item = player.currentMediaItem ?: return
