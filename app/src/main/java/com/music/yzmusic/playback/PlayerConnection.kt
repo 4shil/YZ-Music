@@ -287,3 +287,20 @@ private val DIRECT_FILE_URI_EXTENSIONS = setOf(
     "alac", "amr", "awb", "wma", "aif", "aiff", "ac3", "dts",
 )
 
+private fun resolvePlaybackUri(uriString: String, localPath: String?): String {
+    if (localPath.isNullOrBlank() || !uriString.startsWith("content://")) return uriString
+    val ext = localPath.substringAfterLast('.', "").lowercase(Locale.ROOT)
+    if (ext !in DIRECT_FILE_URI_EXTENSIONS) return uriString
+    val file = File(localPath)
+    return if (file.exists() && file.canRead()) Uri.fromFile(file).toString() else uriString
+}
+
+/**
+ * The `&n=&a=&d=` tail every playback URI carries: what this track is, in the
+ * terms [com.music.yzmusic.data.sources.TrackMatcher] compares recordings on.
+ *
+ * The runtime is the one of the three that can rule a candidate *out* on its
+ * own, and it is only ever a hint here — a row that never carried a duration
+ * simply omits it and the match is made on title and artist alone, as it was
+ * before.
+ */
