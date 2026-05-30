@@ -2622,3 +2622,387 @@ class PlaybackService : MediaSessionService() {
             return Resolved.Module(quick)
         }
 
+        val url = fallback.await().getOrThrow()
+        // Marked pending only here, with the fallback's own bitrate in hand:
+        // that figure is the answer to "better than what?" the second look
+        // measures candidates against, and it isn't known until the client
+        // walk has picked a format. A lookup still running is handed over to
+        // be waited on rather than repeated; one that already finished with
+        // nothing leaves the second look to find its own candidates.
+        val pending = QualityUpgrade.settledForLess(
+            mediaId = videoId,
+            target = target,
+            inFlight = lookup.takeIf { lookup.isActive },
+            playing = NerdStats.pickedBitrateKbps(videoId)?.let { StreamFormat(kbps = it) },
+        )
+        if (!pending) NerdStats.onLosslessRaceEnd(videoId)
+        return Resolved.YouTube(url)
+    }
+
+    /**
+     * Publishes what the decoder is really being fed, for "stats for nerds".
+     *
+     * Bitrate is the awkward one: YouTube's WebM and MP4 containers carry no
+     * bitrate field, so [Format.bitrate] arrives as `NO_VALUE` and the honest
+     * figure is whatever named this stream instead. The source's own figure
+     * comes ahead of YouTube's because a track can have both: one resolved
+     * through YouTube and then upgraded to a module stream mid-song has a
+     * stale 160 sitting in [NerdStats.pickedBitrateKbps] describing audio that
+     * stopped playing several seconds ago. Anything still unknown is left null
+     * for the UI to omit — better a shorter line than a made-up number.
+     */
+    private fun publishNerdStats() {
+        val player = player ?: return
+        val format = player.audioFormat
+        val mediaId = player.currentMediaItem?.mediaId
+        NerdStats.current.value = NerdStats.Snapshot(
+            mimeType = format?.sampleMimeType,
+            bitrateKbps = format?.bitrate?.takeIf { it != Format.NO_VALUE }?.div(1000)
+                ?: NerdStats.declaredFormat(mediaId)?.kbps
+                ?: NerdStats.pickedBitrateKbps(mediaId),
+            sampleRateHz = format?.sampleRate?.takeIf { it != Format.NO_VALUE },
+            channels = format?.channelCount?.takeIf { it != Format.NO_VALUE },
+            bitDepth = format?.pcmEncoding?.let(::bitDepthOf),
+            claimed = NerdStats.declaredFormat(mediaId),
+        )
+    }
+
+    /**
+     * PCM sample depth the renderer settled on, in bits.
+     *
+     * This is the figure that decides whether a hi-res file is being played as
+     * one. A 24-bit FLAC whose renderer reports 16-bit PCM has been truncated
+     * somewhere between the decoder and the sink, and no other number on the
+     * stats line would show it — the sample rate and the codec both survive
+     * that unharmed.
+     *
+     * `ENCODING_INVALID` and `NO_VALUE` mean the renderer hasn't said, which is
+     * common for pass-through and for formats decoded straight to float, and
+     * is reported as unknown rather than as a failure.
+     */
+    private fun bitDepthOf(pcmEncoding: Int): Int? = when (pcmEncoding) {
+        C.ENCODING_PCM_8BIT -> 8
+        C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN -> 16
+        C.ENCODING_PCM_24BIT, C.ENCODING_PCM_24BIT_BIG_ENDIAN -> 24
+        C.ENCODING_PCM_32BIT, C.ENCODING_PCM_32BIT_BIG_ENDIAN -> 32
+        C.ENCODING_PCM_FLOAT -> 32
+        else -> null
+    }
+
+    /** Snapshot the queue so the next launch can open where this one stopped. */
+    private fun saveQueue() {
+        val player = player ?: return
+        if (player.mediaItemCount == 0) return
+        LastPlayed.save(
+            songs = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toSong() },
+            index = player.currentMediaItemIndex,
+            positionMs = player.currentPosition,
+        )
+    }
+
+    /**
+     * Tell the home-screen widgets what is playing.
+     *
+     * Kept out of [saveQueue] even though every caller does both: that one also
+     * runs from the per-second sampler in [reportProgress], and pushing a bitmap
+     * to the launcher once a second would be a lot of work to redraw the same
+     * picture.
+     *
+     * [playing] overrides what the player reports, for the one caller that knows
+     * better than it does — teardown, where the player is still nominally set to
+     * play right up to the moment it is released.
+     */
+    private fun publishWidgetState(playing: Boolean? = null) {
+        val exoPlayer = player ?: return
+        val song = exoPlayer.currentMediaItem?.toSong() ?: return
+        MediaWidgetSnapshot.save(
+            this,
+            MediaWidgetSnapshot(
+                mediaId = song.videoId,
+                title = song.title,
+                artist = song.artist,
+                artworkUrl = song.thumbnailUrl,
+                // playWhenReady, not isPlaying — see MediaWidgetSnapshot.isPlaying.
+                isPlaying = playing ?: exoPlayer.playWhenReady,
+                hasPrevious = exoPlayer.hasPreviousMediaItem(),
+                hasNext = exoPlayer.hasNextMediaItem(),
+            ),
+        )
+        MediaWidget.refresh(this)
+    }
+
+    /**
+     * Hands the cache the queue ahead of the one playing: [AudioCache.QUEUE_DEPTH]
+     * tracks is more than it does anything with, but it decides that, not this.
+     */
+    private fun prefetchAround(player: ExoPlayer) {
+        val nextIndex = player.nextMediaItemIndex
+        val upcoming = if (nextIndex != C.INDEX_UNSET) {
+            val end = (nextIndex + AudioCache.QUEUE_DEPTH - 1).coerceAtMost(player.mediaItemCount - 1)
+            (nextIndex..end).map { index ->
+                val item = player.getMediaItemAt(index)
+                // The title, artist and runtime the item was built with — see
+                // [Song.toMediaItem]. Read here, on the player's own thread,
+                // because read-ahead runs off the queue rather than off the
+                // session and has no other way to reach the track's metadata.
+                AudioCache.Upcoming(
+                    mediaId = item.mediaId,
+                    target = item.localConfiguration?.uri
+                        ?.let(SourceResolver::targetIn)
+                        ?: TrackMatcher.Target("", ""),
+                )
+            }
+        } else {
+            emptyList()
+        }
+        AudioCache.prefetchQueue(upcoming)
+    }
+
+    /**
+     * Feeds played-seconds to [PlaybackTracker]. The tracker can't read the
+     * player itself — ExoPlayer is confined to this thread — and a history
+     * entry with no watchtime behind it barely registers as a listen, so the
+     * sampling has to come from here.
+     */
+    private fun reportProgress() {
+        scope.launch {
+            while (isActive) {
+                // Re-read every tick rather than captured once: the session
+                // moves between two players, and a sampler pinned to the one
+                // that happened to be first would go on reporting a player that
+                // has been silent since the last crossfade.
+                val player = this@PlaybackService.player
+                if (player != null && player.isPlaying) {
+                    lastPositionSeconds = player.currentPosition / 1000
+                    player.currentMediaItem?.mediaId?.let {
+                        PlaybackTracker.onProgress(it, lastPositionSeconds)
+                    }
+                    // The device's own listening record — see [ListeningRecorder],
+                    // which counts wall-clock time between ticks rather than
+                    // reading the position. This loop is the only place in the app
+                    // that ticks exactly while audio is coming out, which is what
+                    // makes it the right place to count from.
+                    player.currentMediaItem?.toSong()?.let {
+                        ListeningRecorder.onSample(it, player.duration)
+                    }
+                    // Same cadence for the resume point: the process can be
+                    // killed at any moment without another callback arriving.
+                    saveQueue()
+                    // The renderer can settle on its format a moment after the
+                    // track change, which no callback of ours follows up on.
+                    publishNerdStats()
+                    // The backstop for the second look. The callbacks that
+                    // start it fire at moments a track may not be resolved
+                    // yet — the resolve happens on the loader thread when the
+                    // source is opened, which for a track skipped to directly
+                    // is after its own transition has been and gone. Cheap to
+                    // repeat: it returns immediately unless the track is
+                    // pending and nothing is already looking.
+                    lookForBetterCopy(player)
+                }
+                delay(PROGRESS_SAMPLE_MS)
+            }
+        }
+    }
+
+    /**
+     * Pause when the sleep timer runs out.
+     *
+     * `collectLatest` is what makes re-setting the timer work: the pending wait
+     * is cancelled and restarted on the new deadline instead of both firing.
+     */
+    private fun watchSleepTimer() {
+        scope.launch {
+            SleepTimer.deadline.collectLatest { deadline ->
+                if (deadline == null) return@collectLatest
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                if (remaining > 0) delay(remaining)
+                player?.pause()
+                SleepTimer.cancel()
+            }
+        }
+    }
+
+    /**
+     * Buffers as far ahead as a whole track rather than a rolling window.
+     *
+     * Media3's audio default stops loading at 13 buffer segments — around 830kB,
+     * or 40 seconds of a 160kbps stream — and everything past that is fetched
+     * only as playback consumes it. Since the data source writes through to
+     * [AudioCache], how far ahead the player loads is also how much of the
+     * track ends up on disk, and a seek past the buffered part is the one that
+     * has to wait on the network.
+     *
+     * This matters for the track playback *starts* on. Everything after it is
+     * on disk in full before it is reached, read ahead while it was still the
+     * queued track — a first track has had no such chance.
+     *
+     * The byte ceiling is what governs; the duration is set past any song so
+     * that it never becomes the binding constraint.
+     *
+     * Two further departures from the defaults, both about how long the
+     * listener waits for sound:
+     *
+     *  - **Back buffer.** Media3 keeps nothing behind the playhead, so a seek
+     *    *backwards* drops the buffer and reloads, while a seek forwards lands
+     *    in samples already held. Half a minute of history closes that gap for
+     *    the seek people actually make — nudging back a few seconds to catch a
+     *    lyric — and it is deliberately no longer than that. The byte ceiling
+     *    above counts *everything* the player holds, history included, so a
+     *    back buffer wide enough to keep a whole track would spend the entire
+     *    read-ahead budget on audio already heard: past the ceiling, loading
+     *    stops, and since every second played moves a second from the front of
+     *    the buffer to the back, the total never falls again and it never
+     *    restarts. Read-ahead collapses and the track stalls every couple of
+     *    seconds for the rest of its length. Seeking further back than this
+     *    window is a disk read anyway, not a network one — [AudioCache] has
+     *    written every byte already played.
+     *  - **Thresholds to (re)start playback.** The defaults — 2.5s of audio
+     *    before starting, 5s before resuming after a rebuffer — are sized for
+     *    streaming video over a network that might stall again. Here the bytes
+     *    are usually already on disk, so those seconds are spent waiting on a
+     *    buffer that fills instantly and are simply dead air after a seek.
+     *    Resuming is given more room than starting: a stall means the network
+     *    is genuinely struggling, and coming back with a second of audio in
+     *    hand only buys the next stall.
+     */
+    private fun farBufferingLoadControl() = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+            /* maxBufferMs = */ FAR_BUFFER_MS,
+            /* bufferForPlaybackMs = */ START_PLAYBACK_MS,
+            /* bufferForPlaybackAfterRebufferMs = */ RESUME_PLAYBACK_MS,
+        )
+        .setTargetBufferBytes(FAR_BUFFER_BYTES)
+        .setBackBuffer(/* backBufferDurationMs = */ BACK_BUFFER_MS, /* retainBackBufferFromKeyframe = */ true)
+        .build()
+
+    /**
+     * Renderers whose audio sink only skips silence worth skipping.
+     *
+     * Media3's stock threshold is 100ms, which eats the breaths, rests and
+     * pre-chorus beats *inside* a song — the setting reads as "make the music
+     * sound rushed" rather than "trim dead air". A second-long floor leaves
+     * musical pauses alone and still collapses the run-in and run-out of a
+     * track. Everything else about the chain stays default, so
+     * `skipSilenceEnabled` keeps driving it as before.
+     */
+    private fun silenceSkippingRenderers(
+        spatial: SpatialAudioProcessor,
+        transition: TransitionFilterProcessor,
+    ) = object : DefaultRenderersFactory(this) {
+        override fun buildAudioSink(
+            context: Context,
+            enableFloatOutput: Boolean,
+            enableAudioTrackPlaybackParams: Boolean,
+        ): AudioSink = DefaultAudioSink.Builder(context)
+            .setEnableFloatOutput(enableFloatOutput)
+            .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+            .setAudioProcessorChain(
+                DefaultAudioSink.DefaultAudioProcessorChain(
+                    // Transition filtering last of the two: widening is a
+                    // property of the track, and a bass swap that ran before it
+                    // would have its own low end fed back in by the crossfeed.
+                    arrayOf(spatial, transition),
+                    SilenceSkippingAudioProcessor(
+                        MIN_SILENCE_US,
+                        SilenceSkippingAudioProcessor.DEFAULT_SILENCE_RETENTION_RATIO,
+                        SilenceSkippingAudioProcessor.DEFAULT_MAX_SILENCE_TO_KEEP_DURATION_US,
+                        SilenceSkippingAudioProcessor.DEFAULT_MIN_VOLUME_TO_KEEP_PERCENTAGE,
+                        SilenceSkippingAudioProcessor.DEFAULT_SILENCE_THRESHOLD_LEVEL,
+                    ),
+                    SonicAudioProcessor(),
+                ),
+            )
+            .build()
+    }
+
+    /**
+     * Push current settings onto a player. Called for both: whichever one is
+     * idle right now is the one the next transition will start a song on, so it
+     * cannot be left on stale settings.
+     */
+    private fun applySettings(player: ExoPlayer) {
+        player.skipSilenceEnabled = AppSettings.skipSilence.value
+        player.setPlaybackSpeed(AppSettings.playbackSpeed.value)
+    }
+
+    /** Runs [body] against both players, in whichever roles they currently hold. */
+    private inline fun eachPlayer(body: (ExoPlayer) -> Unit) {
+        player?.let(body)
+        spare?.let(body)
+    }
+
+    private fun observeSettings() {
+        scope.launch {
+            AppSettings.skipSilence.collect { on -> eachPlayer { it.skipSilenceEnabled = on } }
+        }
+        scope.launch {
+            // Not applied to a player mid-transition: [CrossfadeController]
+            // stacks a beatmatch stretch on top of this setting, and writing the
+            // raw value over it would drop the incoming track back to its own
+            // tempo halfway through a blend. The controller re-reads the setting
+            // when it restores the rate, so the change still lands.
+            AppSettings.playbackSpeed.collect { speed ->
+                if (crossfade?.isTransitioning() == true) return@collect
+                eachPlayer { it.setPlaybackSpeed(speed) }
+            }
+        }
+        scope.launch {
+            AppSettings.spatialAudio.collect {
+                spatialAudioProcessorA.enabled = it
+                spatialAudioProcessorB.enabled = it
+            }
+        }
+    }
+
+    private fun observeScrobbling() {
+        // Keep the manager alive while its timing settings change, so updating
+        // a preference does not cancel the current track's scrobble timer.
+        scope.launch {
+            // Explicit <Any, _>: these flows have mixed element types, and letting
+            // the reified vararg combine() infer T lands on an intersection type.
+            combine<Any, ScrobblingSnapshot>(
+                AppSettings.lastfmEnabled,
+                AppSettings.lastfmScrobbleEnabled,
+                AppSettings.lastfmNowPlaying,
+                AppSettings.lastfmSessionKey,
+                AppSettings.lastfmApiKey,
+                AppSettings.lastfmSecret,
+                AppSettings.lastfmEndpoint,
+                AppSettings.scrobbleMinDuration,
+                AppSettings.scrobbleDelayPercent,
+                AppSettings.scrobbleDelaySeconds,
+            ) { values ->
+                ScrobblingSnapshot(
+                    lastfmEnabled = values[0] as Boolean,
+                    scrobbleEnabled = values[1] as Boolean,
+                    nowPlaying = values[2] as Boolean,
+                    sessionKey = values[3] as String,
+                    apiKey = values[4] as String,
+                    secret = values[5] as String,
+                    endpoint = values[6] as String,
+                    minDuration = values[7] as Int,
+                    delayPercent = values[8] as Float,
+                    delaySeconds = values[9] as Int,
+                )
+            }.collectLatest { snapshot ->
+                val shouldEnable = AppSettings.scrobblingAvailable &&
+                    snapshot.lastfmEnabled &&
+                    snapshot.scrobbleEnabled &&
+                    snapshot.sessionKey.isNotBlank() &&
+                    snapshot.apiKey.isNotBlank() &&
+                    snapshot.secret.isNotBlank()
+
+                if (!shouldEnable) {
+                    scrobbleManager?.destroy()
+                    scrobbleManager = null
+                    return@collectLatest
+                }
+
+                LastFM.configure(
+                    endpoint = snapshot.endpoint.ifBlank { LastFM.DEFAULT_API_ENDPOINT },
+                    apiKey = snapshot.apiKey,
+                    secret = snapshot.secret,
+                    sessionKey = snapshot.sessionKey,
+                )
