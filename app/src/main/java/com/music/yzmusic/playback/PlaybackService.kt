@@ -3161,3 +3161,67 @@ class PlaybackService : MediaSessionService() {
      * never connect an account, and this is called from the middle of every
      * track change.
      */
+    private fun pushDiscordPresence(exoPlayer: ExoPlayer) {
+        val rpc = discordRpc ?: return
+        val song = exoPlayer.currentMediaItem?.toSong() ?: return
+        // Read on the main thread, before the push is handed to IO: by the time
+        // a coroutine gets to run, the queue may have moved on, and ExoPlayer's
+        // state is only legal to read from the thread it was built on.
+        val positionMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+        val durationMs = exoPlayer.duration.takeIf { it > 0 } ?: 0L
+        val speed = exoPlayer.playbackParameters.speed
+
+        discordUpdateJob?.cancel()
+        discordPresenceUp = true
+        discordUpdateJob = scope.launch(Dispatchers.IO) {
+            rpc.updateSong(
+                song = song,
+                currentPlaybackTimeMillis = positionMs,
+                durationMillis = durationMs,
+                playbackSpeed = speed,
+                useDetails = AppSettings.discordUseDetails.value,
+                status = AppSettings.discordStatus.value,
+                button1Text = AppSettings.discordButton1Text.value,
+                button1Visible = AppSettings.discordButton1Visible.value,
+                button2Text = AppSettings.discordButton2Text.value,
+                button2Visible = AppSettings.discordButton2Visible.value,
+                activityType = AppSettings.discordActivityType.value,
+                activityName = AppSettings.discordActivityName.value,
+            ).onFailure {
+                TrackLog.d("YZ Music", "Discord presence failed: ${it.message}", about = song.videoId)
+            }
+        }
+    }
+
+    /**
+     * Takes the presence down but leaves the socket up, so resuming doesn't pay
+     * for a reconnect. Discord clears the card on an activity-less presence.
+     */
+    private fun clearDiscordPresence() {
+        val rpc = discordRpc ?: return
+        if (!discordPresenceUp) return
+        discordPresenceUp = false
+        discordUpdateJob?.cancel()
+        discordUpdateJob = scope.launch(Dispatchers.IO) {
+            runCatching { rpc.close() }
+        }
+    }
+
+    /**
+     * Submits a finished ListenBrainz listen, but only if the service is
+     * actually scrobbling — the settings are read at call time so the helper
+     * stays a no-op whenever ListenBrainz is switched off.
+     */
+    private fun submitListenBrainzFinished(song: Song, startMs: Long, durationMs: Long?) {
+        val lbEnabled = AppSettings.scrobblingAvailable && AppSettings.listenBrainzEnabled.value
+        val lbToken = AppSettings.listenBrainzToken.value
+        if (!lbEnabled || lbToken.isBlank()) return
+        val endMs = System.currentTimeMillis()
+        scope.launch {
+            ListenBrainzManager.submitFinished(lbToken, song, startMs, endMs, durationMs)
+        }
+    }
+
+    /** Sends a ListenBrainz "now playing" update for the current track. */
+    private fun submitListenBrainzPlayingNow(song: Song, positionMs: Long, durationMs: Long?) {
+        val lbEnabled = AppSettings.scrobblingAvailable && AppSettings.listenBrainzEnabled.value
