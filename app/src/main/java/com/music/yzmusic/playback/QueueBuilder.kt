@@ -51,3 +51,23 @@ object QueueBuilder {
             val artists = artistSet(candidate.artist)
             val key = artists.minOrNull()
             if (key != null) {
+                val cap = if (artists.any { it in seedArtists }) {
+                    SEED_ARTIST_LIMIT
+                } else {
+                    PER_ARTIST_LIMIT
+                }
+                val played = perArtist[key] ?: 0
+                if (played >= cap) continue
+                perArtist[key] = played + 1
+            }
+
+            taken += candidate
+            out += candidate
+        }
+        return out
+    }
+
+    /**
+     * Whether two entries are the same recording. Ids differ between the audio
+     * and video cuts of a track, which is exactly the case id equality misses.
+     */
