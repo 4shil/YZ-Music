@@ -73,3 +73,5 @@ object QueueShuffle {
     }
 
     /** Puts the tracks still to come back into the order they were queued in. */
+    private fun restore(player: Player) {
+        val from = player.currentMediaItemIndex + 1
