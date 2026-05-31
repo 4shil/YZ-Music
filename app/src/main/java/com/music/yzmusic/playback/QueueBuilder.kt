@@ -78,3 +78,13 @@ object QueueBuilder {
         // One shared name is enough. The two cuts of a track get billed in
         // whatever order the upload used — "Pritam, Arijit Singh & Shilpa Rao"
         // against "Shilpa Rao, Arijit Singh, & Pritam" is one song, twice.
+        val left = artistSet(a.artist)
+        val right = artistSet(b.artist)
+        return left.isEmpty() || right.isEmpty() || left.any { it in right }
+    }
+
+    /**
+     * `Kesariya (From "Brahmastra") | Official Video` and `Kesariya` are one
+     * recording as far as a queue is concerned. Remix and cover markers are
+     * deliberately left in — those really are different tracks.
+     */
