@@ -88,3 +88,29 @@ object QueueBuilder {
      * recording as far as a queue is concerned. Remix and cover markers are
      * deliberately left in — those really are different tracks.
      */
+    internal fun normalisedTitle(raw: String): String = raw.lowercase(Locale.ROOT)
+        .substringBefore(" | ")
+        .replace(NOISE, " ")
+        .replace(PUNCTUATION, " ")
+        .replace(SPACES, " ")
+        .trim()
+
+    /** The cast behind a credit, split out so billing order stops mattering. */
+    internal fun artistSet(raw: String): Set<String> = raw.lowercase(Locale.ROOT)
+        .replace(TOPIC, " ")
+        .split(",", "&", "·", "•", ";", " feat", " ft.", " ft ", " x ", " with ")
+        .map { it.replace(PUNCTUATION, " ").replace(SPACES, " ").trim() }
+        .filter { it.isNotEmpty() }
+        .toSet()
+
+    private val NOISE = Regex(
+        """\((?:official|lyric|lyrics|lyrical|audio|video|visuali[sz]er|full song|hd|4k)[^)]*\)""" +
+            """|\(from[^)]*\)""" +
+            """|\[[^]]*]""" +
+            """|\b(?:official (?:video|audio|music video)|lyrical video|full video|4k video)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val TOPIC = Regex("""\s*-\s*topic\b""", RegexOption.IGNORE_CASE)
+    private val PUNCTUATION = Regex("""[^\p{L}\p{N}]+""")
+    private val SPACES = Regex("""\s+""")
+}
