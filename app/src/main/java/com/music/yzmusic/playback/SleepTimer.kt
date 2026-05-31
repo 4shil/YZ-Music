@@ -15,3 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 object SleepTimer {
 
     /** Deadline on [SystemClock.elapsedRealtime], or null when no timer is set. */
+    val deadline = MutableStateFlow<Long?>(null)
+
+    /** The preset that was chosen, so the picker can tick it. Null when off. */
