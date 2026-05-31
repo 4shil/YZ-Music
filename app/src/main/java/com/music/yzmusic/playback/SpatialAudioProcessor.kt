@@ -99,3 +99,6 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
         inputBuffer.order(ByteOrder.nativeOrder())
         outputBuffer.order(ByteOrder.nativeOrder())
 
+        val delaySize = delayLeft.size
+        repeat(frameCount) {
+            val left = inputBuffer.short.toInt()
