@@ -64,3 +64,39 @@ object QualityUpgrade {
      * own candidates.
      */
     private data class Pending(
+        val target: TrackMatcher.Target,
+        val inFlight: Deferred<SourceStream?>? = null,
+        /**
+         * What the listener is actually hearing — the yardstick a lossy
+         * candidate is measured against in [SourceResolver.worthSwapping].
+         * Known by the time a track is marked pending: whichever stream won
+         * the race has already named its format, and a track adopted from the
+         * cache without a race has one measured for it — see
+         * [adoptUnresolved]. Null only when neither could, and an unknown
+         * floor is one nothing lossy clears.
+         */
+        val playing: StreamFormat? = null,
+    )
+
+    private val pending = ConcurrentHashMap<String, Pending>()
+    private val forced = ConcurrentHashMap<String, SourceStream>()
+
+    /**
+     * Tracks whose upgraded stream is being *proved* rather than played — see
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService]'s
+     * audition.
+     *
+     * An audition reaches its bytes through the same resolving data source the
+     * real player does, which is where [forcedStream] hands over the URL and
+     * where the format it promises is recorded for "stats for nerds". That
+     * recording is right for a stream being played and wrong for one being
+     * tried out: for the length of an audition the listener is still hearing
+     * the old stream, and a badge that reads "Lossless" over it is describing
+     * a swap that has not happened and might never.
+     */
+    private val auditioning = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    fun beginAudition(mediaId: String) {
+        auditioning += mediaId
+    }
+
