@@ -38,3 +38,8 @@ object PlayerDeepLink {
         // that launched it, and getIntent() returns the same one after every
         // configuration change — left in place, a widget tap would reopen the
         // sheet each time the device changed theme or font size.
+        intent.removeExtra(EXTRA_OPEN_PLAYER)
+        intent.removeExtra("bitchord.openPlayer")
+        _pending.value = true
+        return true
+    }
