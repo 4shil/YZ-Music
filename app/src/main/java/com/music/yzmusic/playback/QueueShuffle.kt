@@ -55,3 +55,13 @@ object QueueShuffle {
      */
     fun startingOrder(songs: List<Song>, startIndex: Int): List<Song> {
         original = songs.map { it.videoId }
+        val rest = songs.filterIndexed { i, _ -> i != startIndex }.shuffled()
+        return listOf(songs[startIndex]) + rest
+    }
+
+    /**
+     * Rearranges everything after the playing track. That track keeps playing,
+     * and whatever sits above it stays there — those have had their turn.
+     */
+    private fun shuffle(player: Player) {
+        original = player.queueIds()
