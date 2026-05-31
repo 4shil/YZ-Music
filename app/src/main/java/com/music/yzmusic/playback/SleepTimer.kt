@@ -35,3 +35,16 @@ object SleepTimer {
     /** Whether any kind of timer is currently armed. */
     val isRunning: Boolean get() = deadline.value != null || afterTrack.value
 
+    fun start(minutes: Int) {
+        afterTrack.value = false
+        this.minutes.value = minutes
+        deadline.value = SystemClock.elapsedRealtime() + minutes * 60_000L
+    }
+
+    /** Pause once the track playing right now finishes. */
+    fun startAfterTrack() {
+        minutes.value = null
+        deadline.value = null
+        afterTrack.value = true
+    }
+
