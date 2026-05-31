@@ -34,3 +34,34 @@ object QueueShuffle {
     /** Media ids in their pre-shuffle order. Empty while shuffle is off. */
     private var original: List<String> = emptyList()
 
+    fun toggle(player: Player) {
+        if (_enabled.value) restore(player) else shuffle(player)
+    }
+
+    /**
+     * Turns shuffle on without touching the current queue — for the Shuffle
+     * button on an album or playlist page, where the queue it applies to is the
+     * one about to replace this one. [playSongs] builds that one shuffled.
+     */
+    fun enableForNextQueue() {
+        original = emptyList()
+        _enabled.value = true
+    }
+
+    /**
+     * The order a queue should go in when it is started while shuffle is on:
+     * the track the user picked leads, the rest follow at random. The order it
+     * arrived in is remembered, so turning shuffle off restores it.
+     */
+    fun startingOrder(songs: List<Song>, startIndex: Int): List<Song> {
+        original = songs.map { it.videoId }
+        val rest = songs.filterIndexed { i, _ -> i != startIndex }.shuffled()
+        return listOf(songs[startIndex]) + rest
+    }
+
+    /**
+     * Rearranges everything after the playing track. That track keeps playing,
+     * and whatever sits above it stays there — those have had their turn.
+     */
+    private fun shuffle(player: Player) {
+        original = player.queueIds()
