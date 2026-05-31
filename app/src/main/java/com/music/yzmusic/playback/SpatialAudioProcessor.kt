@@ -107,3 +107,30 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
             val mid = (left + right) * 0.5f
             val side = (left - right) * 0.5f * widthGain
             var widenedLeft = mid + side
+            var widenedRight = mid - side
+
+            val delayedRight = delayRight[delayIndex].toFloat()
+            val delayedLeft = delayLeft[delayIndex].toFloat()
+            lowpassLeft += lowpassCoeff * (delayedRight - lowpassLeft)
+            lowpassRight += lowpassCoeff * (delayedLeft - lowpassRight)
+            widenedLeft += lowpassLeft * crossfeedGain
+            widenedRight += lowpassRight * crossfeedGain
+
+            delayLeft[delayIndex] = left.toShort()
+            delayRight[delayIndex] = right.toShort()
+            delayIndex = (delayIndex + 1) % delaySize
+
+            outputBuffer.putShort(clampToShort(widenedLeft * outputGain))
+            outputBuffer.putShort(clampToShort(widenedRight * outputGain))
+        }
+        outputBuffer.flip()
+    }
+
+    private fun clampToShort(value: Float): Short =
+        value.coerceIn(Short.MIN_VALUE.toFloat(), Short.MAX_VALUE.toFloat()).toInt().toShort()
+
+    private companion object {
+        const val BYTES_PER_FRAME = 4 // stereo, 16-bit
+        const val DELAY_MS = 15
+    }
+}
