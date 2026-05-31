@@ -33,3 +33,8 @@ object PlayerDeepLink {
         if (intent == null) return false
         val wantsPlayer = intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false) ||
             intent.getBooleanExtra("bitchord.openPlayer", false)
+        if (!wantsPlayer) return false
+        // Cleared off the intent as well. A singleTask activity keeps the intent
+        // that launched it, and getIntent() returns the same one after every
+        // configuration change — left in place, a widget tap would reopen the
+        // sheet each time the device changed theme or font size.
