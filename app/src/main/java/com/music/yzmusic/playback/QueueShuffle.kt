@@ -75,3 +75,22 @@ object QueueShuffle {
     /** Puts the tracks still to come back into the order they were queued in. */
     private fun restore(player: Player) {
         val from = player.currentMediaItemIndex + 1
+        val upcoming = player.queueIds().drop(from).toMutableList()
+        // Each track still queued goes back to where it stood in the old order.
+        // Whatever is left over was queued after the shuffle and was never part
+        // of that order, so it keeps its place at the end.
+        val restored = original.filter { upcoming.remove(it) } + upcoming
+        applyOrder(player, from, sections(restored, player.autoplayIds()))
+        original = emptyList()
+        _enabled.value = false
+    }
+
+    /** [ids] with AutoPlay's tracks moved below the user's, order otherwise kept. */
+    private fun sections(ids: List<String>, autoplay: Set<String>): List<String> =
+        ids.filterNot { it in autoplay } + ids.filter { it in autoplay }
+
+    /**
+     * Rearranges the live queue from [from] onwards into [target], one move at
+     * a time. Moving items leaves the playing track's own source untouched;
+     * setting the queue afresh would restart it — and re-resolve its stream.
+     */
