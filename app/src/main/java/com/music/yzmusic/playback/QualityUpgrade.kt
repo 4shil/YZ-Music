@@ -382,3 +382,142 @@ object QualityUpgrade {
          * cancelled on its way to one. The difference is the whole of what
          * [asked] is allowed to mean.
          */
+        var answered = false
+        return try {
+            // The lookup that was still running when the fallback won the race
+            // gets first refusal: what it returns is the stream that would
+            // have played with no seam at all had it been a few seconds
+            // quicker.
+            //
+            // It is not taken on trust, though, and the reason is the whole
+            // difference between where it was going to be used and where it is
+            // used now. The live path's match is made against a runtime
+            // *claimed* by whoever queued the track, and where nothing in the
+            // results agrees with that runtime, [SourceResolver.preferred]
+            // lets the title and artist decide alone — correctly, for picking
+            // what to play from the start. Cutting into a track already
+            // playing is a stricter question, and it gets the stricter test
+            // that [SourceResolver.upgradeFor] applies to its own candidates,
+            // against the length the decoder is reporting. Measured here, the
+            // difference was a 189-second cut swapped into a 163-second song,
+            // which played for five seconds of silence and was then put back.
+            waiting.inFlight?.let { lookup ->
+                val late = runCatching { lookup.await() }.getOrNull()
+                if (late != null &&
+                    SourceResolver.worthSwapping(late.format, waiting.playing) &&
+                    SourceResolver.sameRecordingAs(late.durationSec, playingDurationSec)
+                ) {
+                    found = late
+                    answered = true
+                    return late
+                }
+            }
+            // It finished with nothing better, so the question gets asked
+            // again from scratch — this time waiting on every module, which is
+            // what the live path could not afford to do.
+            SourceResolver.upgradeFor(
+                waiting.target.copy(durationSec = playingDurationSec ?: waiting.target.durationSec),
+                playing = waiting.playing,
+            ).also {
+                found = it
+                answered = true
+            }
+        } finally {
+            if (answered) {
+                // The question has now been asked, whatever the answer. Leaving
+                // it pending would re-run the whole search on every pause and
+                // resume, and leaving it out of [asked] would let
+                // [adoptUnresolved] offer the same track again at the next
+                // progress sample.
+                pending.remove(mediaId)
+                asked += mediaId
+            }
+            // Otherwise the search was cancelled — the queue moved on while it
+            // was still running — and *nothing was learned*. The track is left
+            // exactly as it was found: still pending, still worth asking about
+            // if the listener comes back to it.
+            //
+            // It was not, and that was the single biggest hole in this feature.
+            // Two seconds on another track was enough to record a search that
+            // never finished as a settled "nothing better exists", and the
+            // track then played on at its original bitrate for the rest of the
+            // session with no badge, no search and no way back:
+            //
+            // ```
+            //   21:36:44  'double take' … looking for a better copy
+            //   21:36:46  TIMING track selected: e-9zmBhCfmk
+            //   21:36:48  TIMING track selected: IYOfGK5Zos4   ← and nothing
+            // ```
+            //
+            // Only a *no* ends the race here. A yes leaves the badge up for
+            // the caller to close out when the swap it describes has actually
+            // happened — see this function's own documentation.
+            if (found == null) NerdStats.onLosslessRaceEnd(mediaId)
+        }
+    }
+
+    /** Abandons the second look for [mediaId] — the queue has moved on. */
+    fun forget(mediaId: String) {
+        pending.remove(mediaId)?.inFlight?.cancel()
+        forced.remove(mediaId)
+        shelved.remove(mediaId)
+        auditioning -= mediaId
+        NerdStats.onLosslessRaceEnd(mediaId)
+    }
+
+    /**
+     * Abandons the second look for every track at once, because the player all
+     * of it was about is gone.
+     *
+     * Everything in this file is scoped to the *process*, and the player it
+     * describes is scoped to [PlaybackService][PlaybackService]. Those are not
+     * the same lifetime: closing the app destroys the service — by
+     * `onTaskRemoved`, or by the session simply being stopped — and Android
+     * routinely keeps the process to stand a new one up in. So a second service
+     * inherits the first one's verdicts, and the one verdict that matters is
+     * [asked].
+     *
+     * That is the whole of "it never comes back to lossless again". Measured on
+     * one track, with the process surviving throughout — a single log buffer
+     * holds both halves:
+     *
+     * ```
+     *   15:12:06  auditioning upgraded AdEKgwUqPKI … (FLAC)
+     *   15:12:11  upgraded to FLAC at 4759ms       ← and so: asked += AdEKgwUqPKI
+     *   ——— app closed, service destroyed, process kept ———
+     *   15:13:38  AdEKgwUqPKI <- audio/opus 48.0kHz
+     *             (no second look, no search, nothing)
+     * ```
+     *
+     * The restored track plays the lossy copy for a reason that is correct on
+     * its own: the rendition marker lives on the item URI, [LastPlayed] does not
+     * store it, and the base cache entry still holds YouTube's fully-fetched
+     * Opus — so the bytes come straight off disk with no resolve at all. What is
+     * supposed to happen next is [adoptUnresolved], which exists for precisely
+     * that track and says so. It never ran: [couldStillUpgrade] found the id in
+     * [asked], put there by last session's *successful* upgrade, and refused.
+     * And because [asked] never expires, skipping away and back could not clear
+     * it either.
+     *
+     * So the sets that are meant to outlive a queue movement are given the one
+     * boundary they were missing. Called before the queue is restored, which
+     * makes a warm restart behave like a cold one — see
+     * [PlaybackService.onCreate].
+     *
+     * [StreamChoice] is deliberately *not* reset alongside this. It records
+     * which source is filling each on-disk cache entry, those entries outlive
+     * the process, and letting a fresh resolve pick a different source for a
+     * half-filled one is the corruption it was written to prevent.
+     */
+    fun forgetLastSession() {
+        // Via [forget] rather than by clearing the maps, so a track still being
+        // auditioned or still holding a live lookup is torn down properly — and
+        // so the badge for it goes out with it.
+        (pending.keys + forced.keys + shelved.keys + auditioning).forEach(::forget)
+        asked.clear()
+        refused.clear()
+    }
+
+    // ── Handing the stream to the player ────────────────────────────────────
+
+    /** Parks [stream] for [mediaId], to be picked up when the item is reopened. */
