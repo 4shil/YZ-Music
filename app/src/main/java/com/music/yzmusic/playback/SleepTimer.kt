@@ -48,3 +48,13 @@ object SleepTimer {
         afterTrack.value = true
     }
 
+    fun cancel() {
+        minutes.value = null
+        deadline.value = null
+        afterTrack.value = false
+    }
+
+    /** How long is left, or null when no timer is running. */
+    fun remainingMs(): Long? =
+        deadline.value?.let { (it - SystemClock.elapsedRealtime()).coerceAtLeast(0L) }
+}
