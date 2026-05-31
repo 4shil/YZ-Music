@@ -71,3 +71,10 @@ object QueueBuilder {
      * Whether two entries are the same recording. Ids differ between the audio
      * and video cuts of a track, which is exactly the case id equality misses.
      */
+    fun isSameRecording(a: Song, b: Song): Boolean {
+        if (a.videoId == b.videoId) return true
+        val title = normalisedTitle(a.title)
+        if (title.isEmpty() || title != normalisedTitle(b.title)) return false
+        // One shared name is enough. The two cuts of a track get billed in
+        // whatever order the upload used — "Pritam, Arijit Singh & Shilpa Rao"
+        // against "Shilpa Rao, Arijit Singh, & Pritam" is one song, twice.
