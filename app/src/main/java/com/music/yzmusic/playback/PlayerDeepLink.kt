@@ -53,3 +53,7 @@ object PlayerDeepLink {
      * spring back open the first time the activity was recreated after the user
      * dismissed it.
      */
+    fun handled() {
+        _pending.value = false
+    }
+}
