@@ -28,3 +28,8 @@ object PlayerDeepLink {
     /** Whether a request is outstanding. Cleared by [handled]. */
     val pending: StateFlow<Boolean> = _pending.asStateFlow()
 
+    /** Reads an incoming intent, and reports whether it asked for the player. */
+    fun consume(intent: Intent?): Boolean {
+        if (intent == null) return false
+        val wantsPlayer = intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false) ||
+            intent.getBooleanExtra("bitchord.openPlayer", false)
