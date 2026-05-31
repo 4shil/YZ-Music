@@ -65,3 +65,13 @@ object QueueShuffle {
      */
     private fun shuffle(player: Player) {
         original = player.queueIds()
+        val from = player.currentMediaItemIndex + 1
+        val autoplay = player.autoplayIds()
+        val (mix, own) = original.drop(from).partition { it in autoplay }
+        applyOrder(player, from, own.shuffled() + mix.shuffled())
+        _enabled.value = true
+    }
+
+    /** Puts the tracks still to come back into the order they were queued in. */
+    private fun restore(player: Player) {
+        val from = player.currentMediaItemIndex + 1
