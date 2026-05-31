@@ -27,3 +27,6 @@ object SleepTimer {
      * seeking, crossfade and a queue that reorders itself would all leave that
      * number wrong, whereas the track ending is an event the player reports.
      */
+    val afterTrack = MutableStateFlow(false)
+
+    /** Durations offered in the picker. */
