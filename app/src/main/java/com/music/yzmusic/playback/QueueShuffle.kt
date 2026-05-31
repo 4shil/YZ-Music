@@ -94,3 +94,23 @@ object QueueShuffle {
      * a time. Moving items leaves the playing track's own source untouched;
      * setting the queue afresh would restart it — and re-resolve its stream.
      */
+    private fun applyOrder(player: Player, from: Int, target: List<String>) {
+        moves(player.queueIds(), from, target).forEach { (at, to) ->
+            player.moveMediaItem(at, to)
+        }
+    }
+
+    /**
+     * The moves that take [current] into [target] from [from] onwards, each a
+     * `from index to index` pair as [Player.moveMediaItem] takes them — the
+     * item at the first index lands on the second, the rest shifting along.
+     *
+     * Only the positions [target] names are placed; anything it doesn't
+     * mention is left to trail behind them, so a queue edited from under this
+     * comes out rearranged as far as it can be rather than not at all.
+     */
+    internal fun moves(
+        current: List<String>,
+        from: Int,
+        target: List<String>,
+    ): List<Pair<Int, Int>> {
