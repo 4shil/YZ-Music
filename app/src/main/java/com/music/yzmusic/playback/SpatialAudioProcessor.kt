@@ -102,3 +102,6 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
         val delaySize = delayLeft.size
         repeat(frameCount) {
             val left = inputBuffer.short.toInt()
+            val right = inputBuffer.short.toInt()
+
+            val mid = (left + right) * 0.5f
