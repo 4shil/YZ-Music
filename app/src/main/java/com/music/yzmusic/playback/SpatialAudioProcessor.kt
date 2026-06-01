@@ -62,3 +62,18 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
      * itself on files from the device: every mono or multichannel track in the
      * local library failed to play while downloads were fine.
      */
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT || inputAudioFormat.channelCount != 2) {
+            return AudioProcessor.AudioFormat.NOT_SET
+        }
+        val delaySamples = (inputAudioFormat.sampleRate * DELAY_MS / 1000f)
+            .roundToInt()
+            .coerceAtLeast(1)
+        delayLeft = ShortArray(delaySamples)
+        delayRight = ShortArray(delaySamples)
+        delayIndex = 0
+        lowpassLeft = 0f
+        lowpassRight = 0f
+        return inputAudioFormat
+    }
+
