@@ -18,3 +18,12 @@ object SleepTimer {
     val deadline = MutableStateFlow<Long?>(null)
 
     /** The preset that was chosen, so the picker can tick it. Null when off. */
+    val minutes = MutableStateFlow<Int?>(null)
+
+    /**
+     * Pause when the current track ends instead of after a fixed wait.
+     *
+     * Deliberately not expressed as a deadline of "duration minus position":
+     * seeking, crossfade and a queue that reorders itself would all leave that
+     * number wrong, whereas the track ending is an event the player reports.
+     */
