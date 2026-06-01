@@ -155,3 +155,8 @@ class AnalysisStore(private val context: Context) {
         val outroStartTime: Double = 0.0,
         val contentEndTime: Double = 0.0,
         val mixInTime: Double = 0.0,
+        val mixOutTime: Double = 0.0,
+        val mixInCandidates: List<StoredCue> = emptyList(),
+        val mixOutCandidates: List<StoredCue> = emptyList(),
+        val energyCurve: List<StoredEnergy> = emptyList(),
+        val lowEnergyCurve: List<StoredEnergy> = emptyList(),
