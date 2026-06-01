@@ -75,3 +75,31 @@ object AudioDecoder {
             extractor.setDataSource(source)
             (0 until extractor.trackCount)
                 .mapNotNull { index ->
+                    val format = extractor.getTrackFormat(index)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: return@mapNotNull null
+                    if (!mime.startsWith("audio/") || !format.containsKey(MediaFormat.KEY_DURATION)) {
+                        return@mapNotNull null
+                    }
+                    format.getLong(MediaFormat.KEY_DURATION).takeIf { it > 0 }?.div(1_000_000.0)
+                }
+                .maxOrNull()
+                ?.takeIf { it.isFinite() && it > 0 }
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not read duration from cached media", error)
+            null
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
+    /**
+     * Decodes [startSeconds] to [endSeconds] of [source], downmixed to mono at
+     * the container's native rate.
+     *
+     * The extractor seeks to the closest sync sample at or before the
+     * requested start, so a little more audio than asked for may come back at
+     * the front; the caller is given the real start via the returned offset
+     * so frame indices still map to true track times.
+     */
+    fun decodeRegion(source: MediaDataSource, startSeconds: Double, endSeconds: Double): Pair<Pcm, Double>? {
+        val chunks = ArrayList<FloatArray>()
