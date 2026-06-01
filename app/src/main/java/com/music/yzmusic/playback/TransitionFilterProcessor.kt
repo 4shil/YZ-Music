@@ -314,3 +314,14 @@ interface TransitionFilters {
     fun outgoing(lowPassHz: Float, highPassHz: Float)
 
     /** Parks both. Called whenever a transition ends, however it ended. */
+    fun open() {
+        incoming(TransitionFilterProcessor.OPEN_HZ, TransitionFilterProcessor.OFF_HZ)
+        outgoing(TransitionFilterProcessor.OPEN_HZ, TransitionFilterProcessor.OFF_HZ)
+    }
+
+    /** For callers with no audio sink to filter — tests, and the default wiring. */
+    object None : TransitionFilters {
+        override fun incoming(lowPassHz: Float, highPassHz: Float) = Unit
+        override fun outgoing(lowPassHz: Float, highPassHz: Float) = Unit
+    }
+}
