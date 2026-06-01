@@ -109,3 +109,13 @@ object StreamChoice {
      * opposite right answers: the first should stop substituting, the second
      * has nothing better to try.
      */
+    fun isSubstitute(videoId: String): Boolean = chosen[videoId]?.substituted == true
+
+    /**
+     * Releases [videoId] to be resolved afresh.
+     *
+     * Called when the bytes behind the choice are gone or were never any good:
+     * the queue moved past the track, its cache entry was discarded after a
+     * read error, or [QualityUpgrade] replaced the whole stream with a better
+     * one.
+     */
