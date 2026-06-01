@@ -91,3 +91,21 @@ object StreamChoice {
             // before it is reached and caches its bytes on the strength of that
             // pin, so a promise can outlive several other tracks' worth of
             // entries, and the blunt version became reachable.
+            val now = SystemClock.elapsedRealtime()
+            chosen.entries.removeIf { now - it.value.at > TTL_MS }
+            if (chosen.size >= MAX_REMEMBERED) {
+                chosen.minByOrNull { it.value.at }?.let { chosen.remove(it.key) }
+            }
+        }
+        chosen[videoId] = Choice(stream, SystemClock.elapsedRealtime(), substituted)
+    }
+
+    /**
+     * Whether the copy currently serving [videoId] came from a source standing
+     * in for YouTube.
+     *
+     * Read on the recovery path, before [forget], to tell a track that died on
+     * a substitution from one that died on YouTube's own stream. The two have
+     * opposite right answers: the first should stop substituting, the second
+     * has nothing better to try.
+     */
