@@ -216,3 +216,14 @@ class TransitionFilterProcessor : BaseAudioProcessor() {
     }
 
     private fun updateHighCoefficients() {
+        val g = tan(Math.PI * usableCutoff(currentHighPassHz) / sampleRate).toFloat()
+        for (stage in 0 until STAGES) {
+            val k = 1f / BUTTERWORTH_Q[stage]
+            val a1 = 1f / (1f + g * (g + k))
+            highA1[stage] = a1
+            highA2[stage] = g * a1
+            highA3[stage] = g * (g * a1)
+            highK[stage] = k
+        }
+    }
+
