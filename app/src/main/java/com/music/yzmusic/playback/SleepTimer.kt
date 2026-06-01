@@ -42,3 +42,9 @@ object SleepTimer {
     }
 
     /** Pause once the track playing right now finishes. */
+    fun startAfterTrack() {
+        minutes.value = null
+        deadline.value = null
+        afterTrack.value = true
+    }
+
