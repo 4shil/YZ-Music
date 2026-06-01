@@ -114,3 +114,8 @@ object QueueShuffle {
         from: Int,
         target: List<String>,
     ): List<Pair<Int, Int>> {
+        val ids = current.toMutableList()
+        val out = mutableListOf<Pair<Int, Int>>()
+        target.forEachIndexed { offset, id ->
+            val to = from + offset
+            if (ids.getOrNull(to) == id) return@forEachIndexed
