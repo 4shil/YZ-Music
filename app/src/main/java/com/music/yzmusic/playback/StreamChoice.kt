@@ -119,3 +119,45 @@ object StreamChoice {
      * read error, or [QualityUpgrade] replaced the whole stream with a better
      * one.
      */
+    fun forget(videoId: String) {
+        chosen.remove(videoId)
+    }
+
+    /**
+     * Tracks whose substituted stream refused to serve its bytes, and when.
+     *
+     * [forget] alone is not enough to recover from one. The search behind a
+     * substitution is deterministic — the same module, asked the same query for
+     * the same tier, answers with the same URL — and it is also *fast*, because
+     * by the second attempt its index and its module are cached. So a retry
+     * that is free to substitute again wins the race against YouTube by the
+     * same margin it won it the first time, and resolves straight back to the
+     * URL that just failed. Three attempts of that is a track that never plays
+     * at all, while a working YouTube URL sits in
+     * [StreamResolver][com.music.yzmusic.data.innertube.StreamResolver]'s cache
+     * unused.
+     *
+     * ### Why this expires
+     *
+     * The first version of this held a refusal for the life of the process, on
+     * the reasoning that a deterministic search deserves a permanent answer.
+     * Nothing measured supports going that far. What still reaches here is a URL
+     * that was well formed and would not serve anyway, and the ordinary causes
+     * of that — a signature that expired between minting and use, a backend
+     * having a bad minute — clear up by themselves. Held forever, one of those
+     * would cost the lossless copy of every track it touched for the rest of the
+     * session: a real loss traded against an unproven gain. So the refusal is a
+     * cooling-off period, not a verdict — long enough to get the track playing
+     * and keep it playing, short enough to ask again in the same sitting.
+     *
+     * Most of what used to arrive here doesn't any more: [ModuleSource.malformed]
+     * rejects a URL carrying its own origin twice before anything tries to play
+     * it. This is the net under that, for the failures only playback can find.
+     */
+    private val refusedSubstitutes = ConcurrentHashMap<String, Long>()
+
+    /**
+     * Stops [videoId] being substituted for [REFUSAL_MS], and sends it to
+     * YouTube instead. Called from the recovery path; see
+     * [PlaybackService.recoverFrom].
+     */
