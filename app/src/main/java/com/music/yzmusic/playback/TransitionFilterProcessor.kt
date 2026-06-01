@@ -174,3 +174,34 @@ class TransitionFilterProcessor : BaseAudioProcessor() {
             val block = min(remaining, GLIDE_FRAMES)
             currentLowPassHz = glide(currentLowPassHz, targetLow)
             currentHighPassHz = glide(currentHighPassHz, targetHigh)
+            val lowOn = currentLowPassHz < OPEN_HZ - SETTLED_HZ
+            val highOn = currentHighPassHz > OFF_HZ + SETTLED_HZ
+            if (lowOn) updateLowCoefficients()
+            if (highOn) updateHighCoefficients()
+
+            repeat(block) {
+                for (channel in 0 until channelCount) {
+                    var sample = inputBuffer.short.toFloat()
+                    if (lowOn) sample = lowPass(channel, sample)
+                    if (highOn) sample = highPass(channel, sample)
+                    outputBuffer.putShort(clampToShort(sample))
+                }
+            }
+            remaining -= block
+        }
+        outputBuffer.flip()
+    }
+
+    // ---- Filter ------------------------------------------------------------
+
+    private fun glide(current: Float, target: Float): Float {
+        val from = ln(current.coerceAtLeast(MIN_HZ))
+        val to = ln(target.coerceAtLeast(MIN_HZ))
+        return exp(from + (to - from) * GLIDE_RATE)
+    }
+
+    /** Highest cutoff the bilinear transform can still represent without warping to infinity. */
+    private fun usableCutoff(hz: Float): Float =
+        hz.coerceIn(MIN_HZ, sampleRate * MAX_CUTOFF_FRACTION)
+
+    private fun updateLowCoefficients() {
