@@ -161,3 +161,9 @@ object StreamChoice {
      * YouTube instead. Called from the recovery path; see
      * [PlaybackService.recoverFrom].
      */
+    fun refuseSubstitutes(videoId: String) {
+        if (refusedSubstitutes.size >= MAX_REMEMBERED) refusedSubstitutes.clear()
+        refusedSubstitutes[videoId] = SystemClock.elapsedRealtime()
+    }
+
+    /** Whether a substitution has broken [videoId] recently enough to still count. */
