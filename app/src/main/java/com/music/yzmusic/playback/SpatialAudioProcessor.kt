@@ -1,0 +1,64 @@
+﻿package com.music.yzmusic.playback
+
+import androidx.media3.common.C
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.BaseAudioProcessor
+import androidx.media3.common.util.UnstableApi
+import java.nio.ByteOrder
+import kotlin.math.roundToInt
+
+/**
+ * Cheap stand-in for "spatial audio": widens the mid/side image and mixes in
+ * a short, low-passed cross-feed between channels — the same trick most
+ * consumer virtual-surround plugins use. O(1) per sample, no FFT or
+ * convolution, so it costs nothing worth measuring on a phone CPU.
+ *
+ * Exists because the platform [android.media.audiofx.Virtualizer] produced no
+ * audible difference on the reference device — likely swallowed by the OEM's
+ * own audio effect chain — so this runs inside ExoPlayer's own audio
+ * processor pipeline instead, where nothing else can intercept it.
+ */
+@UnstableApi
+class SpatialAudioProcessor : BaseAudioProcessor() {
+
+    @Volatile
+    var enabled: Boolean = false
+
+    /** How much wider the stereo image gets. 1.0 = untouched. */
+    private val widthGain = 2.5f
+
+    /** Makeup attenuation after widening, so the wider side energy doesn't clip. */
+    private val outputGain = 0.82f
+
+    /** How much of the delayed, low-passed opposite channel gets mixed back in. */
+    private val crossfeedGain = 0.2f
+
+    /** One-pole lowpass factor applied to the cross-fed signal — dulls it, like a far ear would. */
+    private val lowpassCoeff = 0.3f
+
+    private var delayLeft = ShortArray(0)
+    private var delayRight = ShortArray(0)
+    private var delayIndex = 0
+    private var lowpassLeft = 0f
+    private var lowpassRight = 0f
+
+    /**
+     * Stereo 16-bit only: the widening is written in terms of a left and a
+     * right sample, and there is no mid/side of a mono voice note or of a 5.1
+     * mix to widen.
+     *
+     * Bowing out with [AudioProcessor.AudioFormat.NOT_SET] rather than an
+     * [AudioProcessor.UnhandledAudioFormatException] is what keeps those
+     * tracks playable at all.
+     * [DefaultAudioSink][androidx.media3.exoplayer.audio.DefaultAudioSink]
+     * configures every processor in its chain whether or not the effect is
+     * switched on, and a throw from any
+     * of them fails the whole sink — the renderer dies with
+     * "MediaCodecAudioRenderer error" before a sample is written. NOT_SET
+     * means "inactive for this format" and the chain routes around this
+     * processor instead.
+     *
+     * Nothing from YouTube is anything but stereo, so this only ever showed
+     * itself on files from the device: every mono or multichannel track in the
+     * local library failed to play while downloads were fine.
+     */
