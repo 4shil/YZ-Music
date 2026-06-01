@@ -77,3 +77,12 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
         return inputAudioFormat
     }
 
+    override fun onFlush() {
+        delayLeft.fill(0)
+        delayRight.fill(0)
+        delayIndex = 0
+        lowpassLeft = 0f
+        lowpassRight = 0f
+    }
+
+    override fun queueInput(inputBuffer: java.nio.ByteBuffer) {
