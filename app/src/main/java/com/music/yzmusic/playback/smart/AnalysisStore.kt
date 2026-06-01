@@ -96,3 +96,49 @@ class AnalysisStore(private val context: Context) {
      * tempo: a failure is cheap to rediscover and worth rediscovering, since
      * the reason for it is usually missing bytes rather than the track itself.
      */
+    fun save(trackId: String, analysis: TrackAnalysis) {
+        if (trackId.isBlank() || !analysis.isUsable) return
+        runCatching {
+            directory.mkdirs()
+            val file = File(directory, fileNameFor(trackId))
+            // Written aside and renamed, so a kill mid-write leaves the old
+            // entry rather than a truncated one.
+            val temporary = File(directory, file.name + ".tmp")
+            temporary.writeText(json.encodeToString(Stored.serializer(), Stored.of(analysis)))
+            if (!temporary.renameTo(file)) temporary.delete()
+            known[trackId] = true
+        }.onFailure { Log.w(TAG, "Could not store analysis for $trackId", it) }
+        prune()
+    }
+
+    /**
+     * Keeps the directory under [MAX_ENTRIES], oldest first.
+     *
+     * Cheap because it only lists when the count is plausibly over — a
+     * directory listing per save would otherwise be a filesystem walk on every
+     * analysis.
+     */
+    private fun prune() {
+        val files = directory.listFiles() ?: return
+        if (files.size <= MAX_ENTRIES) return
+        files.sortedBy { it.lastModified() }
+            .take(files.size - MAX_ENTRIES)
+            .forEach { it.delete() }
+    }
+
+    /** Hashed rather than used raw: a track id is not guaranteed to be a legal filename. */
+    private fun fileNameFor(trackId: String): String = "${trackId.hashCode().toUInt()}_${trackId.length}.json"
+
+    /**
+     * The persisted subset, kept separate from [TrackAnalysis] so that adding a
+     * field to the in-memory type is not silently a schema change.
+     *
+     * [version] is checked on read through [ignoreUnknownKeys] plus an explicit
+     * comparison: an entry written by an older build may hold numbers computed a
+     * different way, and a wrong beat grid is worse than no beat grid.
+     */
+    @Serializable
+    private data class Stored(
+        val version: Int = SCHEMA_VERSION,
+        val duration: Double = 0.0,
+        val bpm: Double = 0.0,
