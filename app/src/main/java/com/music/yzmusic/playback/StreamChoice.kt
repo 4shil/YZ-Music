@@ -59,3 +59,20 @@ object StreamChoice {
      * worth trusting.
      */
     fun of(videoId: String): SourceStream? {
+        val choice = chosen[videoId] ?: return null
+        if (SystemClock.elapsedRealtime() - choice.at > TTL_MS) {
+            chosen.remove(videoId)
+            return null
+        }
+        return choice.stream
+    }
+
+    /**
+     * Records [stream] as the one copy of [videoId] this play is reading.
+     *
+     * @param substituted whether this came from a source standing in for
+     *   YouTube rather than from YouTube itself. Only the resolver knows, and
+     *   only [refuseSubstitutes] needs it — a substitution that turns out to be
+     *   unplayable has somewhere else to fall back to, and a YouTube stream
+     *   that fails has not.
+     */
