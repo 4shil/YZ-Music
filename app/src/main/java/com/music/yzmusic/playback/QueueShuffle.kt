@@ -119,3 +119,19 @@ object QueueShuffle {
         target.forEachIndexed { offset, id ->
             val to = from + offset
             if (ids.getOrNull(to) == id) return@forEachIndexed
+            val at = (to + 1 until ids.size).firstOrNull { ids[it] == id }
+                ?: return@forEachIndexed
+            out += at to to
+            ids.add(to, ids.removeAt(at))
+        }
+        return out
+    }
+
+    private fun Player.queueIds(): List<String> =
+        (0 until mediaItemCount).map { getMediaItemAt(it).mediaId }
+
+    private fun Player.autoplayIds(): Set<String> =
+        (0 until mediaItemCount)
+            .filter { getMediaItemAt(it).fromAutoplay }
+            .mapTo(mutableSetOf()) { getMediaItemAt(it).mediaId }
+}
