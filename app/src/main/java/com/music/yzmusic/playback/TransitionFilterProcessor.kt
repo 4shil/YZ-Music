@@ -145,3 +145,32 @@ class TransitionFilterProcessor : BaseAudioProcessor() {
     }
 
     override fun queueInput(inputBuffer: java.nio.ByteBuffer) {
+        val bytesPerFrame = BYTES_PER_SAMPLE * channelCount
+        if (bytesPerFrame == 0) return
+        val frameCount = inputBuffer.remaining() / bytesPerFrame
+        if (frameCount == 0) return
+        val outputBuffer = replaceOutputBuffer(frameCount * bytesPerFrame)
+
+        val targetLow = targetLowPassHz
+        val targetHigh = targetHighPassHz
+        // Parked at both ends *and* already settled there: nothing to do but
+        // hand the buffer straight through. The "already settled" half matters
+        // — a transition that has just finished is still gliding back open, and
+        // cutting the filter out from under that glide is the click it exists
+        // to avoid.
+        val parked = targetLow >= OPEN_HZ && targetHigh <= OFF_HZ &&
+            currentLowPassHz >= OPEN_HZ - SETTLED_HZ && currentHighPassHz <= OFF_HZ + SETTLED_HZ
+        if (parked) {
+            outputBuffer.put(inputBuffer)
+            outputBuffer.flip()
+            return
+        }
+
+        inputBuffer.order(ByteOrder.nativeOrder())
+        outputBuffer.order(ByteOrder.nativeOrder())
+
+        var remaining = frameCount
+        while (remaining > 0) {
+            val block = min(remaining, GLIDE_FRAMES)
+            currentLowPassHz = glide(currentLowPassHz, targetLow)
+            currentHighPassHz = glide(currentHighPassHz, targetHigh)
