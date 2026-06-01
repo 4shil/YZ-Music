@@ -105,3 +105,8 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
             val right = inputBuffer.short.toInt()
 
             val mid = (left + right) * 0.5f
+            val side = (left - right) * 0.5f * widthGain
+            var widenedLeft = mid + side
+            var widenedRight = mid - side
+
+            val delayedRight = delayRight[delayIndex].toFloat()
