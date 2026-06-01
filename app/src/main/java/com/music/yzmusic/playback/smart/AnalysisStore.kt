@@ -142,3 +142,7 @@ class AnalysisStore(private val context: Context) {
         val version: Int = SCHEMA_VERSION,
         val duration: Double = 0.0,
         val bpm: Double = 0.0,
+        val beatInterval: Double = 0.0,
+        val beatConfidence: Double = 0.0,
+        val firstBeat: Double = 0.0,
+        val downbeats: List<Double> = emptyList(),
