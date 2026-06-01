@@ -151,3 +151,7 @@ class AnalysisStore(private val context: Context) {
         val keyConfidence: Double = 0.0,
         val audibleStartTime: Double? = null,
         val pickupTime: Double? = null,
+        val introEndTime: Double = 0.0,
+        val outroStartTime: Double = 0.0,
+        val contentEndTime: Double = 0.0,
+        val mixInTime: Double = 0.0,
