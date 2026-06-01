@@ -146,3 +146,8 @@ class AnalysisStore(private val context: Context) {
         val beatConfidence: Double = 0.0,
         val firstBeat: Double = 0.0,
         val downbeats: List<Double> = emptyList(),
+        val phraseBoundaries: List<Double> = emptyList(),
+        val key: String = "",
+        val keyConfidence: Double = 0.0,
+        val audibleStartTime: Double? = null,
+        val pickupTime: Double? = null,
