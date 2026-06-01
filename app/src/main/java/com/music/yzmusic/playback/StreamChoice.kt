@@ -58,3 +58,4 @@ object StreamChoice {
      * for it — or the last one was long enough ago that its URL is no longer
      * worth trusting.
      */
+    fun of(videoId: String): SourceStream? {
