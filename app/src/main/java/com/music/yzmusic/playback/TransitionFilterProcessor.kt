@@ -259,3 +259,69 @@ class TransitionFilterProcessor : BaseAudioProcessor() {
         return value
     }
 
+    private fun clampToShort(value: Float): Short =
+        value.coerceIn(Short.MIN_VALUE.toFloat(), Short.MAX_VALUE.toFloat()).toInt().toShort()
+
+    companion object {
+        private const val TAG = "YZMusicTransitionFilter"
+
+        /** A low-pass at or above this is doing nothing audible, so it counts as off. */
+        const val OPEN_HZ = 20_000f
+
+        /** A high-pass at or below this is doing nothing audible, so it counts as off. */
+        const val OFF_HZ = 20f
+
+        /** Nothing musical wants the low end lifted above this, and a typo shouldn't be able to. */
+        const val MAX_HIGH_PASS_HZ = 2_000f
+
+        private const val MIN_HZ = 10f
+        private const val BYTES_PER_SAMPLE = 2
+
+        /** Two cascaded second-order sections: 24 dB/octave, the usual DJ-filter slope. */
+        private const val STAGES = 2
+
+        /** Section Qs for a maximally flat (Butterworth) fourth-order response. */
+        private val BUTTERWORTH_Q = floatArrayOf(0.54120f, 1.30656f)
+
+        /** Frames between coefficient updates. ~1.5 ms at 44.1 kHz. */
+        private const val GLIDE_FRAMES = 64
+
+        /** Per-sub-block glide fraction. ~30 ms time constant, just under one fade tick. */
+        private const val GLIDE_RATE = 0.05f
+
+        /** How close to a parked value counts as parked, so a glide terminates. */
+        private const val SETTLED_HZ = 1f
+
+        /** Keeps `tan` away from its pole at Nyquist. */
+        private const val MAX_CUTOFF_FRACTION = 0.45f
+    }
+}
+
+/**
+ * The two filters a transition rides: one over the track arriving, one over the
+ * track leaving.
+ *
+ * An interface rather than the processors themselves so [CrossfadeController]
+ * stays testable without an audio sink, and so it never has to know that
+ * "incoming" and "outgoing" are two different ExoPlayers whose roles swap at the
+ * lap.
+ */
+interface TransitionFilters {
+    /** The track fading up — the session player, once the lap has handed the queue over. */
+    fun incoming(lowPassHz: Float, highPassHz: Float)
+
+    /** The track fading out — the ghost player. */
+    fun outgoing(lowPassHz: Float, highPassHz: Float)
+
+    /** Parks both. Called whenever a transition ends, however it ended. */
+    fun open() {
+        incoming(TransitionFilterProcessor.OPEN_HZ, TransitionFilterProcessor.OFF_HZ)
+        outgoing(TransitionFilterProcessor.OPEN_HZ, TransitionFilterProcessor.OFF_HZ)
+    }
+
+    /** For callers with no audio sink to filter — tests, and the default wiring. */
+    object None : TransitionFilters {
+        override fun incoming(lowPassHz: Float, highPassHz: Float) = Unit
+        override fun outgoing(lowPassHz: Float, highPassHz: Float) = Unit
+    }
+}
