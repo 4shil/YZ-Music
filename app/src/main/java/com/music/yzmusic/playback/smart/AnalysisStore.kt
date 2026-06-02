@@ -155,3 +155,68 @@ class AnalysisStore(private val context: Context) {
         val outroStartTime: Double = 0.0,
         val contentEndTime: Double = 0.0,
         val mixInTime: Double = 0.0,
+        val mixOutTime: Double = 0.0,
+        val mixInCandidates: List<StoredCue> = emptyList(),
+        val mixOutCandidates: List<StoredCue> = emptyList(),
+        val energyCurve: List<StoredEnergy> = emptyList(),
+        val lowEnergyCurve: List<StoredEnergy> = emptyList(),
+        val vocalActivityMask: List<Double> = emptyList(),
+        val vocalProbability: Double = 0.0,
+    ) {
+        fun toAnalysis(trackId: String) = TrackAnalysis(
+            status = TrackAnalysis.STATUS_READY,
+            trackId = trackId,
+            duration = duration,
+            bpm = bpm,
+            beatInterval = beatInterval,
+            beatConfidence = beatConfidence,
+            firstBeat = firstBeat,
+            downbeats = downbeats,
+            phraseBoundaries = phraseBoundaries,
+            key = key,
+            keyConfidence = keyConfidence,
+            audibleStartTime = audibleStartTime,
+            pickupTime = pickupTime,
+            introEndTime = introEndTime,
+            outroStartTime = outroStartTime,
+            contentEndTime = contentEndTime,
+            mixInTime = mixInTime,
+            mixOutTime = mixOutTime,
+            mixInCandidates = mixInCandidates.map { it.toCue() },
+            mixOutCandidates = mixOutCandidates.map { it.toCue() },
+            energyCurve = energyCurve.map { it.toSample() },
+            lowEnergyCurve = lowEnergyCurve.map { it.toSample() },
+            vocalActivityMask = vocalActivityMask,
+            vocalProbability = vocalProbability,
+        )
+
+        companion object {
+            fun of(analysis: TrackAnalysis) = Stored(
+                duration = analysis.duration,
+                bpm = analysis.bpm,
+                beatInterval = analysis.beatInterval,
+                beatConfidence = analysis.beatConfidence,
+                firstBeat = analysis.firstBeat,
+                downbeats = analysis.downbeats.map(::round),
+                phraseBoundaries = analysis.phraseBoundaries.map(::round),
+                key = analysis.key,
+                keyConfidence = analysis.keyConfidence,
+                audibleStartTime = analysis.audibleStartTime,
+                pickupTime = analysis.pickupTime,
+                introEndTime = analysis.introEndTime,
+                outroStartTime = analysis.outroStartTime,
+                contentEndTime = analysis.contentEndTime,
+                mixInTime = analysis.mixInTime,
+                mixOutTime = analysis.mixOutTime,
+                mixInCandidates = analysis.mixInCandidates.map(StoredCue::of),
+                mixOutCandidates = analysis.mixOutCandidates.map(StoredCue::of),
+                energyCurve = analysis.energyCurve.map(StoredEnergy::of),
+                lowEnergyCurve = analysis.lowEnergyCurve.map(StoredEnergy::of),
+                vocalActivityMask = analysis.vocalActivityMask.map(::round),
+                vocalProbability = analysis.vocalProbability,
+            )
+        }
+    }
+
+    @Serializable
+    private data class StoredCue(val time: Double, val score: Double, val type: String) {
