@@ -242,3 +242,37 @@ class BeatTracker(private val context: Context) {
          * neighbours recovers where the maximum actually sits.
          */
         fun pickPeaks(logits: FloatArray): List<Double> {
+            val half = PEAK_WINDOW / 2
+            val peaks = ArrayList<Int>()
+            for (index in logits.indices) {
+                if (logits[index] <= 0f) continue
+                var isMaximum = true
+                for (offset in -half..half) {
+                    val neighbour = index + offset
+                    if (neighbour < 0 || neighbour >= logits.size) continue
+                    if (logits[neighbour] > logits[index]) {
+                        isMaximum = false
+                        break
+                    }
+                }
+                if (isMaximum) peaks += index
+            }
+
+            // Collapse adjacent frames that tied for the maximum onto their mean.
+            val deduped = ArrayList<Int>()
+            var index = 0
+            while (index < peaks.size) {
+                var mean = peaks[index].toDouble()
+                var count = 1
+                while (index + 1 < peaks.size && peaks[index + 1] - mean <= 1) {
+                    index += 1
+                    count += 1
+                    mean += (peaks[index] - mean) / count
+                }
+                deduped += mean.roundToInt()
+                index += 1
+            }
+
+            return deduped.map { frame ->
+                if (frame <= 0 || frame + 1 >= logits.size) return@map frame.toDouble()
+                val left = logits[frame - 1].toDouble()
