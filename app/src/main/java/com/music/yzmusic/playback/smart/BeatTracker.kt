@@ -163,3 +163,22 @@ class BeatTracker(private val context: Context) {
         val environment = OrtEnvironment.getEnvironment()
         val mels = spectrogram.mels
         val name = session.inputNames.first()
+        val stride = CHUNK_FRAMES - 2 * BORDER_FRAMES
+
+        var start = 0
+        while (start < spectrogram.frames) {
+            val length = min(CHUNK_FRAMES, spectrogram.frames - start)
+            // A chunk shorter than the border padding carries no usable centre.
+            if (length <= 2 * BORDER_FRAMES && start > 0) break
+
+            val chunk = spectrogram.values.copyOfRange(start * mels, (start + length) * mels)
+            val shape = longArrayOf(1, length.toLong(), mels.toLong())
+
+            OnnxTensor.createTensor(environment, FloatBuffer.wrap(chunk), shape).use { tensor ->
+                session.run(mapOf(name to tensor)).use { outputs ->
+                    val beat = (outputs.get(0).value as Array<FloatArray>)[0]
+                    val downbeat = (outputs.get(1).value as Array<FloatArray>)[0]
+
+                    val keepFrom = if (start == 0) 0 else BORDER_FRAMES
+                    val keepTo = if (start + length >= spectrogram.frames) length else length - BORDER_FRAMES
+                    for (index in keepFrom until keepTo) {
