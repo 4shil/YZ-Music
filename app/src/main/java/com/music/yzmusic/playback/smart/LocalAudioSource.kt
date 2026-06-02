@@ -57,3 +57,11 @@ internal object LocalAudioSource {
     fun isLocal(uri: Uri): Boolean = when (uri.scheme?.lowercase(Locale.ROOT)) {
         ContentResolver.SCHEME_FILE, ContentResolver.SCHEME_CONTENT -> true
         else -> false
+    }
+
+    /**
+     * Opens [uri] for random-access reading, or null when it cannot be read.
+     *
+     * Best-effort like the rest of the analysis: a permission the user has since
+     * revoked, a row MediaStore still lists for a file that is gone, a provider
+     * that only offers a forward-only stream — all answer null, and the caller
