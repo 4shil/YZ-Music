@@ -145,3 +145,10 @@ class TransitionFilterProcessor : BaseAudioProcessor() {
     }
 
     override fun queueInput(inputBuffer: java.nio.ByteBuffer) {
+        val bytesPerFrame = BYTES_PER_SAMPLE * channelCount
+        if (bytesPerFrame == 0) return
+        val frameCount = inputBuffer.remaining() / bytesPerFrame
+        if (frameCount == 0) return
+        val outputBuffer = replaceOutputBuffer(frameCount * bytesPerFrame)
+
+        val targetLow = targetLowPassHz
