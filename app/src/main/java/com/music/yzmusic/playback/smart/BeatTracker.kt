@@ -55,3 +55,23 @@ class BeatTracker(private val context: Context) {
         val beats: List<Double>,
         val downbeats: List<Double>,
         val bpm: Double,
+        val beatInterval: Double,
+        val firstBeat: Double,
+        val beatConfidence: Double,
+    )
+
+    @Volatile private var session: OrtSession? = null
+    private val lock = Any()
+
+    /** Parsing the graph is far too expensive to repeat per track, so one session is kept. */
+    private fun session(): OrtSession? {
+        session?.let { return it }
+        synchronized(lock) {
+            session?.let { return it }
+            return runCatching {
+                val file = File(context.filesDir, MODEL_ASSET)
+                if (!file.exists() || file.length() == 0L) {
+                    context.assets.open(MODEL_ASSET).use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
