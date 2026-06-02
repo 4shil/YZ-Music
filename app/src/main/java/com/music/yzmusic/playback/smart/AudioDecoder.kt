@@ -133,3 +133,37 @@ object AudioDecoder {
     /** Concatenates the decoded chunks into one contiguous buffer. */
     private fun flatten(chunks: List<FloatArray>): FloatArray {
         val samples = FloatArray(chunks.sumOf { it.size })
+        var offset = 0
+        for (chunk in chunks) {
+            chunk.copyInto(samples, offset)
+            offset += chunk.size
+        }
+        return samples
+    }
+
+    /**
+     * Runs the decode loop, handing each output buffer to [onBuffer], and
+     * returns the output sample rate paired with the region's real start.
+     *
+     * Shared by the mono and stereo entry points so there is one dequeue loop
+     * to get right rather than two that can drift apart; all that differs
+     * between them is how a buffer is reduced, which is what [onBuffer] owns.
+     */
+    private fun decodeRaw(
+        source: MediaDataSource,
+        startSeconds: Double,
+        endSeconds: Double,
+        onBuffer: (ByteBuffer, MediaCodec.BufferInfo, Int) -> Unit,
+    ): Pair<Double, Double>? {
+        if (endSeconds <= startSeconds) return null
+        val extractor = MediaExtractor()
+        var codec: MediaCodec? = null
+        try {
+            extractor.setDataSource(source)
+            val trackIndex = (0 until extractor.trackCount).firstOrNull { index ->
+                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: return null
+            extractor.selectTrack(trackIndex)
+            val format = extractor.getTrackFormat(trackIndex)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+
