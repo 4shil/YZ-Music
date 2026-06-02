@@ -167,3 +167,15 @@ object AudioDecoder {
             val format = extractor.getTrackFormat(trackIndex)
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
 
+            val startUs = (startSeconds * 1_000_000).toLong()
+            val endUs = (endSeconds * 1_000_000).toLong()
+            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+
+            codec = runCatching { MediaCodec.createDecoderByType(mime) }
+                .onFailure { Log.w(TAG, "No decoder for $mime", it) }
+                .getOrNull() ?: return null
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            var outputChannels = format.intOrNull(MediaFormat.KEY_CHANNEL_COUNT) ?: 1
