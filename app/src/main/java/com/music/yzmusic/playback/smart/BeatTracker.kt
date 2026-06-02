@@ -304,3 +304,17 @@ class BeatTracker(private val context: Context) {
          * the peaks. This is the number the whole transition policy gates on, so it is deliberately
          * capped below 1: a model is evidence, not proof.
          */
+        fun gridConfidence(beats: List<Double>, peakLogits: List<Double>): Double {
+            if (beats.size < MIN_BEATS) return 0.0
+            val gaps = beats.zipWithNext { left, right -> right - left }
+            val interval = median(gaps)
+            if (interval <= 0) return 0.0
+
+            // Fraction of gaps that are one beat rather than a hole in the grid.
+            val regular = gaps.count { abs(it - interval) <= interval * 0.1 }.toDouble() / gaps.size
+            // Logits are unbounded; a median around 2 is a decisive peak, around 0 is not.
+            val strength = 1 / (1 + exp(-(median(peakLogits) - 0.5)))
+            return max(0.0, min(0.95, 0.35 + 0.4 * regular + 0.25 * strength))
+        }
+    }
+}
