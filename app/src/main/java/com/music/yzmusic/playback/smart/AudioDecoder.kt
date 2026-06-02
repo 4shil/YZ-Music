@@ -179,3 +179,17 @@ object AudioDecoder {
 
             val bufferInfo = MediaCodec.BufferInfo()
             var outputChannels = format.intOrNull(MediaFormat.KEY_CHANNEL_COUNT) ?: 1
+            var outputRate = format.intOrNull(MediaFormat.KEY_SAMPLE_RATE) ?: 0
+            var actualStartSeconds = -1.0
+            var sawFirstSample = false
+            var inputDone = false
+            var outputDone = false
+
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inputIndex = codec.dequeueInputBuffer(TIMEOUT_US)
+                    if (inputIndex >= 0) {
+                        val inputBuffer = codec.getInputBuffer(inputIndex)
+                        if (inputBuffer == null) {
+                            // Nothing to feed this cycle; try again next iteration.
+                        } else {
