@@ -276,3 +276,14 @@ class BeatTracker(private val context: Context) {
             return deduped.map { frame ->
                 if (frame <= 0 || frame + 1 >= logits.size) return@map frame.toDouble()
                 val left = logits[frame - 1].toDouble()
+                val centre = logits[frame].toDouble()
+                val right = logits[frame + 1].toDouble()
+                val denominator = left - 2 * centre + right
+                if (abs(denominator) <= 1e-9) return@map frame.toDouble()
+                frame + (0.5 * (left - right) / denominator).coerceIn(-0.5, 0.5)
+            }
+        }
+
+        /** Median inter-beat interval as a tempo, or 0 when it is not a plausible one. */
+        fun tempoFromBeats(beats: List<Double>): Double {
+            if (beats.size < MIN_BEATS) return 0.0
