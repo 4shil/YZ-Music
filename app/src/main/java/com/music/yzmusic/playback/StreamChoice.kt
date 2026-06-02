@@ -167,3 +167,25 @@ object StreamChoice {
     }
 
     /** Whether a substitution has broken [videoId] recently enough to still count. */
+    fun substitutesRefused(videoId: String): Boolean {
+        val at = refusedSubstitutes[videoId] ?: return false
+        if (SystemClock.elapsedRealtime() - at <= REFUSAL_MS) return true
+        refusedSubstitutes.remove(videoId)
+        return false
+    }
+
+    /** Long enough to outlast any one play, far short of any signed URL's life. */
+    private const val TTL_MS = 15 * 60 * 1000L
+
+    /**
+     * How long a track stays off substitution after one broke it.
+     *
+     * Comfortably longer than the recovery it exists to protect — the retry
+     * happens within seconds — and longer than a play of the track, so nothing
+     * swaps back mid-song. Short enough that a module which was briefly
+     * returning bad URLs gets another chance inside the same listening session.
+     */
+    private const val REFUSAL_MS = 10 * 60 * 1000L
+
+    private const val MAX_REMEMBERED = 32
+}
