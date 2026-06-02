@@ -179,3 +179,6 @@ object AudioDecoder {
 
             val bufferInfo = MediaCodec.BufferInfo()
             var outputChannels = format.intOrNull(MediaFormat.KEY_CHANNEL_COUNT) ?: 1
+            var outputRate = format.intOrNull(MediaFormat.KEY_SAMPLE_RATE) ?: 0
+            var actualStartSeconds = -1.0
+            var sawFirstSample = false
