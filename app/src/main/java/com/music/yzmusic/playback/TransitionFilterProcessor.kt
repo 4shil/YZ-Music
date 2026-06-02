@@ -110,3 +110,38 @@ class TransitionFilterProcessor : BaseAudioProcessor() {
      * quietly declines to run is a Phase 4 transition that sounds exactly like a
      * Phase 3 one, with nothing anywhere saying why.
      */
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT || inputAudioFormat.channelCount < 1) {
+            Log.w(
+                TAG,
+                "Transition filtering inactive: encoding=${inputAudioFormat.encoding} " +
+                    "channels=${inputAudioFormat.channelCount} is not 16-bit PCM",
+            )
+            return AudioProcessor.AudioFormat.NOT_SET
+        }
+        channelCount = inputAudioFormat.channelCount
+        sampleRate = inputAudioFormat.sampleRate
+        lowState = FloatArray(channelCount * STAGES * 2)
+        highState = FloatArray(channelCount * STAGES * 2)
+        currentLowPassHz = targetLowPassHz
+        currentHighPassHz = targetHighPassHz
+        return inputAudioFormat
+    }
+
+    override fun onFlush() {
+        lowState.fill(0f)
+        highState.fill(0f)
+        // Snapped, not glided: a flush means a seek or a fresh source, so there
+        // is no continuous signal for a glide to be continuous with.
+        currentLowPassHz = targetLowPassHz
+        currentHighPassHz = targetHighPassHz
+    }
+
+    override fun onReset() {
+        targetLowPassHz = OPEN_HZ
+        targetHighPassHz = OFF_HZ
+        lowState = FloatArray(0)
+        highState = FloatArray(0)
+    }
+
+    override fun queueInput(inputBuffer: java.nio.ByteBuffer) {
