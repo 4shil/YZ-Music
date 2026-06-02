@@ -227,3 +227,8 @@ class TransitionFilterProcessor : BaseAudioProcessor() {
         }
     }
 
+    private fun lowPass(channel: Int, input: Float): Float {
+        var value = input
+        for (stage in 0 until STAGES) {
+            val i = (channel * STAGES + stage) * 2
+            val ic1 = lowState[i]
