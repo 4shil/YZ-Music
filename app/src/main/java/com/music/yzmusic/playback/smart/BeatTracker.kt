@@ -102,3 +102,16 @@ class BeatTracker(private val context: Context) {
     fun track(pcm: FloatArray, offsetSeconds: Double = 0.0): Grid? {
         val melStarted = System.currentTimeMillis()
         val spectrogram = MelSpectrogram.compute(pcm) ?: return null
+        val melMs = System.currentTimeMillis() - melStarted
+        val active = session() ?: return null
+
+        val beatLogits = FloatArray(spectrogram.frames)
+        val downbeatLogits = FloatArray(spectrogram.frames)
+        val inferStarted = System.currentTimeMillis()
+        if (!infer(active, spectrogram, beatLogits, downbeatLogits)) return null
+        Log.d(
+            TAG,
+            "mel ${melMs}ms (${spectrogram.frames} frames) " +
+                "infer ${System.currentTimeMillis() - inferStarted}ms",
+        )
+
