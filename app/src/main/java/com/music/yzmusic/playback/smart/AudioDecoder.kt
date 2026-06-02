@@ -288,3 +288,17 @@ object AudioDecoder {
             limit(info.offset + info.size)
         }.asShortBuffer()
         val frames = shorts.remaining() / safeChannels
+        val leftChunk = FloatArray(frames)
+        val rightChunk = FloatArray(frames)
+        val frame = ShortArray(safeChannels)
+        for (index in 0 until frames) {
+            shorts.get(frame, 0, safeChannels)
+            leftChunk[index] = frame[0] / 32768f
+            rightChunk[index] = (if (safeChannels > 1) frame[1] else frame[0]) / 32768f
+        }
+        left += leftChunk
+        right += rightChunk
+    }
+
+    private fun MediaFormat.intOrNull(key: String): Int? = if (containsKey(key)) getInteger(key) else null
+}
