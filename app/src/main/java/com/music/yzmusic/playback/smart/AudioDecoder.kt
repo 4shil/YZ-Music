@@ -274,3 +274,17 @@ object AudioDecoder {
      * where the vocal usually is — into both sides at half level, which is
      * the opposite of helpful for telling a vocal apart from the bed.
      */
+    private fun toStereo(
+        buffer: ByteBuffer,
+        info: MediaCodec.BufferInfo,
+        channels: Int,
+        left: MutableList<FloatArray>,
+        right: MutableList<FloatArray>,
+    ) {
+        val safeChannels = max(1, channels)
+        val shorts = buffer.duplicate().apply {
+            order(ByteOrder.LITTLE_ENDIAN)
+            position(info.offset)
+            limit(info.offset + info.size)
+        }.asShortBuffer()
+        val frames = shorts.remaining() / safeChannels
