@@ -245,3 +245,11 @@ object AudioDecoder {
     }
 
     /** Downmixes one 16-bit PCM output buffer to mono float in [-1, 1]. */
+    private fun toMono(buffer: ByteBuffer, info: MediaCodec.BufferInfo, channels: Int): FloatArray {
+        val safeChannels = max(1, channels)
+        val shorts = buffer.duplicate().apply {
+            order(ByteOrder.LITTLE_ENDIAN)
+            position(info.offset)
+            limit(info.offset + info.size)
+        }.asShortBuffer()
+        val frames = shorts.remaining() / safeChannels
