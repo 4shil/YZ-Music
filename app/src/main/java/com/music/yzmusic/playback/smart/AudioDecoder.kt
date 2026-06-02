@@ -1,0 +1,77 @@
+﻿/*
+ * Modeled on Orchard's own AudioDecoder (https://github.com/SFG5453/Orchard),
+ * scoped down to the platform MediaCodec path — Orchard prefers a native
+ * libopus decode with the platform decoder as its documented fallback; this
+ * only needs the fallback, since YZ Music has no reason to carry a second
+ * Opus decoder purely for background analysis.
+ *
+ * Copyright (C) 2026 Kushagra Singh
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+ * Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package com.music.yzmusic.playback.smart
+
+import android.media.MediaCodec
+import android.media.MediaDataSource
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.util.Log
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.math.max
+
+/**
+ * Decodes a region of a cached track to mono float PCM, for [TrackAnalyzer].
+ *
+ * Only a region: a transition only ever reads the tail of the outgoing track
+ * and the head of the incoming one, not either track in full, and decoding a
+ * whole album's worth of audio to analyse thirty seconds of it would cost
+ * battery for nothing.
+ *
+ * Everything here is best-effort. A codec that will not configure, a
+ * container Android cannot parse, a region past the end — all return null,
+ * and the caller falls back to no analysis, which the transition policy
+ * already handles as its bottom rung.
+ */
+object AudioDecoder {
+
+    private const val TAG = "YZMusicAudioDecoder"
+    private const val TIMEOUT_US = 10_000L
+
+    /** Decoded mono PCM at the container's own sample rate; the caller resamples. */
+    data class Pcm(val samples: FloatArray, val sampleRate: Double)
+
+    /**
+     * Decoded planar stereo PCM at the container's own sample rate.
+     *
+     * Planar rather than interleaved because the only consumer is the vocal
+     * front end, which wants one array per channel; a mono source is widened
+     * by sharing the same samples on both sides, which is what the model was
+     * trained to see for centre-panned material anyway.
+     */
+    data class StereoPcm(val left: FloatArray, val right: FloatArray, val sampleRate: Double)
+
+    /**
+     * Reads the audio duration a fully-cached container advertises, without
+     * decoding it. Queue metadata isn't always trustworthy, so this is the
+     * fallback [TrackAnalyzer] reaches for when a track's own duration is
+     * missing or non-finite.
+     */
+    fun containerDurationSeconds(source: MediaDataSource): Double? {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(source)
+            (0 until extractor.trackCount)
+                .mapNotNull { index ->
