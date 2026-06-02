@@ -193,3 +193,63 @@ object AudioDecoder {
                         if (inputBuffer == null) {
                             // Nothing to feed this cycle; try again next iteration.
                         } else {
+                            val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                            val sampleTimeUs = extractor.sampleTime
+                            if (sampleSize < 0 || (sampleTimeUs in 0..Long.MAX_VALUE && sampleTimeUs > endUs)) {
+                                codec.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                inputDone = true
+                            } else {
+                                codec.queueInputBuffer(inputIndex, 0, sampleSize, sampleTimeUs, 0)
+                                extractor.advance()
+                            }
+                        }
+                    }
+                }
+
+                when (val outputIndex = codec.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)) {
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val newFormat = codec.outputFormat
+                        outputRate = newFormat.intOrNull(MediaFormat.KEY_SAMPLE_RATE) ?: outputRate
+                        outputChannels = newFormat.intOrNull(MediaFormat.KEY_CHANNEL_COUNT) ?: outputChannels
+                    }
+                    MediaCodec.INFO_TRY_AGAIN_LATER, MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
+                    else -> if (outputIndex >= 0) {
+                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                            outputDone = true
+                        }
+                        if (bufferInfo.size > 0) {
+                            if (!sawFirstSample) {
+                                actualStartSeconds = bufferInfo.presentationTimeUs / 1_000_000.0
+                                sawFirstSample = true
+                            }
+                            codec.getOutputBuffer(outputIndex)?.let { output ->
+                                onBuffer(output, bufferInfo, outputChannels)
+                            }
+                            if (bufferInfo.presentationTimeUs > endUs) outputDone = true
+                        }
+                        codec.releaseOutputBuffer(outputIndex, false)
+                    }
+                }
+            }
+
+            if (!sawFirstSample || outputRate <= 0) return null
+            return outputRate.toDouble() to actualStartSeconds
+        } catch (error: Exception) {
+            Log.w(TAG, "Region decode failed", error)
+            return null
+        } finally {
+            runCatching { codec?.stop() }
+            runCatching { codec?.release() }
+            runCatching { extractor.release() }
+        }
+    }
+
+    /** Downmixes one 16-bit PCM output buffer to mono float in [-1, 1]. */
+    private fun toMono(buffer: ByteBuffer, info: MediaCodec.BufferInfo, channels: Int): FloatArray {
+        val safeChannels = max(1, channels)
+        val shorts = buffer.duplicate().apply {
+            order(ByteOrder.LITTLE_ENDIAN)
+            position(info.offset)
+            limit(info.offset + info.size)
+        }.asShortBuffer()
+        val frames = shorts.remaining() / safeChannels
