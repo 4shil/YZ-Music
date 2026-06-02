@@ -220,3 +220,39 @@ class AnalysisStore(private val context: Context) {
 
     @Serializable
     private data class StoredCue(val time: Double, val score: Double, val type: String) {
+        fun toCue() = MixCandidate(time = time, score = score, type = type)
+
+        companion object {
+            fun of(cue: MixCandidate) = StoredCue(round(cue.time), round(cue.score), cue.type)
+        }
+    }
+
+    @Serializable
+    private data class StoredEnergy(val time: Double, val energy: Double) {
+        fun toSample() = EnergySample(time = time, energy = energy)
+
+        companion object {
+            fun of(sample: EnergySample) = StoredEnergy(round(sample.time), round(sample.energy))
+        }
+    }
+
+    private companion object {
+        const val TAG = "YZMusicAnalysisStore"
+        const val DIRECTORY = "smart_analysis"
+
+        /**
+         * Bump whenever a stored number starts being computed differently.
+         * Entries from an older schema are ignored rather than migrated: a
+         * re-analysis costs seconds, and a beat grid interpreted under the wrong
+         * assumptions is silently wrong for the life of the file.
+         */
+        const val SCHEMA_VERSION = 1
+
+        /** A few thousand tracks' worth, at tens of kilobytes each. */
+        const val MAX_ENTRIES = 2_000
+
+        /** Milliseconds is finer than anything downstream distinguishes. */
+        fun round(value: Double): Double =
+            if (value.isFinite()) Math.round(value * 1000.0) / 1000.0 else 0.0
+    }
+}
