@@ -253,3 +253,24 @@ object AudioDecoder {
             limit(info.offset + info.size)
         }.asShortBuffer()
         val frames = shorts.remaining() / safeChannels
+        val mono = FloatArray(frames)
+        val frame = ShortArray(safeChannels)
+        for (index in 0 until frames) {
+            shorts.get(frame, 0, safeChannels)
+            var sum = 0
+            for (value in frame) sum += value
+            mono[index] = (sum / safeChannels.toFloat()) / 32768f
+        }
+        return mono
+    }
+
+    /**
+     * Splits one 16-bit PCM output buffer into planar left/right float in
+     * [-1, 1], appending each to its own accumulator.
+     *
+     * A mono source is widened by giving both sides the same samples, and
+     * anything above two channels keeps only the first two: the model's input
+     * is stereo, and a downmix of a 5.1 track would put the centre channel —
+     * where the vocal usually is — into both sides at half level, which is
+     * the opposite of helpful for telling a vocal apart from the bed.
+     */
