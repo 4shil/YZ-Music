@@ -103,3 +103,33 @@ object AudioDecoder {
      */
     fun decodeRegion(source: MediaDataSource, startSeconds: Double, endSeconds: Double): Pair<Pcm, Double>? {
         val chunks = ArrayList<FloatArray>()
+        val decoded = decodeRaw(source, startSeconds, endSeconds) { buffer, info, channels ->
+            chunks += toMono(buffer, info, channels)
+        } ?: return null
+        return Pcm(flatten(chunks), decoded.first) to decoded.second
+    }
+
+    /**
+     * As [decodeRegion], but keeping the two channels apart.
+     *
+     * Only the vocal front end needs this: open-unmix was trained on stereo,
+     * and handing it a duplicated mono mix throws away the very stereo
+     * information it uses to tell a centred vocal from the instruments
+     * around it.
+     */
+    fun decodeRegionStereo(
+        source: MediaDataSource,
+        startSeconds: Double,
+        endSeconds: Double,
+    ): Pair<StereoPcm, Double>? {
+        val left = ArrayList<FloatArray>()
+        val right = ArrayList<FloatArray>()
+        val decoded = decodeRaw(source, startSeconds, endSeconds) { buffer, info, channels ->
+            toStereo(buffer, info, channels, left, right)
+        } ?: return null
+        return StereoPcm(flatten(left), flatten(right), decoded.first) to decoded.second
+    }
+
+    /** Concatenates the decoded chunks into one contiguous buffer. */
+    private fun flatten(chunks: List<FloatArray>): FloatArray {
+        val samples = FloatArray(chunks.sumOf { it.size })
