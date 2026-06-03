@@ -45,3 +45,6 @@ object MelSpectrogram {
     val sampleRate: Double by lazy { if (available) nativeSampleRate() else 22_050.0 }
 
     /** Samples between frame starts; 441 at 22,050 Hz is exactly 20 ms. */
+    val hop: Int by lazy { if (available) nativeHop() else 441 }
+
+    /** Frames per second of output, which is what beat times are derived from. */
