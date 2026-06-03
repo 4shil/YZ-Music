@@ -239,3 +239,68 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         } else {
             cache.renditionsOf(uri).filter { it.isComplete && it.key !in badRenditions }
         }
+        val usableComplete = local || complete.isNotEmpty()
+
+        val recorded = results[trackId]
+        // Two things are worth superseding, and nothing else is. A provisional
+        // head result, because replacing it with the whole-track pass is the
+        // entire point of it — and a recorded failure, but only once a copy of
+        // the track nobody has read yet turns up. Re-deciding a failure against
+        // the same renditions that produced it would just spend the decode
+        // again for the same answer.
+        //
+        // A local file is its own single copy, keyed by URI — see [copyToRead] —
+        // so a failure there is read once and stays read, which is correct: no
+        // second copy of it is ever going to arrive.
+        val untried = if (local) {
+            uri.toString() !in triedRenditions
+        } else {
+            complete.any { it.key !in triedRenditions }
+        }
+        val supersedable = when {
+            recorded == null -> false
+            trackId in provisional -> usableComplete
+            else -> !recorded.isUsable && untried
+        }
+        if (recorded != null && !supersedable) {
+            // One exception to returning empty-handed. A provisional result is a
+            // placeholder, not an answer — it says the opening decoded, not that
+            // the track is measured — and the thing that supersedes it is bytes.
+            // Without this nudge the byte escalation stops at whatever the first
+            // successful head happened to cost, nothing else ever asks for the
+            // rest, and a queued track reaches its own transition carrying an
+            // entry-only estimate: no content end, no mix-out anchor, no vocal
+            // mask, which is most of what the outgoing half of a blend reads.
+            if (trackId in provisional && !usableComplete) cache.requestAnalysisHead(uri)
+            return
+        }
+        // The strike count belongs to the attempt that was given up on, not to
+        // the track for the rest of the session; a reopened track starts level.
+        if (recorded != null && !recorded.isUsable) shortDecodes.remove(trackId)
+        // One head attempt per track: a partial container that will not parse
+        // now is unlikely to parse ten ticks later, and retrying a decode every
+        // 250ms would cost more than the analysis it is trying to bring
+        // forward. Skipped entirely for a local file, which is `usableComplete`
+        // from the first tick: the head pass exists to get ahead of a download,
+        // and there is no download to get ahead of.
+        val headRendition = if (usableComplete) null else headWorthTrying(trackId, uri, durationSeconds)
+        if (!usableComplete && headRendition == null) {
+            // Nothing on disk worth decoding, so ask for something. Every other
+            // writer either fetches this track's opening too late to matter or
+            // never fetches it at all — see [AudioCache.requestAnalysisHead],
+            // which is a no-op after the first call and for anything that isn't
+            // a YouTube-backed track.
+            cache.requestAnalysisHead(uri)
+            return
+        }
+        if (!running.add(trackId)) return
+
+        executor.execute {
+            try {
+                // [restoreOnce] queues onto this same single-threaded executor,
+                // so a stored result for this track has landed by now if there
+                // was one — but the decision to get here was taken a tick
+                // earlier, when it had not. Without this check a track measured
+                // in an earlier session is restored and then immediately spends
+                // seven seconds recomputing the identical numbers. A provisional
+                // result is exempt: superseding one is the whole point of it.
