@@ -176,3 +176,69 @@ class BeatTracker(private val context: Context) {
 
             OnnxTensor.createTensor(environment, FloatBuffer.wrap(chunk), shape).use { tensor ->
                 session.run(mapOf(name to tensor)).use { outputs ->
+                    val beat = (outputs.get(0).value as Array<FloatArray>)[0]
+                    val downbeat = (outputs.get(1).value as Array<FloatArray>)[0]
+
+                    val keepFrom = if (start == 0) 0 else BORDER_FRAMES
+                    val keepTo = if (start + length >= spectrogram.frames) length else length - BORDER_FRAMES
+                    for (index in keepFrom until keepTo) {
+                        val target = start + index
+                        if (target >= beatLogits.size) break
+                        beatLogits[target] = beat[index]
+                        downbeatLogits[target] = downbeat[index]
+                    }
+                }
+            }
+
+            if (start + length >= spectrogram.frames) break
+            start += stride
+        }
+        true
+    }.onFailure { Log.w(TAG, "Beat inference failed", it) }.getOrDefault(false)
+
+    fun release() {
+        synchronized(lock) {
+            runCatching { session?.close() }
+            session = null
+        }
+    }
+
+    companion object {
+        private const val TAG = "YZMusicBeatTracker"
+        private const val MODEL_ASSET = "beat_this_int8.onnx"
+        private const val INFERENCE_THREADS = 4
+
+        /** The window the model was trained on, and the margin discarded from each chunk's edges. */
+        const val CHUNK_FRAMES = 1500
+        const val BORDER_FRAMES = 6
+
+        /**
+         * Window length that costs exactly one inference. A window longer than this splits into
+         * two chunks that mostly overlap, paying twice for barely more audio.
+         */
+        const val WINDOW_SECONDS = (CHUNK_FRAMES - 2 * BORDER_FRAMES) / 50.0
+
+        /** A frame is a beat when it is the maximum of a seven-frame window and its logit positive. */
+        private const val PEAK_WINDOW = 7
+        private const val MIN_BEATS = 8
+
+        /** Plausible musical tempo, used only to reject a grid the model clearly did not find. */
+        private const val MIN_TEMPO = 40.0
+        private const val MAX_TEMPO = 220.0
+
+        private fun median(values: List<Double>): Double {
+            if (values.isEmpty()) return 0.0
+            val sorted = values.sorted()
+            return sorted[sorted.size / 2]
+        }
+
+        /**
+         * Frame indices that are local maxima over [PEAK_WINDOW] and positive, with runs of
+         * adjacent peaks collapsed to their mean, then refined to sub-frame resolution.
+         *
+         * The refinement is not upstream's. The model's frame rate is 50 Hz, so an integer peak
+         * quantizes every beat to 20 ms, fine for drawing a grid, but a large share of the flam
+         * budget when beat-matching two tracks. Fitting a parabola through the peak and its
+         * neighbours recovers where the maximum actually sits.
+         */
+        fun pickPeaks(logits: FloatArray): List<Double> {
