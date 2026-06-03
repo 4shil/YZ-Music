@@ -69,3 +69,14 @@ data class TrackAnalysis(
 
     /** Where the file starts making sound, and where the first musical event lands. */
     val audibleStartTime: Double? = null,
+    val pickupTime: Double? = null,
+    val introEndTime: Double = 0.0,
+    /** Where the content actually ends, excluding trailing silence. */
+    val contentEndTime: Double = 0.0,
+    val outroStartTime: Double = 0.0,
+
+    val mixInTime: Double = 0.0,
+    val mixOutTime: Double = 0.0,
+    val mixInCandidates: List<MixCandidate> = emptyList(),
+    val mixOutCandidates: List<MixCandidate> = emptyList(),
+
