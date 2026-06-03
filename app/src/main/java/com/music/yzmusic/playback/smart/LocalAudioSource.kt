@@ -105,3 +105,14 @@ internal object LocalAudioSource {
                 // shared state, and the extractor reads a container out of order.
                 Os.pread(descriptor.fileDescriptor, buffer, offset, wanted, position)
                     // Zero is end of stream, which [MediaDataSource] states as -1.
+                    .takeIf { it > 0 } ?: -1
+            } catch (error: ErrnoException) {
+                throw IOException("pread of $length bytes at $position failed", error)
+            }
+        }
+
+        override fun close() {
+            runCatching { descriptor.close() }
+        }
+    }
+}
