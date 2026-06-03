@@ -698,3 +698,57 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
      */
     private class Copy(
         val key: String,
+        val rendition: AudioCache.Rendition?,
+        val open: () -> MediaDataSource?,
+    )
+
+    /**
+     * Which copy of [trackId]'s audio to read, or null when there isn't a usable
+     * one yet.
+     *
+     * A local URI short-circuits the entire rendition search: none of what that
+     * search decides between applies to a file the user already has, and asking
+     * the cache about one only ever produced the empty answer that kept Automix
+     * from analysing local tracks at all. The URI stands in as the cache key,
+     * which is what [request]'s `untried` check reads so a file that will not
+     * decode is not re-decoded on every tick for the rest of the session.
+     */
+    private fun copyToRead(trackId: String, uri: Uri, durationSeconds: Double): Copy? {
+        if (LocalAudioSource.isLocal(uri)) {
+            return Copy(key = uri.toString(), rendition = null) { LocalAudioSource.open(resolver, uri) }
+        }
+        val rendition = chooseRendition(trackId, uri, durationSeconds) ?: return null
+        return Copy(key = rendition.key, rendition = rendition) { cache.renditionDataSource(uri, rendition) }
+    }
+
+    /**
+     * What a whole-track pass came back with.
+     *
+     * [decodedShort] is the difference between "this copy is broken, strike it"
+     * and "there was no copy to read", which the caller counts very differently:
+     * three strikes writes a track off for the session. Conflating the two spent
+     * all three in 922ms on a track whose only complete copy had just been
+     * rejected — the following two attempts decoded nothing because there was
+     * nothing left to decode, and were counted as though they had tried.
+     */
+    private class WholeTrack(val analysis: TrackAnalysis?, val decodedShort: Boolean = false)
+
+    /**
+     * What Pass 1 came back with.
+     *
+     * [decodedShort] has to survive the return rather than collapsing into a null [features]: it is
+     * the same distinction [WholeTrack.decodedShort] draws, between a broken copy and no copy, and
+     * only one of the two is a strike.
+     */
+    private class Structural(
+        val features: TrackFeatures.Features?,
+        val decodedShort: Boolean = false,
+    )
+
+    /**
+     * Decodes the whole track and reduces it to DSP features.
+     *
+     * A method rather than a block in [analyze] for a reason that is about memory, not tidiness —
+     * see the call site. Everything it decodes is dead by the time it returns, and returning is
+     * what makes that true of the heap as well as of the program.
+     */
