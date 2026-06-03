@@ -36,3 +36,12 @@ package com.music.yzmusic.playback.smart
 object MelSpectrogram {
 
     /** True when the native library loaded. Analysis is optional, so this is a fact, not a fault. */
+    val available: Boolean = runCatching { System.loadLibrary("yzmusic_analysis") }.isSuccess
+
+    /** Mel bands per frame; the model's input width. */
+    val mels: Int by lazy { if (available) nativeMelCount() else 128 }
+
+    /** The only sample rate the front end accepts. */
+    val sampleRate: Double by lazy { if (available) nativeSampleRate() else 22_050.0 }
+
+    /** Samples between frame starts; 441 at 22,050 Hz is exactly 20 ms. */
