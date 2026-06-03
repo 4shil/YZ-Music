@@ -81,3 +81,11 @@ internal object LocalAudioSource {
             // around it, not reading it once forwards.
             Log.w(TAG, "Skipping $uri for analysis: not a seekable file")
             runCatching { descriptor.close() }
+            return null
+        }
+        return Source(descriptor, size)
+    }
+
+    private class Source(
+        private val descriptor: ParcelFileDescriptor,
+        private val length: Long,
