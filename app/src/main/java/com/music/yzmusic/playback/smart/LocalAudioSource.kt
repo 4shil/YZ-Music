@@ -113,3 +113,6 @@ internal object LocalAudioSource {
 
         override fun close() {
             runCatching { descriptor.close() }
+        }
+    }
+}
