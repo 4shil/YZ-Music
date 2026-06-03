@@ -125,3 +125,16 @@ data class RankedMixCandidate(
     val time: Double,
     val score: Double,
     val type: String,
+    val rankScore: Double,
+    /**
+     * Seconds of audible music this candidate would skip by ending the
+     * transition before the content does. Mix-out only; always 0 for mix-in.
+     */
+    val discardedMusicSeconds: Double = 0.0,
+    /** False when there was no energy curve and [discardedMusicSeconds] is the raw gap instead. */
+    val measured: Boolean = true,
+)
+
+/** Where a transition should end on the outgoing track, and what it costs to end there. */
+data class MixOutAnchor(
+    val time: Double,
