@@ -304,3 +304,122 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
                 // in an earlier session is restored and then immediately spends
                 // seven seconds recomputing the identical numbers. A provisional
                 // result is exempt: superseding one is the whole point of it.
+                val landed = results[trackId]
+                if (landed != null && landed.isUsable && trackId !in provisional) return@execute
+                if (usableComplete) {
+                    val outcome = analyze(trackId, uri, durationSeconds)
+                    val whole = outcome.analysis
+                    if (whole != null) {
+                        results[trackId] = whole
+                        provisional.remove(trackId)
+                        shortDecodes.remove(trackId)
+                        // Only the whole-track pass is persisted. A head result
+                        // is missing everything past its window — the outro, the
+                        // mix-out anchor, the energy curve — and storing one
+                        // would freeze a deliberately partial answer in place of
+                        // the complete one that supersedes it minutes later.
+                        store.save(trackId, whole)
+                        restoreAttempted.add(trackId)
+                    } else if (outcome.decodedShort &&
+                        shortDecodes.merge(trackId, 1, Int::plus)!! >= MAX_SHORT_DECODE_ATTEMPTS
+                    ) {
+                        // Bounded, so a container that is genuinely truncated
+                        // isn't re-decoded on every tick for the rest of the
+                        // session. Any provisional head result already published
+                        // stays: a partial analysis beats an empty one.
+                        Log.w(TAG, "Giving up on $trackId after $MAX_SHORT_DECODE_ATTEMPTS short decodes")
+                        if (trackId !in provisional) {
+                            results[trackId] = TrackAnalysis(
+                                status = TrackAnalysis.STATUS_READY,
+                                trackId = trackId,
+                                duration = durationSeconds,
+                            )
+                        }
+                    }
+                } else {
+                    // Marked before it is published, so a reader on the playback
+                    // thread can never see a provisional result that is not
+                    // flagged as one.
+                    analyzeHead(trackId, uri, durationSeconds, headRendition!!)?.let { head ->
+                        provisional.add(trackId)
+                        results[trackId] = head
+                    }
+                }
+            } catch (error: Throwable) {
+                // Throwable, not Exception: decode leans on MediaCodec, and an
+                // OOM or a codec-level Error uncaught on a pool thread that is
+                // nobody's parent takes the whole app down for work whose
+                // entire failure mode is meant to be "this track goes
+                // unanalysed".
+                Log.w(TAG, "Analysis of $trackId failed", error)
+                // A failed head pass records nothing: the whole-track pass reads
+                // a different, complete file and deserves its own attempt.
+                // [headWorthTrying] has already made sure the head is not tried
+                // twice, so this cannot spin.
+                if (usableComplete) {
+                    // Recorded as ready-but-empty so a track that cannot be
+                    // analysed is not retried on every tick for the rest of the
+                    // session.
+                    results[trackId] = TrackAnalysis(
+                        status = TrackAnalysis.STATUS_READY,
+                        trackId = trackId,
+                        duration = durationSeconds,
+                    )
+                    provisional.remove(trackId)
+                }
+            } finally {
+                running.remove(trackId)
+                // The session holds the model's arena and a parsed ONNX graph in native heap for
+                // as long as it is open, which a backgrounded music player cannot justify between
+                // transitions. Released the moment nothing is in flight; reloading costs under a
+                // second against an analysis that already takes several.
+                if (running.isEmpty()) {
+                    tracker.release()
+                    vocals.release()
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether enough of [uri]'s head is on disk to be worth a decode, claiming
+     * the attempt if so.
+     *
+     * The byte threshold is derived from the rendition's own average bitrate
+     * where the duration is known, because "30 seconds of audio" is a wildly
+     * different number of bytes at 96 kbps and at lossless.
+     * [HEAD_BYTES_MARGIN] covers the container header and the fact that a
+     * track's opening is rarely at its own average bitrate.
+     *
+     * Where the duration isn't known — which is the common case, since callers
+     * request analysis before anything has read the container — the estimate is
+     * unavailable and [MIN_HEAD_BYTES] stands in. That is about 30 s of a
+     * typical stream but only a few seconds of lossless, so a single attempt
+     * gated on it would be spent on too little audio for exactly the tracks
+     * that carry the most bytes per second.
+     *
+     * Hence retrying on growth rather than attempting once: an attempt is
+     * allowed again only when the cached prefix has [HEAD_RETRY_GROWTH]-fold
+     * grown since the last one. A track therefore gets a handful of tries
+     * spread across its download instead of either one try or one per tick.
+     */
+    private fun headWorthTrying(
+        trackId: String,
+        uri: Uri,
+        durationSeconds: Double,
+    ): AudioCache.Rendition? {
+        // Across every rendition of the recording, not just the one the player
+        // happens to be on. The same track can be part-downloaded under a
+        // sibling cache key, and the live URI's own copy is frequently the one
+        // holding nothing — a track that reported six megabytes cached twenty
+        // minutes earlier reported zero here, because the question was being
+        // asked of the wrong copy of it.
+        val candidate = cache.renditionsOf(uri)
+            .filter { it.cachedPrefix > 0L && it.key !in badRenditions }
+            // The growth guard, applied as a filter rather than to the winner.
+            // Applied afterwards it did not skip a copy, it ended the search: the
+            // single best candidate was chosen, refused for not having grown, and
+            // the second-best — frequently the one that would have worked — was
+            // never reached. A track therefore got exactly one head attempt ever,
+            // against whichever copy of it happened to rank highest at the time.
+            .filter { rendition ->
