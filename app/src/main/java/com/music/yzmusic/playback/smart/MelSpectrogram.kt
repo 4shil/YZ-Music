@@ -71,3 +71,10 @@ object MelSpectrogram {
      */
     data class Spectrogram(val values: FloatArray, val frames: Int, val mels: Int) {
         /** Seconds covered, useful for turning frame indices back into track times. */
+        val durationSeconds: Double get() = frames / (sampleRate / hop)
+
+        override fun equals(other: Any?): Boolean =
+            this === other ||
+                (other is Spectrogram && frames == other.frames && mels == other.mels &&
+                    values.contentEquals(other.values))
+
