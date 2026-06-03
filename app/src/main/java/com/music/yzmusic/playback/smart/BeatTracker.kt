@@ -127,3 +127,52 @@ class BeatTracker(private val context: Context) {
         // land a frame apart; snapping each downbeat onto the nearest beat keeps the bar grid a
         // strict subset of the beat grid, which is what the planner assumes when it snaps a
         // transition to a downbeat.
+        val downbeats = pickPeaks(downbeatLogits)
+            .map { it / fps + offsetSeconds }
+            .map { time -> beats.minByOrNull { abs(it - time) } ?: beats.first() }
+            .distinct()
+            .sorted()
+
+        return Grid(
+            beats = beats,
+            downbeats = downbeats,
+            bpm = bpm,
+            beatInterval = 60 / bpm,
+            firstBeat = beats.first(),
+            beatConfidence = gridConfidence(
+                beats,
+                beatFrames.map { frame -> beatLogits.getOrElse(frame.roundToInt()) { 0f }.toDouble() },
+            ),
+        )
+    }
+
+    /**
+     * Runs the model over the spectrogram in chunks, writing logits into the output arrays.
+     *
+     * The model reads 1500-frame chunks and has no context at their edges, so [BORDER_FRAMES] are
+     * discarded from each side and chunks advance by the difference. The first and last chunk keep
+     * their outer border, since there is no neighbouring chunk to supply it.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun infer(
+        session: OrtSession,
+        spectrogram: MelSpectrogram.Spectrogram,
+        beatLogits: FloatArray,
+        downbeatLogits: FloatArray,
+    ): Boolean = runCatching {
+        val environment = OrtEnvironment.getEnvironment()
+        val mels = spectrogram.mels
+        val name = session.inputNames.first()
+        val stride = CHUNK_FRAMES - 2 * BORDER_FRAMES
+
+        var start = 0
+        while (start < spectrogram.frames) {
+            val length = min(CHUNK_FRAMES, spectrogram.frames - start)
+            // A chunk shorter than the border padding carries no usable centre.
+            if (length <= 2 * BORDER_FRAMES && start > 0) break
+
+            val chunk = spectrogram.values.copyOfRange(start * mels, (start + length) * mels)
+            val shape = longArrayOf(1, length.toLong(), mels.toLong())
+
+            OnnxTensor.createTensor(environment, FloatBuffer.wrap(chunk), shape).use { tensor ->
+                session.run(mapOf(name to tensor)).use { outputs ->
