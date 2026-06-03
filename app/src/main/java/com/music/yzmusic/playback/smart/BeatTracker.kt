@@ -276,3 +276,31 @@ class BeatTracker(private val context: Context) {
             return deduped.map { frame ->
                 if (frame <= 0 || frame + 1 >= logits.size) return@map frame.toDouble()
                 val left = logits[frame - 1].toDouble()
+                val centre = logits[frame].toDouble()
+                val right = logits[frame + 1].toDouble()
+                val denominator = left - 2 * centre + right
+                if (abs(denominator) <= 1e-9) return@map frame.toDouble()
+                frame + (0.5 * (left - right) / denominator).coerceIn(-0.5, 0.5)
+            }
+        }
+
+        /** Median inter-beat interval as a tempo, or 0 when it is not a plausible one. */
+        fun tempoFromBeats(beats: List<Double>): Double {
+            if (beats.size < MIN_BEATS) return 0.0
+            val gaps = beats.zipWithNext { left, right -> right - left }
+            val rough = median(gaps)
+            if (rough <= 0) return 0.0
+            // A second pass over gaps close to the first estimate, so a few dropped beats do not
+            // drag the interval.
+            val kept = gaps.filter { abs(it - rough) <= rough * 0.2 }
+            val interval = median(if (kept.size >= 4) kept else gaps)
+            if (interval <= 0) return 0.0
+            val bpm = 60 / interval
+            return if (bpm in MIN_TEMPO..MAX_TEMPO) bpm else 0.0
+        }
+
+        /**
+         * How far the grid can be trusted, 0..1: regularity of the spacing and decisiveness of
+         * the peaks. This is the number the whole transition policy gates on, so it is deliberately
+         * capped below 1: a model is evidence, not proof.
+         */
