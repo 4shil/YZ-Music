@@ -75,3 +75,43 @@ class BeatTracker(private val context: Context) {
                         file.outputStream().use { output -> input.copyTo(output) }
                     }
                 }
+                val options = OrtSession.SessionOptions().apply {
+                    setIntraOpNumThreads(INFERENCE_THREADS)
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                    // ORT's arena allocator keeps every block it has ever needed, which for this
+                    // graph is tens of megabytes of native heap retained for the life of the
+                    // session, far past the model's own size, on a process that also has to
+                    // survive in the background. Analysis runs a handful of times per track, so
+                    // allocating per run is the right trade.
+                    setCPUArenaAllocator(false)
+                    setMemoryPatternOptimization(false)
+                }
+                OrtEnvironment.getEnvironment().createSession(file.absolutePath, options)
+                    .also { session = it }
+            }.onFailure { Log.w(TAG, "Beat model unavailable; falling back to no grid", it) }
+                .getOrNull()
+        }
+    }
+
+    /**
+     * Tracks [pcm], which must already be mono at [MelSpectrogram.sampleRate].
+     *
+     * [offsetSeconds] is added to every returned time, so a grid tracked on a decoded region maps
+     * back onto the full track's timeline rather than starting at zero.
+     */
+    fun track(pcm: FloatArray, offsetSeconds: Double = 0.0): Grid? {
+        val melStarted = System.currentTimeMillis()
+        val spectrogram = MelSpectrogram.compute(pcm) ?: return null
+        val melMs = System.currentTimeMillis() - melStarted
+        val active = session() ?: return null
+
+        val beatLogits = FloatArray(spectrogram.frames)
+        val downbeatLogits = FloatArray(spectrogram.frames)
+        val inferStarted = System.currentTimeMillis()
+        if (!infer(active, spectrogram, beatLogits, downbeatLogits)) return null
+        Log.d(
+            TAG,
+            "mel ${melMs}ms (${spectrogram.frames} frames) " +
+                "infer ${System.currentTimeMillis() - inferStarted}ms",
+        )
+
