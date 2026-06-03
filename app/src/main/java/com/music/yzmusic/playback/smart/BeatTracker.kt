@@ -259,3 +259,20 @@ class BeatTracker(private val context: Context) {
             }
 
             // Collapse adjacent frames that tied for the maximum onto their mean.
+            val deduped = ArrayList<Int>()
+            var index = 0
+            while (index < peaks.size) {
+                var mean = peaks[index].toDouble()
+                var count = 1
+                while (index + 1 < peaks.size && peaks[index + 1] - mean <= 1) {
+                    index += 1
+                    count += 1
+                    mean += (peaks[index] - mean) / count
+                }
+                deduped += mean.roundToInt()
+                index += 1
+            }
+
+            return deduped.map { frame ->
+                if (frame <= 0 || frame + 1 >= logits.size) return@map frame.toDouble()
+                val left = logits[frame - 1].toDouble()
