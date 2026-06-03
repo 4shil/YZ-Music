@@ -115,3 +115,15 @@ class BeatTracker(private val context: Context) {
                 "infer ${System.currentTimeMillis() - inferStarted}ms",
         )
 
+        val fps = MelSpectrogram.frameRate
+        val beatFrames = pickPeaks(beatLogits)
+        val beats = beatFrames.map { it / fps + offsetSeconds }
+        if (beats.size < MIN_BEATS) return null
+
+        val bpm = tempoFromBeats(beats)
+        if (bpm <= 0) return null
+
+        // Every downbeat is a beat. The two heads are predicted independently, so their peaks can
+        // land a frame apart; snapping each downbeat onto the nearest beat keeps the bar grid a
+        // strict subset of the beat grid, which is what the planner assumes when it snaps a
+        // transition to a downbeat.
