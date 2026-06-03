@@ -171,3 +171,71 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
     }
 
     /** True once [trackId] has a result, including a failure. Nothing more will arrive. */
+    fun isAnalysed(trackId: String): Boolean = results.containsKey(trackId)
+
+    /**
+     * True while a decode and inference for [trackId] is actually in flight.
+     *
+     * Distinct from "not analysed": a track waiting on bytes and a track being
+     * worked on right now are the same absence of a result, and the difference
+     * is the difference between something being wrong and something simply
+     * taking the several seconds it takes.
+     */
+    fun isAnalysing(trackId: String): Boolean = trackId in running
+
+    /**
+     * Queues [trackId] (playing at [uri]) for analysis if it is not already
+     * done or in flight. Cheap to call repeatedly; callers re-request as
+     * caching progresses.
+     *
+     * Runs in up to two passes, because waiting for a full cache is what kept
+     * the *incoming* track of every transition unanalysed. A track only
+     * finishes downloading once it is already playing, so the whole-track pass
+     * lands in time to describe a track's own mix-out and never in time to
+     * describe its entry — which is the half the listener hears at the moment
+     * of the blend.
+     *
+     * So a track with enough of a head on disk gets [analyzeHead] first: beat
+     * grid only, over the opening window, which is all the incoming side is
+     * read for. That result is provisional and is replaced by the whole-track
+     * [analyze] as soon as the remaining bytes arrive.
+     *
+     * None of that applies to a track playing off the device, which goes
+     * straight to [analyze] on the first tick that reaches it — there is nothing
+     * to wait for and nothing to escalate through. See [LocalAudioSource] for
+     * why that needed saying at all.
+     */
+    fun request(trackId: String, uri: Uri, durationSeconds: Double) {
+        if (trackId.isBlank()) return
+        if (trackId in running) return
+
+        // Any complete rendition of this recording will do, not just the one the
+        // player happens to be on: see [chooseRendition]. Waiting on the live
+        // URI is what made analysis arrive after the transition that needed it.
+        // Queued before the cache is even consulted, so a track measured in an
+        // earlier session short-circuits the whole path rather than being
+        // re-earned from audio the cache may since have evicted.
+        restoreOnce(trackId)
+
+        // A track playing off the device is not a download in progress. Every
+        // byte of it is already there, and none of those bytes are in the cache:
+        // local URIs are routed past it rather than written into it a second
+        // time. So everything below answers "nothing on disk" for a track that
+        // is entirely on disk, and the head fetch that answer falls back to is a
+        // no-op for anything without a YouTube id — which is why a local file
+        // was never queued for analysis at all. See [LocalAudioSource].
+        val local = LocalAudioSource.isLocal(uri)
+
+        // Complete *and* not already written off. A copy that decoded to
+        // nothing is not a copy worth routing to: counting it as "fully cached"
+        // sent this down the whole-track path on every tick with nothing left
+        // for that path to read, and each of those empty passes was then
+        // counted as a failed decode.
+        //
+        // Not asked of a local file, whose bytes the cache has never seen and
+        // whose completeness is not a question: it is whole from the first tick.
+        val complete = if (local) {
+            emptyList()
+        } else {
+            cache.renditionsOf(uri).filter { it.isComplete && it.key !in badRenditions }
+        }
