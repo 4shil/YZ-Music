@@ -62,3 +62,10 @@ data class TrackAnalysis(
     val beatConfidence: Double = 0.0,
     val downbeats: List<Double> = emptyList(),
     val phraseBoundaries: List<Double> = emptyList(),
+    val firstBeat: Double = 0.0,
+
+    val key: String = "",
+    val keyConfidence: Double = 0.0,
+
+    /** Where the file starts making sound, and where the first musical event lands. */
+    val audibleStartTime: Double? = null,
