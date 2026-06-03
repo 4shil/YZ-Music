@@ -97,3 +97,11 @@ internal object LocalAudioSource {
             if (position < 0 || position >= length) return -1
             if (size <= 0) return 0
             // Clamped rather than left to the kernel, so a read straddling the
+            // end returns the bytes that exist instead of whatever a short read
+            // happened to give back.
+            val wanted = minOf(size.toLong(), length - position).toInt()
+            return try {
+                // pread, not seek-then-read: the descriptor's file offset is
+                // shared state, and the extractor reads a container out of order.
+                Os.pread(descriptor.fileDescriptor, buffer, offset, wanted, position)
+                    // Zero is end of stream, which [MediaDataSource] states as -1.
