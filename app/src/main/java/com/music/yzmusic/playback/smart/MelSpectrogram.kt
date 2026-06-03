@@ -57,3 +57,17 @@ object MelSpectrogram {
      * than one padded frame. Callers treat that as "no model prediction available" rather than as
      * an error; the transition policy already degrades on absent evidence.
      */
+    fun compute(samples: FloatArray, sampleRate: Double = this.sampleRate): Spectrogram? {
+        if (!available || samples.isEmpty()) return null
+        val values = nativeCompute(samples, sampleRate)
+        if (values.isEmpty()) return null
+        return Spectrogram(values = values, frames = values.size / mels, mels = mels)
+    }
+
+    /**
+     * A flattened spectrogram, row-major over frames: frame `f` band `b` lives at
+     * `f * mels + b`. Flat because the only consumer hands it straight to an ONNX tensor of
+     * shape `[1, frames, mels]`.
+     */
+    data class Spectrogram(val values: FloatArray, val frames: Int, val mels: Int) {
+        /** Seconds covered, useful for turning frame indices back into track times. */
