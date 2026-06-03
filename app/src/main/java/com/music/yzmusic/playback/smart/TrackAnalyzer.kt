@@ -423,3 +423,64 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
             // never reached. A track therefore got exactly one head attempt ever,
             // against whichever copy of it happened to rank highest at the time.
             .filter { rendition ->
+                val previous = headAttempts[rendition.key] ?: return@filter true
+                rendition.cachedPrefix >= previous * HEAD_RETRY_GROWTH
+            }
+            // Most *audio*, not most bytes: renditions differ in bitrate, so the
+            // largest prefix is not necessarily the longest playable head.
+            .maxByOrNull { headSecondsOf(it, durationSeconds) }
+            ?: return null
+
+        val prefix = candidate.cachedPrefix
+        val total = candidate.contentLength
+        val needed = if (durationSeconds.isFinite() && durationSeconds > MIN_HEAD_SECONDS && total > 0) {
+            val bytesPerSecond = total / durationSeconds
+            // Sized to [MIN_HEAD_SECONDS] — the shortest decode [analyzeHead]
+            // will accept — not to the model's full window. Gating on the full
+            // window meant demanding two and a half times the input the analysis
+            // would actually settle for: a lossless rendition needs nine
+            // megabytes on disk for thirty seconds of audio, and a track sitting
+            // at six was refused outright despite holding twice what was needed
+            // to produce a result. Whatever *is* cached still gets decoded — the
+            // read simply runs out — so a larger prefix is used when there is
+            // one, and [HEAD_RETRY_GROWTH] comes back for a better look as the
+            // rest arrives.
+            (MIN_HEAD_SECONDS * bytesPerSecond * HEAD_BYTES_MARGIN).toLong()
+                .coerceAtLeast(MIN_HEAD_BYTES)
+                .coerceAtMost(total)
+        } else {
+            MIN_HEAD_BYTES
+        }
+        if (prefix < needed) {
+            // Once per track, not per tick: a head pass that never fires is
+            // invisible otherwise, which is exactly how the first version of
+            // this shipped doing nothing at all.
+            if (headSkipLogged.add("$trackId@${candidate.key}")) {
+                Log.d(
+                    TAG,
+                    "Head pass for $trackId waiting: ${prefix / 1024}kB cached of " +
+                        "${needed / 1024}kB needed (rendition ${candidate.key})",
+                )
+            }
+            return null
+        }
+
+        headAttempts[candidate.key] = prefix
+        return candidate
+    }
+
+    /**
+     * Roughly how many seconds of audio a rendition's cached prefix holds.
+     *
+     * The ranking this feeds used to be `cachedPrefix / contentLength`, which
+     * answers zero whenever the length is unknown — and the length is unknown
+     * for precisely the entry that matters most, the head
+     * [AudioCache.requestAnalysisHead] just fetched, because a bounded request
+     * gets a bounded answer. A megabyte of freshly downloaded opening therefore
+     * scored below a sibling holding eight unusable kilobytes, and the analyzer
+     * spent its one attempt on the wrong copy.
+     *
+     * [ASSUMED_BYTES_PER_SECOND] stands in where the length still isn't known.
+     * It only has to be the right order of magnitude: this decides which copy to
+     * read first, not whether the result is trusted.
+     */
