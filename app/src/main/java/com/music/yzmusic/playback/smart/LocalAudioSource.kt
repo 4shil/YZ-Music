@@ -65,3 +65,19 @@ internal object LocalAudioSource {
      * Best-effort like the rest of the analysis: a permission the user has since
      * revoked, a row MediaStore still lists for a file that is gone, a provider
      * that only offers a forward-only stream — all answer null, and the caller
+     * falls back to no analysis, which the transition policy already handles as
+     * its bottom rung.
+     *
+     * Callers must [MediaDataSource.close] the result.
+     */
+    fun open(resolver: ContentResolver, uri: Uri): MediaDataSource? {
+        val descriptor = runCatching { resolver.openFileDescriptor(uri, "r") }
+            .onFailure { Log.w(TAG, "Cannot open $uri for analysis", it) }
+            .getOrNull() ?: return null
+        val size = descriptor.statSize
+        if (size <= 0L) {
+            // A pipe or a socket, which a provider is free to hand back and an
+            // extractor cannot work with: parsing a container means seeking
+            // around it, not reading it once forwards.
+            Log.w(TAG, "Skipping $uri for analysis: not a seekable file")
+            runCatching { descriptor.close() }
