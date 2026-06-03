@@ -242,3 +242,20 @@ class BeatTracker(private val context: Context) {
          * neighbours recovers where the maximum actually sits.
          */
         fun pickPeaks(logits: FloatArray): List<Double> {
+            val half = PEAK_WINDOW / 2
+            val peaks = ArrayList<Int>()
+            for (index in logits.indices) {
+                if (logits[index] <= 0f) continue
+                var isMaximum = true
+                for (offset in -half..half) {
+                    val neighbour = index + offset
+                    if (neighbour < 0 || neighbour >= logits.size) continue
+                    if (logits[neighbour] > logits[index]) {
+                        isMaximum = false
+                        break
+                    }
+                }
+                if (isMaximum) peaks += index
+            }
+
+            // Collapse adjacent frames that tied for the maximum onto their mean.
