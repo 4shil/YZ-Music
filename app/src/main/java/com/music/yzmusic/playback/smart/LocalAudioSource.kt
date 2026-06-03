@@ -89,3 +89,11 @@ internal object LocalAudioSource {
     private class Source(
         private val descriptor: ParcelFileDescriptor,
         private val length: Long,
+    ) : MediaDataSource() {
+
+        override fun getSize(): Long = length
+
+        override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+            if (position < 0 || position >= length) return -1
+            if (size <= 0) return 0
+            // Clamped rather than left to the kernel, so a read straddling the
