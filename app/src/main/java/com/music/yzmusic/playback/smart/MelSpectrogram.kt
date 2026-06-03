@@ -78,3 +78,31 @@ object MelSpectrogram {
                 (other is Spectrogram && frames == other.frames && mels == other.mels &&
                     values.contentEquals(other.values))
 
+        override fun hashCode(): Int = 31 * (31 * values.contentHashCode() + frames) + mels
+    }
+
+    /**
+     * Converts mono float PCM to [sampleRate], the only rate [compute] accepts.
+     *
+     * A windowed-sinc conversion rather than decimation: dropping samples would fold everything
+     * above 11 kHz back into the band the mel filterbank reads, and an aliased spectrogram yields
+     * a *wrong* beat grid rather than a noisy one, which the planner would then trust.
+     *
+     * Returns the input unchanged when the rates already match, and null when the native library
+     * is missing or the rates are unusable.
+     */
+    fun resample(samples: FloatArray, inputRate: Double, outputRate: Double = sampleRate): FloatArray? {
+        if (!available || samples.isEmpty() || inputRate <= 0 || outputRate <= 0) return null
+        return nativeResample(samples, inputRate, outputRate).takeIf { it.isNotEmpty() }
+    }
+
+    @JvmStatic private external fun nativeCompute(samples: FloatArray, sampleRate: Double): FloatArray
+    @JvmStatic private external fun nativeResample(
+        samples: FloatArray,
+        inputRate: Double,
+        outputRate: Double,
+    ): FloatArray
+    @JvmStatic private external fun nativeMelCount(): Int
+    @JvmStatic private external fun nativeSampleRate(): Double
+    @JvmStatic private external fun nativeHop(): Int
+}
