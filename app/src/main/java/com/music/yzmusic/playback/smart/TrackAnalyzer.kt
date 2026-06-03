@@ -873,3 +873,77 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         // held while the models ran, in a process that was reaching a 256 MB heap limit and had
         // died on it. Returning is what releases them — a `val` cannot be nulled, and a narrower
         // scope alone does not make ART treat one as dead.
+        val structural = structure(trackId, uri, copy, effectiveDuration)
+        if (structural.decodedShort) return WholeTrack(null, decodedShort = true)
+        val features = structural.features ?: return WholeTrack(empty(trackId, effectiveDuration))
+
+        // Pass 2 (Phases 2 and 3, models): the Beat This! grid and the open-unmix vocal mask, over
+        // the head and tail only. A transition only ever reads the tail of the outgoing track and
+        // the head of the incoming one, and a track is both of those at different moments, so the
+        // middle is never decoded for this. Both models read the same decoded region, so the
+        // stereo buffer is paid for once.
+        val window = BeatTracker.WINDOW_SECONDS
+        val tailStart = max(0.0, effectiveDuration - window)
+        val head = region(openSource, 0.0, minOf(window, effectiveDuration), features)
+        val tail = if (tailStart > window / 2) region(openSource, tailStart, effectiveDuration, features) else null
+
+        val headGrid = head?.grid
+        val tailGrid = tail?.grid
+
+        // The tail governs where the outgoing track is mixed out, so it takes precedence; the
+        // head is what a track uses when it is the *incoming* side of a different transition.
+        val leading = tailGrid ?: headGrid
+
+        Log.d(
+            TAG,
+            "Analysed $trackId: bpm=${leading?.bpm ?: features.bpm} " +
+                "conf=${leading?.beatConfidence ?: features.beatConfidence} " +
+                "key=${features.key} contentEnd=${features.contentEndTime} " +
+                "mixOutCandidates=${features.mixOutCandidates.size} " +
+                "vocalMask=${if (head?.vocalMask != null || tail?.vocalMask != null) "model" else "dsp"}",
+        )
+
+        return WholeTrack(
+                TrackAnalysis(
+                    status = TrackAnalysis.STATUS_READY,
+                    trackId = trackId,
+                    duration = effectiveDuration,
+                    contentEndTime = features.contentEndTime.takeIf { it > 0 } ?: effectiveDuration,
+                    bpm = leading?.bpm ?: features.bpm,
+                beatInterval = leading?.beatInterval ?: features.beatInterval,
+                beatConfidence = leading?.beatConfidence ?: features.beatConfidence,
+                downbeats = (headGrid?.downbeats.orEmpty() + tailGrid?.downbeats.orEmpty())
+                    .ifEmpty { features.downbeats }
+                    .sorted(),
+                firstBeat = headGrid?.firstBeat ?: features.firstBeat,
+                phraseBoundaries = features.phraseBoundaries,
+                key = features.key,
+                keyConfidence = features.keyConfidence,
+                audibleStartTime = features.audibleStartTime,
+                pickupTime = features.pickupTime,
+                introEndTime = features.introEndTime,
+                outroStartTime = features.outroStartTime,
+                mixInTime = features.mixInTime,
+                mixOutTime = features.mixOutTime,
+                mixInCandidates = features.mixInCandidates,
+                mixOutCandidates = features.mixOutCandidates,
+                energyCurve = features.energyCurve,
+                lowEnergyCurve = features.lowEnergyCurve,
+                // The model's mask where it ran, the DSP heuristic's where it didn't. Falling back to
+                // the heuristic rather than to nothing matters because the policy reads an
+                // absent mask and a neutral one identically — as "no evidence" — so a failed model
+                // pass would otherwise silently discard the estimate Phase 1 already had.
+                vocalActivityMask = mergeMasks(features.energyCurve.size, head?.vocalMask, tail?.vocalMask)
+                    ?: features.vocalActivityMask,
+                vocalProbability = features.vocalProbability,
+            ),
+        )
+    }
+
+    /**
+     * Everything a decoded region contributes, once its audio has been let go
+     * of. [seconds] is what was actually decoded, which for a partially cached
+     * file is not what was asked for.
+     */
+    private class Region(
+        val grid: BeatTracker.Grid?,
