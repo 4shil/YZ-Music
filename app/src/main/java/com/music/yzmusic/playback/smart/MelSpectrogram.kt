@@ -48,3 +48,12 @@ object MelSpectrogram {
     val hop: Int by lazy { if (available) nativeHop() else 441 }
 
     /** Frames per second of output, which is what beat times are derived from. */
+    val frameRate: Double get() = sampleRate / hop
+
+    /**
+     * Computes the spectrogram for contiguous mono float PCM at [sampleRate].
+     *
+     * Returns null when the native library is missing, the rate is wrong, or the input is shorter
+     * than one padded frame. Callers treat that as "no model prediction available" rather than as
+     * an error; the transition policy already degrades on absent evidence.
+     */
