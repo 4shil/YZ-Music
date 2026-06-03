@@ -551,3 +551,77 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
             }
         }
 
+        val window = BeatTracker.WINDOW_SECONDS
+        val head = region(::openSource, 0.0, window, features = null, deriveFeatures = true)
+            ?: run {
+                Log.d(TAG, "Head pass for $trackId could not decode rendition ${rendition.key}")
+                return null
+            }
+        // What was decoded, not what was asked for: the source stops where the
+        // cache does. A tempo read off a few seconds is not a weaker measurement
+        // than one read off thirty, it is a different and much more credulous
+        // one, and the planner cannot see the difference — so it is refused here
+        // and the next attempt gets more of the file.
+        if (head.seconds < MIN_HEAD_SECONDS) {
+            Log.d(TAG, "Head pass for $trackId decoded only ${"%.1f".format(Locale.ROOT, head.seconds)}s; too short")
+            return null
+        }
+        val grid = head.grid
+        val entry = head.features
+        if (grid == null && entry == null) {
+            Log.d(TAG, "Head pass for $trackId produced nothing usable")
+            return null
+        }
+
+        Log.d(
+            TAG,
+            "Analysed head of $trackId: bpm=${grid?.bpm ?: entry?.bpm} " +
+                "conf=${grid?.beatConfidence ?: entry?.beatConfidence} " +
+                "audibleStart=${entry?.audibleStartTime} pickup=${entry?.pickupTime} " +
+                "introEnd=${entry?.introEndTime} mixInCandidates=${entry?.mixInCandidates?.size ?: 0} " +
+                "over ${"%.1f".format(Locale.ROOT, head.seconds)}s",
+        )
+
+        return TrackAnalysis(
+            status = TrackAnalysis.STATUS_READY,
+            trackId = trackId,
+            duration = durationSeconds,
+            bpm = grid?.bpm ?: entry?.bpm ?: 0.0,
+            beatInterval = grid?.beatInterval ?: entry?.beatInterval ?: 0.0,
+            beatConfidence = grid?.beatConfidence ?: entry?.beatConfidence ?: 0.0,
+            downbeats = grid?.downbeats ?: entry?.downbeats.orEmpty(),
+            firstBeat = grid?.firstBeat ?: entry?.firstBeat ?: 0.0,
+            key = entry?.key.orEmpty(),
+            keyConfidence = entry?.keyConfidence ?: 0.0,
+            audibleStartTime = entry?.audibleStartTime,
+            pickupTime = entry?.pickupTime,
+            introEndTime = entry?.introEndTime ?: 0.0,
+            mixInTime = entry?.mixInTime ?: 0.0,
+            mixInCandidates = entry?.mixInCandidates.orEmpty(),
+        )
+    }
+
+    /**
+     * Picks which rendition of [uri]'s recording to analyse: the lightest one
+     * that is both complete and the same cut as the track being played.
+     *
+     * A recording can be on disk two or three times over — the Opus stream
+     * YouTube served, a substituted source's copy, a later quality upgrade — and
+     * they hold the same music, so an analysis of any of them describes all of
+     * them. Analysing the smallest is not merely cheaper: it is the one that
+     * finished downloading first, and a lossless upgrade can take most of a
+     * track's play time to arrive. Waiting for it is why analysis was landing
+     * seconds *after* the transition it was meant to inform.
+     *
+     * The duration check is what makes the sharing safe. A `#alt` rendition
+     * comes from an entirely different source and may be a different cut —
+     * a radio edit, a version with a longer intro — and a beat grid borrowed
+     * across that difference would put every downbeat and both mix anchors
+     * seconds out. Comparing container durations catches exactly that, and
+     * costs a header parse per candidate.
+     */
+    private fun chooseRendition(
+        trackId: String,
+        uri: Uri,
+        durationSeconds: Double,
+    ): AudioCache.Rendition? {
