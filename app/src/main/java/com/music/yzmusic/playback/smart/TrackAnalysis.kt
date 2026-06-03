@@ -53,3 +53,12 @@ data class TrackAnalysis(
      * directly and it survives tempo drift better, so it is preferred
      * wherever both are available.
      */
+    val beatInterval: Double = 0.0,
+    /**
+     * How far the beat grid can be trusted, 0..1. A catalog tempo lookup
+     * merges in at 0, so a metadata BPM alone can never authorize
+     * beat-matching.
+     */
+    val beatConfidence: Double = 0.0,
+    val downbeats: List<Double> = emptyList(),
+    val phraseBoundaries: List<Double> = emptyList(),
