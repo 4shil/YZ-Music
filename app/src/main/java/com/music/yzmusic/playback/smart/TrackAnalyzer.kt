@@ -826,3 +826,50 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
             return Structural(null, decodedShort = true)
         }
 
+        val samples = if (abs(pcm.sampleRate - structRate) > 1.0) {
+            TrackFeatures.resample(pcm.samples, pcm.sampleRate, structRate) ?: return Structural(null)
+        } else {
+            pcm.samples
+        }
+
+        return Structural(TrackFeatures.analyze(samples, effectiveDuration))
+    }
+
+    /**
+     * The whole-track pass. A null [WholeTrack.analysis] means "not now, try
+     * again"; see the short-decode guard below, which is the one condition that
+     * produces a confident-looking analysis that is wrong by minutes rather than
+     * merely absent, and the only one that counts as a strike.
+     */
+    private fun analyze(trackId: String, uri: Uri, durationSeconds: Double): WholeTrack {
+        val copy = copyToRead(trackId, uri, durationSeconds) ?: return WholeTrack(null)
+        // Recorded before the outcome is known, because what this gates is
+        // whether a *written-off* track is worth reopening, and the answer is
+        // only ever "yes" for a copy that has not been read yet. Recording it on
+        // success alone would leave a failure looking permanently reopenable and
+        // re-decode the same file on every tick.
+        triedRenditions.add(copy.key)
+        val openSource = copy.open
+
+        var effectiveDuration = durationSeconds
+        if (!effectiveDuration.isFinite() || effectiveDuration <= 0) {
+            effectiveDuration = openSource()?.use(AudioDecoder::containerDurationSeconds) ?: 0.0
+        }
+        if (effectiveDuration <= 0) {
+            Log.d(TAG, "Skipping $trackId: ${copy.key} has no readable duration")
+            return WholeTrack(empty(trackId, 0.0))
+        }
+
+        // Pass 1 (Phase 1, DSP-only): the analyzer needs the whole track — the energy curve,
+        // phrase structure and mix-out anchor all read the tail, not just a window of it — at its
+        // own low sample rate, so this is a much smaller decode than a full-rate pass would be.
+        //
+        // In a frame of its own, and handing back only the features, because of what it allocates
+        // to get them: the whole track decoded to mono at the container's rate (35 MB for a
+        // 3.5-minute song) plus the resampled copy the DSP reads (8 MB). Neither is touched again
+        // after this line, but a local holding either stays reachable to the end of the method, and
+        // the rest of the method is Pass 2 — the most allocation-heavy part of the analysis.
+        // Measured on the API 28 emulator: those two buffers were 43 MB of an 82 MB live set, still
+        // held while the models ran, in a process that was reaching a 256 MB heap limit and had
+        // died on it. Returning is what releases them — a `val` cannot be nulled, and a narrower
+        // scope alone does not make ART treat one as dead.
