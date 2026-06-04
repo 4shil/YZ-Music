@@ -930,3 +930,52 @@ fun planTransition(
 
     val policy = assessTransitionTier(analysis, nextAnalysis)
     if (policy.tier == TransitionTier.PLAIN_CROSSFADE) {
+        val transitionStart = max(0.0, mixAnchor - standardFade)
+        val started = playbackTime >= transitionStart
+        return TransitionPlan(
+            shouldStart = started,
+            markerVisible = true,
+            transitionStart = transitionStart,
+            transitionEnd = mixAnchor,
+            fadeSeconds = mixAnchor - transitionStart,
+            transitionStyle = TransitionStyle.EQUAL_POWER,
+            incomingCueTime = incomingStartPoint(nextAnalysis),
+            policyReasons = policy.reasons,
+            reason = if (started) "smart-plain-crossfade" else "before-plain-crossfade-window",
+        )
+    }
+
+    val nextLength = max(nextAnalysis.duration.orZero(), trackDurationSeconds(nextTrack))
+
+    phraseSwitch(analysis, nextAnalysis, length, nextLength)
+        ?.takeIf { playbackTime < it.transitionEnd }
+        ?.let { plan ->
+            val started = playbackTime >= plan.transitionStart
+            return plan.copy(
+                shouldStart = started,
+                policyReasons = policy.reasons,
+                reason = if (started) "smart-phrase-switch" else "before-phrase-switch",
+            )
+        }
+
+    val (overlap, transitionBeats, incomingPlaybackRate) = adaptiveOverlap(analysis, nextAnalysis)
+    val currentBpm = analysis.bpm.orZero()
+    val nextBpm = nextAnalysis.bpm.orZero()
+    val handoffBpm = if (currentBpm > 0) currentBpm else nextBpm
+    val sameBeatBlend = currentBpm > 0 && nextBpm > 0 &&
+        abs(1 - normalizedTempoRatio(currentBpm, nextBpm)) <= 0.05 &&
+        (analysis.beatConfidence.orZero() >= 0.2 || nextAnalysis.beatConfidence.orZero() >= 0.2)
+    val outgoingArrangementOverlap =
+        if (sameBeatBlend && mixOutAnchor.type == "content_end") {
+            min(ARRANGEMENT_OVERLAP_BEATS * 60 / currentBpm, MAX_DISCARDED_MUSIC_SECONDS)
+        } else {
+            0.0
+        }
+    val mixEnd = max(0.0, mixAnchor - outgoingArrangementOverlap)
+    val maximumOverlap = minOf(
+        if (handoffBpm > 0) (AUTO_TRANSITION_MAX_BEATS * 60) / handoffBpm else AUTO_TRANSITION_MAX_SECONDS,
+        AUTO_TRANSITION_MAX_SECONDS,
+        mixEnd * 0.4,
+        if (nextLength > 0) nextLength * 0.4 else AUTO_TRANSITION_MAX_SECONDS,
+    )
+    val handoffBeats = if (sameBeatBlend) 8 else 4
