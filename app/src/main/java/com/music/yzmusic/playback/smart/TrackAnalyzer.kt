@@ -873,3 +873,15 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         // held while the models ran, in a process that was reaching a 256 MB heap limit and had
         // died on it. Returning is what releases them — a `val` cannot be nulled, and a narrower
         // scope alone does not make ART treat one as dead.
+        val structural = structure(trackId, uri, copy, effectiveDuration)
+        if (structural.decodedShort) return WholeTrack(null, decodedShort = true)
+        val features = structural.features ?: return WholeTrack(empty(trackId, effectiveDuration))
+
+        // Pass 2 (Phases 2 and 3, models): the Beat This! grid and the open-unmix vocal mask, over
+        // the head and tail only. A transition only ever reads the tail of the outgoing track and
+        // the head of the incoming one, and a track is both of those at different moments, so the
+        // middle is never decoded for this. Both models read the same decoded region, so the
+        // stereo buffer is paid for once.
+        val window = BeatTracker.WINDOW_SECONDS
+        val tailStart = max(0.0, effectiveDuration - window)
+        val head = region(openSource, 0.0, minOf(window, effectiveDuration), features)
