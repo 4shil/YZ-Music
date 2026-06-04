@@ -947,3 +947,81 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
      */
     private class Region(
         val grid: BeatTracker.Grid?,
+        val vocalMask: DoubleArray?,
+        val seconds: Double,
+        /** Only populated when the caller asked for it; see [region]'s `deriveFeatures`. */
+        val features: TrackFeatures.Features? = null,
+    )
+
+    /**
+     * Decodes one stereo region and runs both models over it, returning only their results.
+     *
+     * The point of the function boundary is the audio: the stereo buffer, its mono mix and the
+     * resampled copies are all local, so they become collectible the moment this returns rather
+     * than staying live until the whole analysis finishes. A 30 s stereo region is several
+     * megabytes before either model's own working set is counted.
+     *
+     * Null, or a null field, means "no model evidence for this window" — a codec that will not
+     * configure, a region too short, a missing model — which [analyze] already falls back on.
+     *
+     * The extractor seeks to a sync sample at or before what was asked for, so the region's real
+     * start (not [startSeconds]) is what its beat times must be stated against.
+     */
+    private fun region(
+        openSource: () -> MediaDataSource?,
+        startSeconds: Double,
+        endSeconds: Double,
+        features: TrackFeatures.Features?,
+        deriveFeatures: Boolean = false,
+    ): Region? {
+        val decoded = openSource()?.use { AudioDecoder.decodeRegionStereo(it, startSeconds, endSeconds) }
+            ?: run {
+                // The two ways this comes back empty mean opposite things and
+                // were reported identically, which cost a round of guessing:
+                // this one is the extractor refusing the container outright, so
+                // the bytes are wrong or not enough of them are there to parse.
+                Log.d(TAG, "Region [$startSeconds, $endSeconds) would not open")
+                return null
+            }
+        val (stereo, actualStart) = decoded
+        if (stereo.left.size < stereo.sampleRate) {
+            // And this one is a container that parsed fine and yielded under a
+            // second of audio — a decode that started and ran out, not one that
+            // never started.
+            Log.d(TAG, "Region [$startSeconds, $endSeconds) decoded ${stereo.left.size} frames; too few")
+            return null
+        }
+
+        val seconds = stereo.left.size / stereo.sampleRate
+        // In a frame of its own so the full-rate mono downmix is released before either model runs.
+        // It is 23 MB for this window at 48 kHz — the same size as each of the two channels it
+        // averages — and it is read exactly twice, to make the resampled model input and the DSP
+        // one. As a local it would nonetheless stay reachable through `tracker.track` and
+        // `vocalMask` below, which is where the analysis allocates most heavily and where the
+        // process was dying. Same reasoning [derived] already had, one level further out.
+        val inputs = regionInputs(stereo, seconds, deriveFeatures)
+
+        return Region(
+            grid = inputs.forModel?.let { tracker.track(it, offsetSeconds = actualStart) },
+            vocalMask = features?.let { vocalMask(stereo, it, actualStart) },
+            seconds = seconds,
+            features = inputs.derived,
+        )
+    }
+
+    /** A region's model input, and its DSP features when the caller asked for them. */
+    private class RegionInputs(val forModel: FloatArray?, val derived: TrackFeatures.Features?)
+
+    /**
+     * Reduces a decoded region to the buffers the models and the DSP actually read.
+     *
+     * Both come off one full-rate mono downmix, which is why they are made together rather than on
+     * demand: that downmix is the largest single allocation in the analysis, and returning is the
+     * only way to be rid of it before the models run.
+     */
+    private fun regionInputs(
+        stereo: AudioDecoder.StereoPcm,
+        seconds: Double,
+        deriveFeatures: Boolean,
+    ): RegionInputs {
+        val mono = FloatArray(stereo.left.size) { index -> (stereo.left[index] + stereo.right[index]) * 0.5f }
