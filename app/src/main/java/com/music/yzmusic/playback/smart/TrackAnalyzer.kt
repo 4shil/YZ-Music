@@ -1025,3 +1025,51 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         deriveFeatures: Boolean,
     ): RegionInputs {
         val mono = FloatArray(stereo.left.size) { index -> (stereo.left[index] + stereo.right[index]) * 0.5f }
+        val forModel = if (abs(stereo.sampleRate - MelSpectrogram.sampleRate) > 1.0) {
+            MelSpectrogram.resample(mono, stereo.sampleRate, MelSpectrogram.sampleRate)
+        } else {
+            mono
+        }
+
+        // Derived here rather than by the caller so the mono buffer is still
+        // live: handing it back would keep several megabytes reachable for the
+        // rest of the analysis, which is the one thing this function exists to
+        // avoid.
+        val derived = if (deriveFeatures) {
+            val forFeatures = if (abs(stereo.sampleRate - TrackFeatures.sampleRate) > 1.0) {
+                TrackFeatures.resample(mono, stereo.sampleRate, TrackFeatures.sampleRate)
+            } else {
+                mono
+            }
+            forFeatures?.let { TrackFeatures.analyze(it, seconds) }
+        } else {
+            null
+        }
+
+        return RegionInputs(forModel, derived)
+    }
+
+    /**
+     * A vocal-presence value for every point on the energy curve, filled only where the model
+     * actually ran.
+     *
+     * The policy indexes the mask against energy-curve sample times and requires the two to be the
+     * same length, but the model's window is fixed at about 22 seconds, far less than a track. So
+     * the mask is built at full length and filled only over this region.
+     *
+     * Everywhere else stays at [NEUTRAL_VOCAL]. That is not a guess dressed up as data: it sits
+     * below the policy's own VOCAL_ACTIVE_THRESHOLD, so unmeasured material can never trip vocal
+     * logic in either direction.
+     */
+    private fun vocalMask(
+        stereo: AudioDecoder.StereoPcm,
+        features: TrackFeatures.Features,
+        actualStart: Double,
+    ): DoubleArray? {
+        val curve = features.energyCurve
+        if (curve.isEmpty() || !VocalSpectrogram.available) return null
+
+        // The beat model's window is longer than the vocal model's fixed input, so the region is
+        // trimmed rather than handed over whole — [VocalTracker.track] refuses anything wider than
+        // its graph, and refusing is how the tail of every region would otherwise go unmeasured.
+        // Two frames of margin absorb the ±1 sample a rate conversion can land on.
