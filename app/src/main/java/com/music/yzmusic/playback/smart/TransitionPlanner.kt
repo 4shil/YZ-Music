@@ -856,3 +856,77 @@ private fun analysisReadyForTrack(analysis: TrackAnalysis, track: TransitionTrac
  *   handoff instead of a mix.
  * @param currentTime the outgoing track's playhead, in seconds.
  */
+fun planTransition(
+    analysis: TrackAnalysis = TrackAnalysis(),
+    nextAnalysis: TrackAnalysis = TrackAnalysis(),
+    currentTrack: TransitionTrackInfo? = null,
+    nextTrack: TransitionTrackInfo? = null,
+    currentTime: Double = 0.0,
+    duration: Double = 0.0,
+    fadeSeconds: Double = 6.0,
+    minFadeSeconds: Double = 1.0,
+    mode: CrossfadeMode = CrossfadeMode.STANDARD,
+    albumSequential: Boolean = false,
+): TransitionPlan {
+    val length = max(duration.orZero(), trackDurationSeconds(currentTrack))
+    val playbackTime = max(0.0, currentTime.orZero())
+    if (length <= 0) return blocked("no-duration")
+
+    val standardFade = clamp(fadeSeconds, minFadeSeconds, 12.0)
+    if (mode != CrossfadeMode.SMART) {
+        return standardTransition(length, playbackTime, standardFade, minFadeSeconds)
+    }
+
+    if (length < MIN_SMART_DURATION_SECONDS) {
+        return blocked("short-duration-guard", transitionStart = length, transitionEnd = length)
+    }
+
+    val analyzedContentEnd = analysis.contentEndTime.orZero().takeIf { it != 0.0 } ?: length
+    val finalMixAnchor = if (analyzedContentEnd > 0 && analyzedContentEnd <= length) {
+        analyzedContentEnd
+    } else {
+        length
+    }
+    val mixOutAnchor = resolveMixOutAnchor(analysis, contentEnd = finalMixAnchor, duration = length)
+    val hasInteriorMixOut = mixOutAnchor.time < finalMixAnchor - 1
+
+    if (albumSequential && sameAlbum(currentTrack, nextTrack) && !hasInteriorMixOut) {
+        val transitionStart = max(0.0, length - 0.45)
+        val started = playbackTime >= transitionStart
+        return TransitionPlan(
+            shouldStart = started,
+            markerVisible = true,
+            transitionStart = transitionStart,
+            transitionEnd = length,
+            fadeSeconds = 0.12,
+            transitionStyle = TransitionStyle.GAPLESS,
+            reason = if (started) "same-album-gapless" else "before-gapless-window",
+        )
+    }
+
+    if (BLOCKED_TEXT.containsMatchIn("${itemText(currentTrack)} ${itemText(nextTrack)}")) {
+        return blocked("blocked-speech-or-live")
+    }
+
+    if (!analysisReadyForTrack(analysis, currentTrack) ||
+        !analysisReadyForTrack(nextAnalysis, nextTrack)
+    ) {
+        return standardTransition(
+            length,
+            playbackTime,
+            standardFade,
+            minFadeSeconds,
+            "smart-analysis-fallback",
+        )
+    }
+
+    val preferredMixAnchor = min(length, mixOutAnchor.time)
+    val mixAnchor =
+        if (playbackTime >= preferredMixAnchor - 0.05 && preferredMixAnchor < finalMixAnchor - 1) {
+            finalMixAnchor
+        } else {
+            preferredMixAnchor
+        }
+
+    val policy = assessTransitionTier(analysis, nextAnalysis)
+    if (policy.tier == TransitionTier.PLAIN_CROSSFADE) {
