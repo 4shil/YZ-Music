@@ -552,3 +552,39 @@ sealed interface WsolaPlanResult {
         val stretchRatio: Double,
         val incomingCueTime: Double,
         val incomingDropTime: Double,
+        val incomingHandoffTime: Double,
+        val incomingResumeTime: Double,
+    ) : WsolaPlanResult
+}
+
+/** Where the incoming track takes over: the best-ranked mix-in candidate, snapped to a downbeat. */
+fun incomingMixInPoint(analysis: TrackAnalysis): Double? {
+    val beatSeconds = analysis.beatInterval.orZero().takeIf { it > 0 }
+        ?: if (analysis.bpm.orZero() > 0) 60 / analysis.bpm else 0.0
+    val tolerance = max(0.5, beatSeconds * 2)
+    val target = listOfNotNull(rankMixInCandidates(analysis).firstOrNull()?.time, analysis.mixInTime)
+        .firstOrNull { it.isFinite() && it > 0 }
+        ?: return null
+    return nearestValue(analysis.downbeats, target, tolerance) ?: target
+}
+
+/** Where the incoming track first makes sound. */
+fun incomingAudibleStart(analysis: TrackAnalysis): Double = audibleStartOf(analysis)
+
+/** Plans one beat-matched transition between [analysis] and [nextAnalysis]. */
+fun planWsolaTransition(
+    analysis: TrackAnalysis,
+    nextAnalysis: TrackAnalysis,
+    duration: Double = 0.0,
+    nextDuration: Double = 0.0,
+): WsolaPlanResult {
+    val policy = assessTransitionTier(analysis, nextAnalysis)
+    if (policy.tier != TransitionTier.BEATMATCHED) {
+        return WsolaPlanResult.Refused(policy.reasons.firstOrNull() ?: "policy")
+    }
+
+    val outgoingBpm = analysis.bpm.orZero()
+    val incomingBpm = alignTempoOctave(outgoingBpm, nextAnalysis.bpm.orZero())
+    val stretchRatio = outgoingBpm / incomingBpm
+
+    val outgoingLength = max(duration.orZero(), analysis.duration.orZero())
