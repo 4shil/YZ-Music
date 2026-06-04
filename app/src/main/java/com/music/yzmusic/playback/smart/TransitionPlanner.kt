@@ -460,3 +460,95 @@ private fun bassSwapFractionFor(
     )
     val strongest = candidates.mapNotNull { beat ->
         val outgoingAt = transitionStart + beat * outgoingBeatSeconds
+        val incomingAt = incomingCueTime + beat * incomingBeatSeconds
+        val incomingChange = lowEnergyChange(
+            nextAnalysis.lowEnergyCurve,
+            incomingReference,
+            incomingAt,
+            incomingWindow,
+        )
+        val outgoingChange = lowEnergyChange(
+            analysis.lowEnergyCurve,
+            outgoingReference,
+            outgoingAt,
+            outgoingWindow,
+        )
+        if (incomingChange == null && outgoingChange == null) return@mapNotNull null
+        BassCandidate(beat, (incomingChange ?: 0.0) - (outgoingChange ?: 0.0))
+    }.maxWithOrNull(
+        compareBy<BassCandidate> { it.score }
+            .thenBy { if (it.beat % 4 == 0) 1 else 0 }
+            .thenBy { -abs(it.beat.toDouble() / overlapBeats - prior) },
+    )
+
+    val chosenBeat = strongest?.takeIf { it.score >= MIN_BASS_STRUCTURE_SCORE }?.beat
+        ?: fallbackBeat
+    return chosenBeat.toDouble() / overlapBeats
+}
+
+/**
+ * How vocal the planned overlap is on both sides at once, measured over the
+ * windows the plan actually blends.
+ *
+ * The two windows are not the same length in wall-clock terms whenever the
+ * incoming track is being stretched: [incomingPlaybackRate] above 1 means it
+ * covers proportionally more of its own timeline in the same number of seconds,
+ * so the incoming window is scaled by it rather than copied from the outgoing
+ * one. Getting that wrong would measure a window the listener never hears.
+ *
+ * Answers zero for a degenerate span and for any track without a mask, so every
+ * caller can set this unconditionally.
+ */
+private fun plannedVocalOverlap(
+    analysis: TrackAnalysis,
+    nextAnalysis: TrackAnalysis,
+    transitionStart: Double,
+    transitionEnd: Double,
+    incomingCueTime: Double,
+    incomingPlaybackRate: Double,
+): Double {
+    val outgoingSpan = transitionEnd - transitionStart
+    if (outgoingSpan <= 0.0 || !outgoingSpan.isFinite()) return 0.0
+    val rate = incomingPlaybackRate.takeIf { it.isFinite() && it > 0 } ?: 1.0
+    return simultaneousVocalFraction(
+        outgoing = analysis,
+        incoming = nextAnalysis,
+        outStart = transitionStart,
+        outEnd = transitionEnd,
+        inStart = incomingCueTime,
+        rate = rate,
+    ) ?: 0.0
+}
+
+private fun nearestAtOrBefore(values: List<Double>, target: Double): Double? =
+    values.filter { it.isFinite() && it >= 0 && it <= target }.maxOrNull()
+
+/**
+ * The outcome of planning one beat-matched transition.
+ *
+ * [Refused] is a routing decision, not an error: the caller falls back to the
+ * adaptive overlap below, which degrades further on its own.
+ */
+sealed interface WsolaPlanResult {
+    data class Refused(val reason: String) : WsolaPlanResult
+
+    /** All times are seconds on each track's own media timeline. */
+    data class Planned(
+        val tier: TransitionTier,
+        val beatConfidence: Double,
+        val mixOutType: String,
+        val vocalClash: Boolean,
+        val transitionStart: Double,
+        val transitionEnd: Double,
+        val overlapSeconds: Double,
+        val beats: Int,
+        val fadeBeats: Int,
+        val handoffFraction: Double,
+        val bedPosition: Double,
+        val bassSwapFraction: Double,
+        val filterSweep: Double,
+        val outgoingBpm: Double,
+        val incomingBpm: Double,
+        val stretchRatio: Double,
+        val incomingCueTime: Double,
+        val incomingDropTime: Double,
