@@ -144,3 +144,43 @@ object TrackFeatures {
             for (index in 0 until array.length()) {
                 val point = array.optJSONObject(index) ?: continue
                 val time = point.optDouble("t", Double.NaN)
+                val energy = point.optDouble("e", Double.NaN)
+                if (time.isFinite() && energy.isFinite()) add(EnergySample(time, energy))
+            }
+        }
+    }
+
+    private fun JSONObject.cuePoints(name: String): List<MixCandidate> {
+        val array: JSONArray = optJSONArray(name) ?: return emptyList()
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) {
+                val point = array.optJSONObject(index) ?: continue
+                val time = point.optDouble("t", Double.NaN)
+                if (!time.isFinite()) continue
+                add(
+                    MixCandidate(
+                        time = time,
+                        score = point.optDouble("s", 0.0).orZero(),
+                        type = point.optString("y", ""),
+                    ),
+                )
+            }
+        }
+    }
+
+    private const val TAG = "YZMusicTrackFeatures"
+
+    @JvmStatic private external fun nativeAnalyze(
+        samples: FloatArray,
+        sampleRate: Double,
+        duration: Double,
+    ): String
+
+    @JvmStatic private external fun nativeSampleRate(): Double
+
+    @JvmStatic private external fun nativeResample(
+        samples: FloatArray,
+        inputRate: Double,
+        outputRate: Double,
+    ): FloatArray
+}
