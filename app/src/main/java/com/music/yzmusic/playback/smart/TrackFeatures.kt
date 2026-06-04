@@ -100,3 +100,41 @@ object TrackFeatures {
         val vocalActivityMask: List<Double>,
         val energyCurve: List<EnergySample>,
         val lowEnergyCurve: List<EnergySample>,
+        val mixInCandidates: List<MixCandidate>,
+        val mixOutCandidates: List<MixCandidate>,
+    )
+
+    fun parse(root: JSONObject): Features = Features(
+        duration = root.optDouble("duration", 0.0).orZero(),
+        bpm = root.optDouble("bpm", 0.0).orZero(),
+        beatInterval = root.optDouble("beatInterval", 0.0).orZero(),
+        firstBeat = root.optDouble("firstBeat", 0.0).orZero(),
+        beatConfidence = root.optDouble("beatConfidence", 0.0).orZero(),
+        key = root.optString("key", ""),
+        keyConfidence = root.optDouble("keyConfidence", 0.0).orZero(),
+        audibleStartTime = root.optDouble("audibleStartTime", 0.0).orZero(),
+        pickupTime = root.optDouble("pickupTime", 0.0).orZero(),
+        introEndTime = root.optDouble("introEndTime", 0.0).orZero(),
+        outroStartTime = root.optDouble("outroStartTime", 0.0).orZero(),
+        contentEndTime = root.optDouble("contentEndTime", 0.0).orZero(),
+        mixInTime = root.optDouble("mixInTime", 0.0).orZero(),
+        mixOutTime = root.optDouble("mixOutTime", 0.0).orZero(),
+        vocalProbability = root.optDouble("vocalProbability", 0.0).orZero(),
+        downbeats = root.doubles("downbeats"),
+        phraseBoundaries = root.doubles("phraseBoundaries"),
+        vocalActivityMask = root.doubles("vocalActivityMask"),
+        energyCurve = root.energyCurve("energyCurve"),
+        lowEnergyCurve = root.energyCurve("lowEnergyCurve"),
+        mixInCandidates = root.cuePoints("mixInCandidates"),
+        mixOutCandidates = root.cuePoints("mixOutCandidates"),
+    )
+
+    private fun JSONObject.doubles(name: String): List<Double> {
+        val array = optJSONArray(name) ?: return emptyList()
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) {
+                array.optDouble(index).takeIf { it.isFinite() }?.let(::add)
+            }
+        }
+    }
+
