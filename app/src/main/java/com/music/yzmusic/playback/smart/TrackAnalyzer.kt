@@ -1073,3 +1073,11 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         // trimmed rather than handed over whole — [VocalTracker.track] refuses anything wider than
         // its graph, and refusing is how the tail of every region would otherwise go unmeasured.
         // Two frames of margin absorb the ±1 sample a rate conversion can land on.
+        val maxSeconds = (VocalTracker.FIXED_FRAMES - 2) * VocalSpectrogram.hop / VocalSpectrogram.sampleRate
+        val maxSamples = (maxSeconds * stereo.sampleRate).toInt().coerceAtMost(stereo.left.size)
+        if (maxSamples <= 0) return null
+        val left = if (maxSamples < stereo.left.size) stereo.left.copyOf(maxSamples) else stereo.left
+        val right = if (maxSamples < stereo.right.size) stereo.right.copyOf(maxSamples) else stereo.right
+
+        val values = vocals.track(left, right, stereo.sampleRate) ?: return null
+
