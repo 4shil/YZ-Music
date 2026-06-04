@@ -96,3 +96,7 @@ object TrackFeatures {
         val mixOutTime: Double,
         val vocalProbability: Double,
         val downbeats: List<Double>,
+        val phraseBoundaries: List<Double>,
+        val vocalActivityMask: List<Double>,
+        val energyCurve: List<EnergySample>,
+        val lowEnergyCurve: List<EnergySample>,
