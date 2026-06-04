@@ -792,3 +792,67 @@ private data class Overlap(
 
 /** How long a mix should run when the tracks are related but not phrase-switchable. */
 private fun adaptiveOverlap(analysis: TrackAnalysis, nextAnalysis: TrackAnalysis): Overlap {
+    val currentBpm = analysis.bpm.orZero()
+    val nextBpm = nextAnalysis.bpm.orZero()
+    if (currentBpm <= 0 || nextBpm <= 0) {
+        return Overlap(AUTO_FALLBACK_SECONDS, 0, 1.0)
+    }
+
+    val ratio = normalizedTempoRatio(currentBpm, nextBpm)
+    val distance = keyDistance(trustedKey(analysis), trustedKey(nextAnalysis))
+    val vocalConflict = analysis.vocalProbability >= 0.62 && nextAnalysis.vocalProbability >= 0.62
+    val transitionBeats =
+        if (!vocalConflict && (abs(1 - ratio) > 0.07 || (distance != null && distance > 4))) 16 else 8
+    val beatSeconds = 60 / currentBpm
+    val minimumOverlap = if (currentBpm >= 140) AUTO_FAST_TRACK_MIN_SECONDS else AUTO_MIN_SECONDS
+
+    return Overlap(
+        overlap = clamp(transitionBeats * beatSeconds, minimumOverlap, AUTO_TRANSITION_MAX_SECONDS),
+        transitionBeats = transitionBeats,
+        incomingPlaybackRate = if (ratio in 0.9..1.1) {
+            (clamp(1 / ratio, 0.9, 1.1) * 10000).roundToInt() / 10000.0
+        } else {
+            1.0
+        },
+    )
+}
+
+private fun standardTransition(
+    length: Double,
+    playbackTime: Double,
+    fadeSeconds: Double,
+    minFadeSeconds: Double,
+    reason: String = "standard",
+): TransitionPlan {
+    val fade = clamp(fadeSeconds, minFadeSeconds, 12.0)
+    val transitionStart = max(0.0, length - fade)
+    val started = playbackTime >= transitionStart
+    return TransitionPlan(
+        shouldStart = started,
+        markerVisible = true,
+        transitionStart = transitionStart,
+        transitionEnd = length,
+        fadeSeconds = fade,
+        transitionStyle = TransitionStyle.EQUAL_POWER,
+        reason = if (started) reason else "before-$reason-window",
+    )
+}
+
+/** A stale analysis paired with the wrong track is worse than no analysis at all. */
+private fun analysisReadyForTrack(analysis: TrackAnalysis, track: TransitionTrackInfo?): Boolean {
+    if (analysis.status.isBlank()) return true
+    if (analysis.status != TrackAnalysis.STATUS_READY) return false
+    return analysis.trackId.isBlank() || track?.id.isNullOrBlank() || analysis.trackId == track.id
+}
+
+/**
+ * Plans the transition out of [currentTrack] and into [nextTrack].
+ *
+ * Called on every playback tick; the returned plan describes the transition
+ * whether or not it has started yet.
+ *
+ * @param albumSequential true only when this is an album genuinely being
+ *   played through in order, which is the sole case that earns a gapless
+ *   handoff instead of a mix.
+ * @param currentTime the outgoing track's playhead, in seconds.
+ */
