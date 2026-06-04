@@ -75,3 +75,31 @@ data class TrackAnalysis(
     val contentEndTime: Double = 0.0,
     val outroStartTime: Double = 0.0,
 
+    val mixInTime: Double = 0.0,
+    val mixOutTime: Double = 0.0,
+    val mixInCandidates: List<MixCandidate> = emptyList(),
+    val mixOutCandidates: List<MixCandidate> = emptyList(),
+
+    val energyCurve: List<EnergySample> = emptyList(),
+    /** Low-band energy, present only when the analyzer ran a band split. Drives the bass swap. */
+    val lowEnergyCurve: List<EnergySample> = emptyList(),
+    /**
+     * Per-sample vocal activity, indexed against [energyCurve] sample times.
+     * Empty, or any length other than the energy curve's, means "no
+     * evidence", which never blocks a transition.
+     */
+    val vocalActivityMask: List<Double> = emptyList(),
+    /** Whole-track vocal likelihood, distinct from the per-sample [vocalActivityMask]. */
+    val vocalProbability: Double = 0.0,
+) {
+    /**
+     * Whether this analysis actually describes a track, as opposed to standing
+     * in for one that has not been analysed or could not be.
+     *
+     * Both no-analysis states have to be excluded, and they look different: a
+     * track nothing has looked at yet has a blank [status], while one whose
+     * decode failed is recorded [STATUS_READY] with every field at its default
+     * so it is not retried forever. A zero [bpm] is what separates the second
+     * from a real result — and it is also the threshold the policy uses, since
+     * a tempo outside 40–220 drops a pairing to a plain crossfade anyway.
+     */
