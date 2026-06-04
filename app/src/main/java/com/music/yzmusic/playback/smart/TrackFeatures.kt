@@ -57,3 +57,28 @@ object TrackFeatures {
      */
     fun analyze(samples: FloatArray, durationSeconds: Double): Features? {
         if (!available || samples.isEmpty()) return null
+        val json = runCatching { nativeAnalyze(samples, sampleRate, durationSeconds) }
+            .onFailure { Log.w(TAG, "Native analysis failed", it) }
+            .getOrNull() ?: return null
+        return runCatching { parse(JSONObject(json)) }
+            .onFailure { Log.w(TAG, "Could not parse analysis output", it) }
+            .getOrNull()
+    }
+
+    /**
+     * Converts mono float PCM from [inputRate] to [sampleRate] (or any other
+     * target), with an anti-aliasing windowed-sinc filter — see
+     * `native/analyzer/resampler.cpp`.
+     *
+     * Returns the input unchanged when the rates already match, and null when
+     * the native library is missing or the rates are unusable.
+     */
+    fun resample(samples: FloatArray, inputRate: Double, outputRate: Double = sampleRate): FloatArray? {
+        if (!available || samples.isEmpty() || inputRate <= 0 || outputRate <= 0) return null
+        return nativeResample(samples, inputRate, outputRate).takeIf { it.isNotEmpty() }
+    }
+
+    /** The subset of the analyzer's output the transition policy reads. */
+    data class Features(
+        val duration: Double,
+        val bpm: Double,
