@@ -138,3 +138,9 @@ object TrackFeatures {
         }
     }
 
+    private fun JSONObject.energyCurve(name: String): List<EnergySample> {
+        val array: JSONArray = optJSONArray(name) ?: return emptyList()
+        return buildList(array.length()) {
+            for (index in 0 until array.length()) {
+                val point = array.optJSONObject(index) ?: continue
+                val time = point.optDouble("t", Double.NaN)
