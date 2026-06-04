@@ -625,3 +625,76 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         uri: Uri,
         durationSeconds: Double,
     ): AudioCache.Rendition? {
+        val complete = cache.renditionsOf(uri)
+            .filter { it.isComplete && it.key !in badRenditions }
+        if (complete.isEmpty()) return null
+
+        val expected = durationSeconds.takeIf { it.isFinite() && it > 0 }
+        // Without a length to check a sibling against, sharing would be a guess,
+        // so only the rendition actually being played can be trusted.
+        if (expected == null) {
+            val own = cache.cacheKeyOf(uri)
+            complete.firstOrNull { it.key == own }?.let { return it }
+            // Nothing to cross-check against — but one copy is not ambiguous
+            // either, and refusing it outright is a dead end rather than a
+            // safeguard. [cacheKeyOf] answers with whichever rendition the key
+            // factory resolves to *now*, which with substitution on is the `#alt`
+            // entry; the copy actually on disk is routinely the plain one, so
+            // this asked for a rendition that did not exist and returned null on
+            // every tick, silently, for as long as the track stayed queued.
+            //
+            // The risk the duration check exists to catch is borrowing a beat
+            // grid across two different cuts of a song. That needs two copies to
+            // choose wrongly between. With exactly one there is no choice being
+            // made, and the worst case degrades from "never analysed" to "a grid
+            // measured off the only audio we have".
+            return complete.singleOrNull()?.also {
+                Log.d(
+                    TAG,
+                    "Analysing $trackId from its only cached rendition ${it.key}; " +
+                        "no duration to check it against",
+                )
+            }
+        }
+
+        for (candidate in complete) {
+            val length = cache.renditionDataSource(uri, candidate)
+                .use(AudioDecoder::containerDurationSeconds) ?: continue
+            if (length <= 0) continue
+            if (abs(length - expected) > RENDITION_DURATION_TOLERANCE) {
+                Log.d(
+                    TAG,
+                    "Rendition ${candidate.key} rejected for $trackId: " +
+                        "${"%.1f".format(Locale.ROOT, length)}s against ${"%.1f".format(Locale.ROOT, expected)}s expected",
+                )
+                continue
+            }
+            if (candidate.key != cache.cacheKeyOf(uri)) {
+                Log.d(
+                    TAG,
+                    "Analysing $trackId from lighter rendition ${candidate.key} " +
+                        "(${candidate.contentLength / 1024}kB)",
+                )
+            }
+            return candidate
+        }
+        return null
+    }
+
+    /**
+     * Where a whole-track pass reads its audio from, and the identity the retry
+     * bookkeeping keys off.
+     *
+     * Two kinds of copy exist and they are not interchangeable. A **cached
+     * rendition** is one of several copies of a streamed recording: chosen
+     * between by [chooseRendition], cross-checked for being the same cut, and —
+     * when it turns out undecodable — thrown off disk so a clean one can replace
+     * it. A **local file** is the track itself: exactly one of it, complete from
+     * the moment it exists, nothing to choose between, and not ours to delete.
+     *
+     * [rendition] is what tells the two apart. Null means the audio is a file on
+     * the device, which is why the blame-and-discard half of [structure] is
+     * conditional on it rather than on a flag.
+     */
+    private class Copy(
+        val key: String,
