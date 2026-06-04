@@ -87,3 +87,7 @@ object TrackFeatures {
         val beatConfidence: Double,
         val key: String,
         val keyConfidence: Double,
+        val audibleStartTime: Double,
+        val pickupTime: Double,
+        val introEndTime: Double,
+        val outroStartTime: Double,
