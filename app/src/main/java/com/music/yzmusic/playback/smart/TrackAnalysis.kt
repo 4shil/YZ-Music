@@ -125,3 +125,42 @@ data class RankedMixCandidate(
     val time: Double,
     val score: Double,
     val type: String,
+    val rankScore: Double,
+    /**
+     * Seconds of audible music this candidate would skip by ending the
+     * transition before the content does. Mix-out only; always 0 for mix-in.
+     */
+    val discardedMusicSeconds: Double = 0.0,
+    /** False when there was no energy curve and [discardedMusicSeconds] is the raw gap instead. */
+    val measured: Boolean = true,
+)
+
+/** Where a transition should end on the outgoing track, and what it costs to end there. */
+data class MixOutAnchor(
+    val time: Double,
+    val type: String,
+    val discardedMusicSeconds: Double,
+)
+
+/** The verdict on how ambitious a transition the stored evidence supports. */
+data class TransitionPolicyVerdict(
+    val tier: TransitionTier,
+    /** Ordered most-disqualifying first, so `reasons.first()` is the routing verdict. */
+    val reasons: List<String>,
+    val beatConfidence: Double,
+)
+
+/**
+ * The degradation ladder. Ambition falls in explicit steps as certainty does,
+ * rather than letting one engine quietly do beat math on junk data.
+ */
+enum class TransitionTier {
+    /** Both grids trusted and the tempi sit within the transparent stretch window. */
+    BEATMATCHED,
+
+    /** Beat-quantized anchors and EQ handoffs are allowed; time-stretching is not. */
+    DJ_ASSISTED,
+
+    /** The evidence supports nothing beyond an equal-power fade at the analyzed anchor. */
+    PLAIN_CROSSFADE,
+}
