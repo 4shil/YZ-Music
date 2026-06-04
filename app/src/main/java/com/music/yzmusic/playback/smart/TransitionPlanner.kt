@@ -671,3 +671,124 @@ fun planWsolaTransition(
         incomingDropTime + ARRANGEMENT_OVERLAP_BEATS * incomingBeatSeconds
     val maxIncomingHandoff = incomingLength - MIN_CLEARANCE_SECONDS
     if (maxIncomingHandoff < incomingDropTime) return WsolaPlanResult.Refused("incoming-too-short")
+    val incomingHandoffTime = min(requestedIncomingHandoff, maxIncomingHandoff)
+    val incomingCueTime = incomingHandoffTime - overlapSeconds
+    if (incomingCueTime < audibleStart - 0.05) return WsolaPlanResult.Refused("incoming-no-runway")
+
+    val startTarget = overlapEndTarget - outgoingOverlapSeconds
+    val transitionStart = nearestAtOrBefore(analysis.downbeats, startTarget) ?: startTarget
+    if (transitionStart < MIN_CLEARANCE_SECONDS) return WsolaPlanResult.Refused("outgoing-too-short")
+    val transitionEnd = transitionStart + outgoingOverlapSeconds
+    if (transitionEnd > outgoingLength + 0.05) return WsolaPlanResult.Refused("outgoing-overlap-overruns")
+
+    val incomingResumeTime = incomingCueTime + overlapSeconds
+    if (incomingResumeTime + MIN_CLEARANCE_SECONDS > incomingLength) {
+        return WsolaPlanResult.Refused("incoming-too-short")
+    }
+
+    return WsolaPlanResult.Planned(
+        tier = policy.tier,
+        beatConfidence = policy.beatConfidence,
+        mixOutType = mixOutAnchor.type,
+        vocalClash = fadeVocalClash,
+        transitionStart = transitionStart,
+        transitionEnd = transitionEnd,
+        overlapSeconds = overlapSeconds,
+        beats = overlapBeats,
+        fadeBeats = overlapBeats,
+        handoffFraction = HANDOFF_FRACTION,
+        bedPosition = BED_POSITION,
+        bassSwapFraction = bassSwapFractionFor(
+            analysis = analysis,
+            nextAnalysis = nextAnalysis,
+            transitionStart = transitionStart,
+            incomingCueTime = incomingCueTime,
+            outgoingBeatSeconds = outgoingBeatSeconds,
+            incomingBeatSeconds = incomingBeatSeconds,
+            overlapSeconds = overlapSeconds,
+            overlapBeats = overlapBeats,
+        ),
+        filterSweep = FILTER_SWEEP,
+        outgoingBpm = outgoingBpm,
+        incomingBpm = incomingBpm,
+        stretchRatio = stretchRatio,
+        incomingCueTime = incomingCueTime,
+        incomingDropTime = incomingDropTime,
+        incomingHandoffTime = incomingHandoffTime,
+        incomingResumeTime = incomingResumeTime,
+    )
+}
+
+/**
+ * The most ambitious move available: run the incoming track's instrumental
+ * intro underneath the outgoing one and close on its drop. A refusal is a
+ * routing decision, not an error: the caller falls back to the adaptive
+ * overlap below, which degrades further on its own.
+ */
+private fun phraseSwitch(
+    analysis: TrackAnalysis,
+    nextAnalysis: TrackAnalysis,
+    length: Double,
+    nextLength: Double,
+): TransitionPlan? {
+    if (!harmonicallyCompatible(trustedKey(analysis), trustedKey(nextAnalysis))) return null
+
+    val planned = planWsolaTransition(
+        analysis = analysis,
+        nextAnalysis = nextAnalysis,
+        duration = length,
+        nextDuration = nextLength,
+    ) as? WsolaPlanResult.Planned ?: return null
+
+    val overlap = planned.transitionEnd - planned.transitionStart
+    return TransitionPlan(
+        markerVisible = true,
+        transitionStart = planned.transitionStart,
+        transitionEnd = planned.transitionEnd,
+        fadeSeconds = overlap,
+        handoffStartSeconds = 0.0,
+        handoffDuration = overlap,
+        incomingCueTime = planned.incomingCueTime,
+        incomingHandoffTime = planned.incomingHandoffTime,
+        incomingPlaybackRate = (planned.stretchRatio * 10000).roundToInt() / 10000.0,
+        pickupSeconds = incomingAudibleStart(nextAnalysis),
+        transitionBeats = planned.beats,
+        bassSwap = true,
+        handoffFraction = planned.handoffFraction,
+        bedPosition = planned.bedPosition,
+        bassSwapFraction = planned.bassSwapFraction,
+        // Deliberately not `planned.filterSweep`. A phrase switch is the one
+        // case where both decks are genuinely on the same grid, and the move
+        // there is to hand the low end over on a beat, not to hide the outgoing
+        // track behind a filter — filtering a blend this well aligned would
+        // throw away the reason it was worth aligning. The renderer reads a
+        // nonzero sweep as "ride the filter instead", so this says zero.
+        filterSweep = 0.0,
+        // The separation this style *does* need, and the one it cannot get from
+        // alignment. Two tracks on a shared grid are the worst case for
+        // overlapping voices precisely because nothing about the arrangement
+        // pulls them apart — they sit in the same bar, in the same range, for the
+        // whole blend. The renderer uses this to deepen the entry high-pass and
+        // the exit low-pass without turning the blend into a filter ride.
+        vocalOverlap = plannedVocalOverlap(
+            analysis = analysis,
+            nextAnalysis = nextAnalysis,
+            transitionStart = planned.transitionStart,
+            transitionEnd = planned.transitionEnd,
+            incomingCueTime = planned.incomingCueTime,
+            incomingPlaybackRate = planned.stretchRatio,
+        ),
+        outgoingBpm = planned.outgoingBpm,
+        incomingBpm = planned.incomingBpm,
+        transitionStyle = TransitionStyle.DJ_BLEND,
+    )
+}
+
+private data class Overlap(
+    val overlap: Double,
+    val transitionBeats: Int,
+    val incomingPlaybackRate: Double,
+)
+
+/** How long a mix should run when the tracks are related but not phrase-switchable. */
+private fun adaptiveOverlap(analysis: TrackAnalysis, nextAnalysis: TrackAnalysis): Overlap {
