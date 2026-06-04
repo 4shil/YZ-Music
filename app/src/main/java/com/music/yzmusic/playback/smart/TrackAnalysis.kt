@@ -103,3 +103,25 @@ data class TrackAnalysis(
      * from a real result — and it is also the threshold the policy uses, since
      * a tempo outside 40–220 drops a pairing to a plain crossfade anyway.
      */
+    val isUsable: Boolean get() = status == STATUS_READY && bpm > 0
+
+    companion object {
+        const val STATUS_READY = "ready"
+    }
+}
+
+/** One point on an energy curve. [energy] is in whatever scale the analyzer chose. */
+data class EnergySample(val time: Double, val energy: Double)
+
+/**
+ * A candidate point for a transition to enter or leave on. [score] is the
+ * analyzer's own confidence; [type] is what it recognized, and carries its
+ * own weight during ranking.
+ */
+data class MixCandidate(val time: Double, val score: Double, val type: String)
+
+/** A ranked [MixCandidate], carrying the score the policy actually ordered it by. */
+data class RankedMixCandidate(
+    val time: Double,
+    val score: Double,
+    val type: String,
