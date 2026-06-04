@@ -82,3 +82,8 @@ object TrackFeatures {
     data class Features(
         val duration: Double,
         val bpm: Double,
+        val beatInterval: Double,
+        val firstBeat: Double,
+        val beatConfidence: Double,
+        val key: String,
+        val keyConfidence: Double,
