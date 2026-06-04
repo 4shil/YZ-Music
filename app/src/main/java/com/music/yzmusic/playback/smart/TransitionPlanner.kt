@@ -213,3 +213,56 @@ private fun splitKey(key: String): Pair<Int?, String?> {
     return KEY_INDEX[parts.firstOrNull()] to parts.getOrNull(1)
 }
 
+private fun keyDistance(left: String, right: String): Int? {
+    val (leftIndex, leftMode) = splitKey(left)
+    val (rightIndex, rightMode) = splitKey(right)
+    if (leftIndex == null || rightIndex == null) return null
+    val pitchDistance = min((leftIndex - rightIndex + 12) % 12, (rightIndex - leftIndex + 12) % 12)
+    return pitchDistance + if (leftMode != null && rightMode != null && leftMode != rightMode) 1 else 0
+}
+
+private fun harmonicallyCompatible(left: String, right: String): Boolean {
+    val (leftIndex, leftMode) = splitKey(left)
+    val (rightIndex, rightMode) = splitKey(right)
+    if (leftIndex == null || rightIndex == null) return false
+    val distance = min((leftIndex - rightIndex + 12) % 12, (rightIndex - leftIndex + 12) % 12)
+    if (leftMode != null && rightMode != null && leftMode != rightMode) return distance <= 1
+    // A fifth is as close as a second here: it is the move every DJ makes.
+    return distance <= 2 || distance == 5
+}
+
+/** A key the analyzer was not confident about is no key at all. */
+private fun trustedKey(analysis: TrackAnalysis): String =
+    if (analysis.key.isBlank() || analysis.keyConfidence < 0.25) "" else analysis.key
+
+private fun nearestTimedValue(
+    values: List<Double>,
+    target: Double,
+    tolerance: Double = Double.POSITIVE_INFINITY,
+    minimum: Double = 0.0,
+): Double? = values
+    .filter { it.isFinite() && it >= minimum && abs(it - target) <= tolerance }
+    .minByOrNull { abs(it - target) }
+
+private fun timedValueNearOrBefore(
+    values: List<Double>,
+    target: Double,
+    tolerance: Double = Double.POSITIVE_INFINITY,
+    minimum: Double = 0.0,
+): Double? = values
+    .filter { it.isFinite() && it >= minimum && it <= target && target - it <= tolerance }
+    .maxOrNull()
+
+/**
+ * Snaps a transition start onto the outgoing track's grid: a phrase boundary
+ * if one is near, a downbeat otherwise, and the raw target when neither is.
+ */
+private fun alignedTransitionStart(
+    analysis: TrackAnalysis,
+    target: Double,
+    end: Double,
+    preferEarlier: Boolean,
+    minimum: Double,
+): Double {
+    val interval = analysis.beatInterval.orZero().takeIf { it > 0 }
+        ?: if (analysis.bpm.orZero() > 0) 60 / analysis.bpm else 0.0
