@@ -698,3 +698,131 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
      */
     private class Copy(
         val key: String,
+        val rendition: AudioCache.Rendition?,
+        val open: () -> MediaDataSource?,
+    )
+
+    /**
+     * Which copy of [trackId]'s audio to read, or null when there isn't a usable
+     * one yet.
+     *
+     * A local URI short-circuits the entire rendition search: none of what that
+     * search decides between applies to a file the user already has, and asking
+     * the cache about one only ever produced the empty answer that kept Automix
+     * from analysing local tracks at all. The URI stands in as the cache key,
+     * which is what [request]'s `untried` check reads so a file that will not
+     * decode is not re-decoded on every tick for the rest of the session.
+     */
+    private fun copyToRead(trackId: String, uri: Uri, durationSeconds: Double): Copy? {
+        if (LocalAudioSource.isLocal(uri)) {
+            return Copy(key = uri.toString(), rendition = null) { LocalAudioSource.open(resolver, uri) }
+        }
+        val rendition = chooseRendition(trackId, uri, durationSeconds) ?: return null
+        return Copy(key = rendition.key, rendition = rendition) { cache.renditionDataSource(uri, rendition) }
+    }
+
+    /**
+     * What a whole-track pass came back with.
+     *
+     * [decodedShort] is the difference between "this copy is broken, strike it"
+     * and "there was no copy to read", which the caller counts very differently:
+     * three strikes writes a track off for the session. Conflating the two spent
+     * all three in 922ms on a track whose only complete copy had just been
+     * rejected — the following two attempts decoded nothing because there was
+     * nothing left to decode, and were counted as though they had tried.
+     */
+    private class WholeTrack(val analysis: TrackAnalysis?, val decodedShort: Boolean = false)
+
+    /**
+     * What Pass 1 came back with.
+     *
+     * [decodedShort] has to survive the return rather than collapsing into a null [features]: it is
+     * the same distinction [WholeTrack.decodedShort] draws, between a broken copy and no copy, and
+     * only one of the two is a strike.
+     */
+    private class Structural(
+        val features: TrackFeatures.Features?,
+        val decodedShort: Boolean = false,
+    )
+
+    /**
+     * Decodes the whole track and reduces it to DSP features.
+     *
+     * A method rather than a block in [analyze] for a reason that is about memory, not tidiness —
+     * see the call site. Everything it decodes is dead by the time it returns, and returning is
+     * what makes that true of the heap as well as of the program.
+     */
+    private fun structure(
+        trackId: String,
+        uri: Uri,
+        copy: Copy,
+        effectiveDuration: Double,
+    ): Structural {
+        val structRate = TrackFeatures.sampleRate
+        val decoded = copy.open()?.use { AudioDecoder.decodeRegion(it, 0.0, effectiveDuration) }
+            ?: return Structural(null)
+        val (pcm, _) = decoded
+
+        // A decode that stops early is indistinguishable, downstream, from a
+        // track that simply goes quiet: [TrackFeatures] is handed the
+        // container's full duration alongside a short buffer, reads the
+        // difference as trailing silence, and puts the mix-out anchor where the
+        // bytes ran out. Nothing about the result looks wrong — it is a complete
+        // analysis with a plausible contentEnd — and the audible symptom is the
+        // track being faded out minutes early. Refused outright rather than
+        // published, because a missing analysis degrades to a plain crossfade
+        // while a confidently wrong one does not degrade at all.
+        val decodedSeconds = if (pcm.sampleRate > 0) pcm.samples.size / pcm.sampleRate else 0.0
+        if (decodedSeconds < effectiveDuration * MIN_DECODED_FRACTION) {
+            Log.w(
+                TAG,
+                "Analysis of $trackId refused: ${copy.key} decoded " +
+                    "${"%.1f".format(Locale.ROOT, decodedSeconds)}s of a " +
+                    "${"%.1f".format(Locale.ROOT, effectiveDuration)}s " +
+                    // The two causes are different enough to be worth naming. A
+                    // cached rendition stops at the first hole read-ahead left in
+                    // it; a file on the device has no holes, so a short decode
+                    // there means the container itself is truncated or damaged.
+                    if (copy.rendition != null) "container — cached with holes?" else "container — truncated file?",
+            )
+            // Both halves of this are about *renditions*, so both are conditional
+            // on there being one. A local file has no sibling copy to be routed to
+            // instead and is not ours to delete either way; the three-strike count
+            // in [request] is the whole bound there, and it is enough, because a
+            // file on disk that decodes short will decode short again.
+            copy.rendition?.let { rendition ->
+                // Remembered, so the retry reaches for a *different* rendition. This
+                // is the whole reason the lightest one is only a preference: a
+                // rendition the cache index calls complete can still decode short if
+                // it was written badly, and without this the retries would pick the
+                // same broken copy three times over and give up on a track whose
+                // heavier rendition would have analysed perfectly well.
+                badRenditions.add(rendition.key)
+                // And thrown off disk, not merely remembered. A file the cache calls
+                // complete and the decoder gives up on partway is not going to
+                // improve: nothing else will ever write to it, because as far as the
+                // cache is concerned it is finished. Remembering it only helps for as
+                // long as this process lives — a restart clears the set, the same
+                // bytes are read again, and the same seconds are spent reaching the
+                // same conclusion. Deleting it is what lets a clean copy be fetched.
+                // Skipped for whatever the player is reading from; see
+                // [AudioCache.discardBadRendition].
+                if (rendition.isComplete && discardsOf(rendition.key) < MAX_RENDITION_DISCARDS &&
+                    cache.discardBadRendition(uri, rendition.key)
+                ) {
+                    // Every memory of that copy goes with the bytes. Deleting the
+                    // file and then still refusing its key is the worst of both: the
+                    // clean copy [AudioCache.requestAnalysisHead] fetches in its place
+                    // is filtered straight back out by [badRenditions], the track is
+                    // written off for the session anyway, and the download was spent
+                    // on nothing. The strike count goes too — the next attempt reads
+                    // genuinely different bytes, so it starts level.
+                    discarded.merge(rendition.key, 1, Int::plus)
+                    badRenditions.remove(rendition.key)
+                    triedRenditions.remove(rendition.key)
+                    shortDecodes.remove(trackId)
+                }
+            }
+            return Structural(null, decodedShort = true)
+        }
+
