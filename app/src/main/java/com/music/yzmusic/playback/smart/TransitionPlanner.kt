@@ -266,3 +266,112 @@ private fun alignedTransitionStart(
 ): Double {
     val interval = analysis.beatInterval.orZero().takeIf { it > 0 }
         ?: if (analysis.bpm.orZero() > 0) 60 / analysis.bpm else 0.0
+    val phraseTolerance = max(1.0, interval * 4)
+    val downbeatTolerance = max(0.75, interval * 2)
+    val phrase = if (preferEarlier) {
+        timedValueNearOrBefore(analysis.phraseBoundaries, target, phraseTolerance, minimum)
+    } else {
+        nearestTimedValue(analysis.phraseBoundaries, target, phraseTolerance, minimum)
+    }
+    val downbeat = if (preferEarlier) {
+        timedValueNearOrBefore(analysis.downbeats, target, downbeatTolerance, minimum)
+    } else {
+        nearestTimedValue(analysis.downbeats, target, downbeatTolerance, minimum)
+    }
+    return clamp(phrase ?: downbeat ?: target, minimum, end)
+}
+
+/**
+ * Where the incoming track's arrangement arrives: the point the outgoing
+ * track should be gone by.
+ */
+internal fun incomingCuePoint(analysis: TrackAnalysis): Double {
+    rankMixInCandidates(analysis).firstOrNull()?.let { return it.time }
+
+    val interval = analysis.beatInterval.orZero().takeIf { it > 0 }
+        ?: if (analysis.bpm.orZero() > 0) 60 / analysis.bpm else 0.0
+    val downbeats = analysis.downbeats
+
+    val analyzedMixIn = analysis.mixInTime
+    if (analyzedMixIn.isFinite() && analyzedMixIn > 0) {
+        return nearestTimedValue(downbeats, analyzedMixIn, max(0.5, interval * 2)) ?: analyzedMixIn
+    }
+
+    val pickup = max(
+        0.0,
+        analysis.introEndTime.orZero().takeIf { it != 0.0 }
+            ?: (analysis.audibleStartTime ?: analysis.pickupTime).orZero().takeIf { it != 0.0 }
+            ?: analysis.firstBeat.orZero(),
+    )
+    val duration = analysis.duration.orZero().takeIf { it != 0.0 } ?: 300.0
+    if (pickup > 0 && pickup < duration - 10) {
+        downbeats.firstOrNull { it >= pickup }?.let { return it }
+    }
+    val phrases = analysis.phraseBoundaries
+    if (phrases.size > 1 && phrases[1] > 4) return phrases[1]
+    if (downbeats.size >= 8) return downbeats[min(8, downbeats.size - 1)].orZero()
+    return pickup
+}
+
+/** Where the incoming track first makes sound, so the fade is not cued into its lead-in silence. */
+private fun incomingStartPoint(analysis: TrackAnalysis): Double =
+    listOfNotNull(analysis.audibleStartTime, analysis.pickupTime, analysis.firstBeat)
+        .firstOrNull { it.isFinite() && it >= 0 } ?: 0.0
+
+// ---------------------------------------------------------------------------
+// WSOLA-style beat-matched phrase-switch plan (ported from WsolaPlanner.kt)
+// ---------------------------------------------------------------------------
+
+// The fade is bounded in beats because overlap length is musical: bounding it
+// in seconds makes a faster track get a longer mix, which is backwards. Four
+// bars is the ceiling and one bar the floor, the latter for tracks whose
+// intro cannot cover more.
+private const val MIN_FADE_BEATS = 4
+private const val MAX_FADE_BEATS = 16
+
+// A ceiling on the whole overlap regardless of how long the incoming intro is.
+private const val MAX_OVERLAP_SECONDS = 16.0
+
+/**
+ * Moving both decks by the same musical amount preserves the beat grid and
+ * overlap length while putting the incoming arrangement inside the blend
+ * instead of making it the finish line. Applied only to a content-end exit on
+ * the outgoing side; a real structural/energy exit has already supplied the
+ * earlier anchor.
+ */
+internal const val ARRANGEMENT_OVERLAP_BEATS = 8
+
+/**
+ * One continuous equal-power fade across the whole overlap. 0.5/0.5 is the
+ * plain symmetric crossfade, which is exactly the sin/cos pair
+ * [com.music.yzmusic.playback.CrossfadeController] rides — so at these values
+ * the renderer already honours them, and anything else would need a two-segment
+ * gain curve it does not have.
+ */
+const val HANDOFF_FRACTION = 0.5
+const val BED_POSITION = 0.5
+
+/** The prior for where the low end hands over, on a pairing with no useful structural change. */
+private const val DEFAULT_BASS_SWAP_FRACTION = 0.7
+
+/** Analysis may move the swap later than the prior, but never so late the outgoing low end survives almost to silence. */
+private const val MAX_BASS_SWAP_FRACTION = 0.85
+
+/** A normalized low-band step smaller than this is too weak to move the swap away from its prior. */
+private const val MIN_BASS_STRUCTURE_SCORE = 0.25
+
+/** Capped in absolute seconds too, so a long overlap does not scale the hold up with it. */
+private const val BASS_SWAP_MAX_SECONDS = 6.0
+
+/**
+ * How far the outgoing track's low-pass sweep travels by the end of the
+ * overlap, as a fraction of a full ride. 1.0 is the whole way down to
+ * [com.music.yzmusic.playback.CrossfadeController.FILTER_FLOOR_HZ].
+ */
+const val FILTER_SWEEP = 1.0
+
+/** The outgoing track must have this much audio before the overlap and the incoming this much after it. */
+private const val MIN_CLEARANCE_SECONDS = 5.0
+
+private fun averageLowEnergy(curve: List<EnergySample>, from: Double, until: Double): Double? {
+    if (until <= from) return null
