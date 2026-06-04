@@ -885,3 +885,101 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
         val window = BeatTracker.WINDOW_SECONDS
         val tailStart = max(0.0, effectiveDuration - window)
         val head = region(openSource, 0.0, minOf(window, effectiveDuration), features)
+        val tail = if (tailStart > window / 2) region(openSource, tailStart, effectiveDuration, features) else null
+
+        val headGrid = head?.grid
+        val tailGrid = tail?.grid
+
+        // The tail governs where the outgoing track is mixed out, so it takes precedence; the
+        // head is what a track uses when it is the *incoming* side of a different transition.
+        val leading = tailGrid ?: headGrid
+
+        Log.d(
+            TAG,
+            "Analysed $trackId: bpm=${leading?.bpm ?: features.bpm} " +
+                "conf=${leading?.beatConfidence ?: features.beatConfidence} " +
+                "key=${features.key} contentEnd=${features.contentEndTime} " +
+                "mixOutCandidates=${features.mixOutCandidates.size} " +
+                "vocalMask=${if (head?.vocalMask != null || tail?.vocalMask != null) "model" else "dsp"}",
+        )
+
+        return WholeTrack(
+                TrackAnalysis(
+                    status = TrackAnalysis.STATUS_READY,
+                    trackId = trackId,
+                    duration = effectiveDuration,
+                    contentEndTime = features.contentEndTime.takeIf { it > 0 } ?: effectiveDuration,
+                    bpm = leading?.bpm ?: features.bpm,
+                beatInterval = leading?.beatInterval ?: features.beatInterval,
+                beatConfidence = leading?.beatConfidence ?: features.beatConfidence,
+                downbeats = (headGrid?.downbeats.orEmpty() + tailGrid?.downbeats.orEmpty())
+                    .ifEmpty { features.downbeats }
+                    .sorted(),
+                firstBeat = headGrid?.firstBeat ?: features.firstBeat,
+                phraseBoundaries = features.phraseBoundaries,
+                key = features.key,
+                keyConfidence = features.keyConfidence,
+                audibleStartTime = features.audibleStartTime,
+                pickupTime = features.pickupTime,
+                introEndTime = features.introEndTime,
+                outroStartTime = features.outroStartTime,
+                mixInTime = features.mixInTime,
+                mixOutTime = features.mixOutTime,
+                mixInCandidates = features.mixInCandidates,
+                mixOutCandidates = features.mixOutCandidates,
+                energyCurve = features.energyCurve,
+                lowEnergyCurve = features.lowEnergyCurve,
+                // The model's mask where it ran, the DSP heuristic's where it didn't. Falling back to
+                // the heuristic rather than to nothing matters because the policy reads an
+                // absent mask and a neutral one identically — as "no evidence" — so a failed model
+                // pass would otherwise silently discard the estimate Phase 1 already had.
+                vocalActivityMask = mergeMasks(features.energyCurve.size, head?.vocalMask, tail?.vocalMask)
+                    ?: features.vocalActivityMask,
+                vocalProbability = features.vocalProbability,
+            ),
+        )
+    }
+
+    /**
+     * Everything a decoded region contributes, once its audio has been let go
+     * of. [seconds] is what was actually decoded, which for a partially cached
+     * file is not what was asked for.
+     */
+    private class Region(
+        val grid: BeatTracker.Grid?,
+        val vocalMask: DoubleArray?,
+        val seconds: Double,
+        /** Only populated when the caller asked for it; see [region]'s `deriveFeatures`. */
+        val features: TrackFeatures.Features? = null,
+    )
+
+    /**
+     * Decodes one stereo region and runs both models over it, returning only their results.
+     *
+     * The point of the function boundary is the audio: the stereo buffer, its mono mix and the
+     * resampled copies are all local, so they become collectible the moment this returns rather
+     * than staying live until the whole analysis finishes. A 30 s stereo region is several
+     * megabytes before either model's own working set is counted.
+     *
+     * Null, or a null field, means "no model evidence for this window" — a codec that will not
+     * configure, a region too short, a missing model — which [analyze] already falls back on.
+     *
+     * The extractor seeks to a sync sample at or before what was asked for, so the region's real
+     * start (not [startSeconds]) is what its beat times must be stated against.
+     */
+    private fun region(
+        openSource: () -> MediaDataSource?,
+        startSeconds: Double,
+        endSeconds: Double,
+        features: TrackFeatures.Features?,
+        deriveFeatures: Boolean = false,
+    ): Region? {
+        val decoded = openSource()?.use { AudioDecoder.decodeRegionStereo(it, startSeconds, endSeconds) }
+            ?: run {
+                // The two ways this comes back empty mean opposite things and
+                // were reported identically, which cost a round of guessing:
+                // this one is the extractor refusing the container outright, so
+                // the bytes are wrong or not enough of them are there to parse.
+                Log.d(TAG, "Region [$startSeconds, $endSeconds) would not open")
+                return null
+            }
