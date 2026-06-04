@@ -423,3 +423,131 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
             // never reached. A track therefore got exactly one head attempt ever,
             // against whichever copy of it happened to rank highest at the time.
             .filter { rendition ->
+                val previous = headAttempts[rendition.key] ?: return@filter true
+                rendition.cachedPrefix >= previous * HEAD_RETRY_GROWTH
+            }
+            // Most *audio*, not most bytes: renditions differ in bitrate, so the
+            // largest prefix is not necessarily the longest playable head.
+            .maxByOrNull { headSecondsOf(it, durationSeconds) }
+            ?: return null
+
+        val prefix = candidate.cachedPrefix
+        val total = candidate.contentLength
+        val needed = if (durationSeconds.isFinite() && durationSeconds > MIN_HEAD_SECONDS && total > 0) {
+            val bytesPerSecond = total / durationSeconds
+            // Sized to [MIN_HEAD_SECONDS] — the shortest decode [analyzeHead]
+            // will accept — not to the model's full window. Gating on the full
+            // window meant demanding two and a half times the input the analysis
+            // would actually settle for: a lossless rendition needs nine
+            // megabytes on disk for thirty seconds of audio, and a track sitting
+            // at six was refused outright despite holding twice what was needed
+            // to produce a result. Whatever *is* cached still gets decoded — the
+            // read simply runs out — so a larger prefix is used when there is
+            // one, and [HEAD_RETRY_GROWTH] comes back for a better look as the
+            // rest arrives.
+            (MIN_HEAD_SECONDS * bytesPerSecond * HEAD_BYTES_MARGIN).toLong()
+                .coerceAtLeast(MIN_HEAD_BYTES)
+                .coerceAtMost(total)
+        } else {
+            MIN_HEAD_BYTES
+        }
+        if (prefix < needed) {
+            // Once per track, not per tick: a head pass that never fires is
+            // invisible otherwise, which is exactly how the first version of
+            // this shipped doing nothing at all.
+            if (headSkipLogged.add("$trackId@${candidate.key}")) {
+                Log.d(
+                    TAG,
+                    "Head pass for $trackId waiting: ${prefix / 1024}kB cached of " +
+                        "${needed / 1024}kB needed (rendition ${candidate.key})",
+                )
+            }
+            return null
+        }
+
+        headAttempts[candidate.key] = prefix
+        return candidate
+    }
+
+    /**
+     * Roughly how many seconds of audio a rendition's cached prefix holds.
+     *
+     * The ranking this feeds used to be `cachedPrefix / contentLength`, which
+     * answers zero whenever the length is unknown — and the length is unknown
+     * for precisely the entry that matters most, the head
+     * [AudioCache.requestAnalysisHead] just fetched, because a bounded request
+     * gets a bounded answer. A megabyte of freshly downloaded opening therefore
+     * scored below a sibling holding eight unusable kilobytes, and the analyzer
+     * spent its one attempt on the wrong copy.
+     *
+     * [ASSUMED_BYTES_PER_SECOND] stands in where the length still isn't known.
+     * It only has to be the right order of magnitude: this decides which copy to
+     * read first, not whether the result is trusted.
+     */
+    private fun headSecondsOf(rendition: AudioCache.Rendition, durationSeconds: Double): Double =
+        if (rendition.contentLength > 0 && durationSeconds.isFinite() && durationSeconds > 0) {
+            rendition.cachedPrefix * durationSeconds / rendition.contentLength
+        } else {
+            rendition.cachedPrefix / ASSUMED_BYTES_PER_SECOND
+        }
+
+    /**
+     * The opening window only: a beat grid, and nothing that would need the rest
+     * of the file.
+     *
+     * Runs [TrackFeatures] over the head, but copies across only the fields
+     * that describe an *entry*: where the file starts making sound, the pickup,
+     * the end of the intro, and the mix-in candidates. Those are all measured
+     * within the opening seconds, so a head-only pass measures them exactly as
+     * a whole-track pass would.
+     *
+     * Everything that describes the rest of the track is dropped on the floor —
+     * content end, outro, mix-out anchors, the energy curve. Over a 30 s head
+     * that pass does not fail, it answers confidently about a track that is
+     * mostly missing, and the planner has no way to tell the difference. Left at
+     * their defaults they read as "no evidence": [contentEndTime] falls back to
+     * the real duration and the mix-out list ranks as empty.
+     *
+     * The energy curve is dropped for the same reason even though it is
+     * genuinely measured here: the policy indexes the vocal mask against it and
+     * counts audible seconds from it, and a curve that stops at 30 s would have
+     * this track's *outgoing* half scored against a window it does not cover.
+     * A vocal mask therefore cannot come from this pass either, and waits for
+     * the whole-track one.
+     */
+    private fun analyzeHead(
+        trackId: String,
+        uri: Uri,
+        durationSeconds: Double,
+        rendition: AudioCache.Rendition,
+    ): TrackAnalysis? {
+        fun openSource(): MediaDataSource? = cache.renditionDataSource(uri, rendition)
+
+        // Same guard the whole-track pass applies, for the same reason: a
+        // sibling rendition can be a different cut, and a beat grid borrowed
+        // across that would put every anchor seconds out. Skipped for the
+        // player's own copy, which is the track by definition. A header that
+        // will not parse yet is not held against the rendition — more bytes may
+        // well fix it — but a length that genuinely disagrees is.
+        val expected = durationSeconds.takeIf { it.isFinite() && it > 0 }
+        if (expected != null && rendition.key != cache.cacheKeyOf(uri)) {
+            val length = openSource()?.use(AudioDecoder::containerDurationSeconds)
+            if (length == null || length <= 0) {
+                // Logged rather than returned quietly. This is the likeliest way
+                // for a head pass to do nothing — a partial container the
+                // extractor will not read a duration out of — and while it was
+                // silent the whole path looked like it had never run.
+                Log.d(TAG, "Head rendition ${rendition.key} for $trackId has no readable duration yet")
+                return null
+            }
+            if (abs(length - expected) > RENDITION_DURATION_TOLERANCE) {
+                Log.d(
+                    TAG,
+                    "Head rendition ${rendition.key} rejected for $trackId: " +
+                        "${"%.1f".format(Locale.ROOT, length)}s against ${"%.1f".format(Locale.ROOT, expected)}s expected",
+                )
+                badRenditions.add(rendition.key)
+                return null
+            }
+        }
+
