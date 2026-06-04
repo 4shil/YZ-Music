@@ -1081,3 +1081,125 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
 
         val values = vocals.track(left, right, stereo.sampleRate) ?: return null
 
+        val mask = DoubleArray(curve.size) { NEUTRAL_VOCAL }
+        for (index in curve.indices) {
+            val frame = ((curve[index].time - actualStart) * VocalSpectrogram.frameRate).toInt()
+            if (frame in values.indices) mask[index] = values[frame].toDouble()
+        }
+        return mask
+    }
+
+    /**
+     * Overlays the head and tail masks onto one full-length curve, or null when neither ran —
+     * which the caller answers by keeping the DSP heuristic rather than reporting a mask of
+     * nothing but [NEUTRAL_VOCAL].
+     */
+    private fun mergeMasks(size: Int, head: DoubleArray?, tail: DoubleArray?): List<Double>? {
+        if (size <= 0 || (head == null && tail == null)) return null
+        val merged = DoubleArray(size) { NEUTRAL_VOCAL }
+        for (source in listOfNotNull(head, tail)) {
+            for (index in merged.indices) {
+                if (index < source.size && source[index] != NEUTRAL_VOCAL) merged[index] = source[index]
+            }
+        }
+        return merged.toList()
+    }
+
+    /** Recorded ready-but-empty so a track that cannot be decoded is not retried every tick. */
+    private fun empty(trackId: String, durationSeconds: Double) = TrackAnalysis(
+        status = TrackAnalysis.STATUS_READY,
+        trackId = trackId,
+        duration = durationSeconds,
+    )
+
+    fun release() {
+        executor.shutdownNow()
+        headAttempts.clear()
+        headSkipLogged.clear()
+        provisional.clear()
+        restoreAttempted.clear()
+        shortDecodes.clear()
+        badRenditions.clear()
+        triedRenditions.clear()
+        discarded.clear()
+        tracker.release()
+        vocals.release()
+    }
+
+    private companion object {
+        const val TAG = "YZMusicTrackAnalyzer"
+
+        /**
+         * What an unmeasured instant reads as. Below the policy's VOCAL_ACTIVE_THRESHOLD by
+         * design, so absence of measurement is never mistaken for absence of a vocal, or for the
+         * presence of one.
+         */
+        const val NEUTRAL_VOCAL = 0.5
+
+        /**
+         * How much more than the average-bitrate estimate of the opening window
+         * to insist on before decoding it. Covers the container header and the
+         * fact that a track's opening is rarely at its own average bitrate.
+         */
+        const val HEAD_BYTES_MARGIN = 1.35
+
+        /**
+         * Floor under the computed threshold, and the whole requirement when the
+         * duration is unknown. Roughly fifteen seconds at 128 kbps — a little
+         * over [MIN_HEAD_SECONDS], so it guarantees a parsable container and a
+         * usable decode without quietly reinstating the thirty-second demand the
+         * bitrate estimate was just lowered away from.
+         */
+        const val MIN_HEAD_BYTES = 256L * 1024L
+
+        /**
+         * How much of the container's stated duration must actually decode
+         * before the whole-track pass is trusted. Not 1.0: a decoder legitimately
+         * comes up a frame or two short of the container's rounding, and
+         * refusing over that would refuse everything.
+         */
+        const val MIN_DECODED_FRACTION = 0.95
+
+        /** Refusals before a track is written off as truncated rather than still filling in. */
+        const val MAX_SHORT_DECODE_ATTEMPTS = 3
+
+        /**
+         * Clean-slate retries per rendition. One: a discard is worth doing when
+         * the bytes on disk are unrecoverable and nothing would otherwise
+         * overwrite them, and worth doing exactly once, because a second identical
+         * answer means the source is serving that file rather than the cache
+         * having mangled it.
+         */
+        const val MAX_RENDITION_DISCARDS = 1
+
+        /**
+         * How far two renditions' container durations may differ and still count
+         * as the same cut. Generous enough for codec padding and the player's own
+         * rounding, tight enough that a different edit of the same song — where a
+         * borrowed beat grid would be useless — is rejected.
+         */
+        const val RENDITION_DURATION_TOLERANCE = 1.0
+
+        /**
+         * Stand-in bitrate for a rendition whose real length isn't recorded yet,
+         * used only to rank copies against each other in [headSecondsOf]. About
+         * 160kbps, the middle of what the streams in play here run at.
+         */
+        const val ASSUMED_BYTES_PER_SECOND = 20_000.0
+
+        /**
+         * The least decoded audio a head-only tempo estimate is allowed to rest
+         * on. Twelve seconds is around 24 beats at 120 bpm — enough for the
+         * grid's own confidence measure to mean something.
+         */
+        const val MIN_HEAD_SECONDS = 12.0
+
+        /**
+         * How much more of the file has to be cached before the head is worth
+         * decoding again. Doubling bounds the attempts to a handful over a whole
+         * download while still catching up quickly on a high-bitrate rendition
+         * whose first attempt covered only a few seconds.
+         */
+        const val HEAD_RETRY_GROWTH = 2
+    }
+}
