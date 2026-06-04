@@ -91,3 +91,8 @@ object TrackFeatures {
         val pickupTime: Double,
         val introEndTime: Double,
         val outroStartTime: Double,
+        val contentEndTime: Double,
+        val mixInTime: Double,
+        val mixOutTime: Double,
+        val vocalProbability: Double,
+        val downbeats: List<Double>,
