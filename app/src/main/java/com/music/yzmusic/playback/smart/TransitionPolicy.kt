@@ -306,3 +306,74 @@ internal fun nearestValue(values: List<Double>, target: Double, tolerance: Doubl
 fun rankMixInCandidates(analysis: TrackAnalysis): List<RankedMixCandidate> {
     val candidates = analysis.mixInCandidates.filter { it.time.isFinite() && it.time >= 0 }
     if (candidates.isEmpty()) return emptyList()
+    val beatSeconds = analysis.beatInterval.orZero()
+        .takeIf { it > 0 }
+        ?: if (analysis.bpm.orZero() > 0) 60 / analysis.bpm else 0.5
+    val audibleStart = audibleStartOf(analysis)
+    return candidates.map { candidate ->
+        var rankScore = candidate.score.orZero() + (MIX_IN_TYPE_WEIGHT[candidate.type] ?: 0.0)
+        if (nearestValue(analysis.downbeats, candidate.time, beatSeconds / 2) != null) rankScore += 0.1
+        // A cold open: nothing before the point to play underneath the outgoing track, so entering
+        // here means starting the blend on the arrangement.
+        if (candidate.time - audibleStart < beatSeconds * 4) rankScore -= 0.2
+        // Prefer entries whose run-up is instrumental; an intro that already sings will sing over
+        // the outgoing track for the whole pre-roll.
+        val vocal = vocalActivityBetween(
+            analysis,
+            max(audibleStart, candidate.time - beatSeconds * 16),
+            candidate.time,
+        )
+        if (vocal != null) rankScore += (0.5 - vocal) * 0.4
+        RankedMixCandidate(
+            time = candidate.time,
+            score = candidate.score.orZero(),
+            type = candidate.type,
+            rankScore = rankScore,
+        )
+    }.sortedByDescending { it.rankScore }
+}
+
+/** Falls back to the scalar mix-out fields when the analysis carries no candidate list. */
+private fun mixOutCandidatesOf(analysis: TrackAnalysis, contentEnd: Double): List<MixCandidate> {
+    val supplied = analysis.mixOutCandidates.filter { it.time.isFinite() && it.time > 0 }
+    val candidates = supplied.map {
+        MixCandidate(time = it.time, score = it.score.orZero(), type = it.type)
+    }.toMutableList()
+    if (supplied.isEmpty()) {
+        val mixOut = analysis.mixOutTime.orZero()
+        val outroStart = analysis.outroStartTime.orZero()
+        if (mixOut > 0 && mixOut < contentEnd - 1) {
+            candidates += MixCandidate(mixOut, 0.95, "energy_cliff")
+        }
+        if (outroStart > 0 && outroStart < contentEnd - 1) {
+            candidates += MixCandidate(outroStart, 0.9, "outro_start")
+        }
+    }
+    // Vocals describe how the overlap should be shaped, not where the outgoing song stops. The
+    // incoming instrumental runway can begin under an outgoing vocal; promoting vocal boundaries
+    // to exit anchors waits for the easy gap (or skips the vocal tail entirely) instead of asking
+    // the filter ride and gain curves to blend it. Only structural and energy candidates choose
+    // the exit. The transition always has somewhere to end: where the content does.
+    if (candidates.none { abs(it.time - contentEnd) < 0.05 }) {
+        candidates += MixCandidate(contentEnd, 0.75, "content_end")
+    }
+    return candidates
+}
+
+/** Resolves the content end from the analysis and the caller's overrides, in priority order. */
+private fun resolveContentEnd(analysis: TrackAnalysis, contentEnd: Double, duration: Double): Double =
+    contentEnd.orZero().takeIf { it != 0.0 }
+        ?: analysis.contentEndTime.orZero().takeIf { it != 0.0 }
+        ?: duration.orZero().takeIf { it != 0.0 }
+        ?: analysis.duration.orZero()
+
+/**
+ * Ranks a track's analyzed mix-out candidates as places for a transition to
+ * end, best first.
+ *
+ * Candidates that would skip more than [MAX_DISCARDED_MUSIC_SECONDS] of
+ * remaining music are dropped outright: how confidently the analyzer marked a
+ * boundary is no argument for cutting a song short, and both an outro marker
+ * and a mid-track silence gap will happily do exactly that. Silence is free,
+ * so a genuine interior gap still wins the anchor it deserves.
+ */
