@@ -133,3 +133,44 @@ fun vocalActivityBetween(analysis: TrackAnalysis, start: Double, end: Double): D
     val curve = analysis.energyCurve
     if (mask.isEmpty() || mask.size != curve.size || end <= start) return null
     var sum = 0.0
+    var count = 0
+    for (index in mask.indices) {
+        val time = curve[index].time
+        if (!time.isFinite() || time < start || time > end) continue
+        val value = mask[index]
+        if (!value.isFinite()) continue
+        sum += value
+        count += 1
+    }
+    return if (count > 0) sum / count else null
+}
+
+/**
+ * Both windows measurably singing at once. Null means "no evidence", which
+ * never blocks; absence of a mask is not absence of a vocal, but acting on it
+ * would punish every track a fallback analyzer handled.
+ */
+fun isVocalClash(outgoingActivity: Double?, incomingActivity: Double?): Boolean =
+    outgoingActivity != null &&
+        incomingActivity != null &&
+        outgoingActivity >= VOCAL_ACTIVE_THRESHOLD &&
+        incomingActivity >= VOCAL_ACTIVE_THRESHOLD
+
+/**
+ * How strongly two windows sing over each other: 0 for nothing worth acting on,
+ * 1 for two fully vocal passages landing on one another.
+ *
+ * [isVocalClash]'s graded counterpart, and the reason for having both. A boolean
+ * is the right shape for a routing decision — shorten the overlap or don't — but
+ * it is the wrong shape for the renderer, which has to decide *how hard* to pull
+ * the two voices apart. A pair scraping over the threshold and two choruses
+ * colliding are the same `true` and want visibly different treatment.
+ *
+ * Governed by the quieter of the two, because a clash needs both sides: an
+ * instrumental passage under a vocal is not a clash however loud the vocal is,
+ * and taking a mean would let one strong side manufacture one.
+ *
+ * Null on either side is no evidence and answers zero, which leaves whatever the
+ * caller would have done anyway. Absence of a mask is not absence of a vocal —
+ * but acting on it would filter every track a fallback analyzer handled.
+ */
