@@ -979,3 +979,113 @@ fun planTransition(
         if (nextLength > 0) nextLength * 0.4 else AUTO_TRANSITION_MAX_SECONDS,
     )
     val handoffBeats = if (sameBeatBlend) 8 else 4
+    val beatSeconds = if (handoffBpm > 0) 60 / handoffBpm else 0.5
+    val handoffSeconds = if (handoffBpm > 0) {
+        clamp((handoffBeats * 60) / handoffBpm, 2.0, if (sameBeatBlend) 6.0 else 5.0)
+    } else {
+        4.0
+    }
+    val analyzedPickup = nextAnalysis.audibleStartTime ?: nextAnalysis.pickupTime
+    val pickupSeconds = if (analyzedPickup != null && analyzedPickup.isFinite() && analyzedPickup >= 0) {
+        analyzedPickup
+    } else {
+        0.0
+    }
+    val incomingDropTime = incomingCuePoint(nextAnalysis)
+    val alignedIncomingBpm = alignTempoOctave(currentBpm, nextBpm)
+    val requestedIncomingHandoff =
+        if (sameBeatBlend && alignedIncomingBpm > 0) {
+            incomingDropTime + ARRANGEMENT_OVERLAP_BEATS * 60 / alignedIncomingBpm
+        } else {
+            incomingDropTime
+        }
+    val maxIncomingHandoff = nextLength - MIN_INCOMING_CLEARANCE_SECONDS
+    val incomingHandoffTime =
+        if (maxIncomingHandoff >= incomingDropTime) {
+            min(requestedIncomingHandoff, maxIncomingHandoff)
+        } else {
+            incomingDropTime
+        }
+    val rawIncomingCueTime = incomingStartPoint(nextAnalysis)
+    val analyzedIncomingHandoff = nextAnalysis.mixInTime
+    val hasIncomingPreroll = analyzedIncomingHandoff.isFinite() &&
+        analyzedIncomingHandoff > rawIncomingCueTime + 0.5
+    val incomingCueTime = if (hasIncomingPreroll) rawIncomingCueTime else incomingHandoffTime
+    val introPreroll = max(
+        0.0,
+        (if (hasIncomingPreroll) incomingHandoffTime - incomingCueTime else 0.0) /
+            max(0.8, incomingPlaybackRate),
+    )
+
+    val finalIncomingCueTime: Double
+    val transitionStart: Double
+
+    if (sameBeatBlend && beatSeconds > 0) {
+        val introDropTime = incomingHandoffTime / max(0.8, incomingPlaybackRate)
+        val totalOverlap = clamp(introDropTime, min(12.0, maximumOverlap), maximumOverlap)
+        val targetStart = max(0.0, mixEnd - totalOverlap)
+        val earliestTransitionStart = max(0.0, mixEnd - maximumOverlap)
+        transitionStart = alignedTransitionStart(
+            analysis,
+            targetStart,
+            mixEnd - 0.05,
+            preferEarlier = true,
+            minimum = earliestTransitionStart,
+        )
+        finalIncomingCueTime =
+            max(0.0, incomingHandoffTime - (mixEnd - transitionStart) * incomingPlaybackRate)
+    } else {
+        val desiredOverlap = max(overlap, introPreroll + handoffSeconds * 0.42)
+        val actualOverlap = clamp(desiredOverlap, min(handoffSeconds, maximumOverlap), maximumOverlap)
+        val targetStart = max(0.0, mixEnd - actualOverlap)
+        val earliestTransitionStart = max(0.0, mixEnd - maximumOverlap)
+        transitionStart = alignedTransitionStart(
+            analysis,
+            targetStart,
+            mixEnd - 0.05,
+            preferEarlier = desiredOverlap > overlap + 0.5,
+            minimum = earliestTransitionStart,
+        )
+        finalIncomingCueTime = if (hasIncomingPreroll) {
+            max(0.0, incomingHandoffTime - (mixEnd - transitionStart) * incomingPlaybackRate)
+        } else {
+            incomingCueTime
+        }
+    }
+
+    val alignedOverlap = mixEnd - transitionStart
+    val hasBassContent = analysis.lowEnergyCurve.isNotEmpty() || nextAnalysis.lowEnergyCurve.isNotEmpty()
+    val started = playbackTime >= transitionStart
+    return TransitionPlan(
+        shouldStart = started,
+        markerVisible = true,
+        transitionStart = transitionStart,
+        transitionEnd = mixEnd,
+        fadeSeconds = alignedOverlap,
+        handoffStartSeconds = 0.0,
+        handoffDuration = alignedOverlap,
+        incomingCueTime = finalIncomingCueTime,
+        incomingHandoffTime = incomingHandoffTime,
+        incomingPlaybackRate = incomingPlaybackRate,
+        pickupSeconds = pickupSeconds,
+        transitionBeats = transitionBeats,
+        bassSwap = sameBeatBlend || hasBassContent,
+        transitionStyle = if (sameBeatBlend) TransitionStyle.DJ_BLEND else TransitionStyle.DJ_FILTER,
+        // The two styles are alternatives, not a scale: a matched pair hands the
+        // low end over on a beat and otherwise stays open, while an unmatched
+        // pair has no shared grid to hand anything over on and instead pulls the
+        // outgoing track behind a closing low-pass. Left at zero on the blend
+        // branch so the renderer doesn't do both at once.
+        filterSweep = if (sameBeatBlend) 0.0 else FILTER_SWEEP,
+        vocalOverlap = plannedVocalOverlap(
+            analysis = analysis,
+            nextAnalysis = nextAnalysis,
+            transitionStart = transitionStart,
+            transitionEnd = mixEnd,
+            incomingCueTime = finalIncomingCueTime,
+            incomingPlaybackRate = incomingPlaybackRate,
+        ),
+        policyReasons = policy.reasons,
+        reason = if (started) "smart-duration" else "before-smart-duration",
+    )
+}
