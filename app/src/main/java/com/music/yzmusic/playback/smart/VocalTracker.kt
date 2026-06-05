@@ -170,3 +170,62 @@ class VocalTracker(private val context: Context) {
                     // per call — when the only thing read from it is a band
                     // average.
                     val target = (outputs.get(0) as OnnxTensor).floatBuffer
+                    val curve = reduceToBandCurve(backing.asFloatBuffer(), target, bins, spectrogram.frames)
+                    Log.d(
+                        TAG,
+                        "vocal mask ${spectrogram.frames} frames in " +
+                            "${System.currentTimeMillis() - started}ms",
+                    )
+                    curve
+                }
+            }
+        }.onFailure { Log.w(TAG, "Vocal inference failed", it) }.getOrNull()
+    }
+
+    /**
+     * Writes the spectrogram into the model's fixed width, zero-padding each bin's tail.
+     *
+     * The stride changes as well as the length: the source is stored at `frames` per bin and the
+     * model wants [FIXED_FRAMES], so this is a re-stride rather than an append.
+     *
+     * Sequential relative puts only. Seeking to each bin's start would be the obvious way to write
+     * it, but that needs `FloatBuffer.position(int)`, which Android declares on `Buffer` alone;
+     * writing the pad out explicitly keeps every call on a member that has existed since API 1.
+     */
+    private fun fillFixedFrames(into: FloatBuffer, values: FloatArray, bins: Int, frames: Int) {
+        if (frames == FIXED_FRAMES) {
+            into.put(values)
+            return
+        }
+        val pad = FloatArray(FIXED_FRAMES - frames)
+        for (channel in 0 until VocalSpectrogram.CHANNELS) {
+            for (bin in 0 until bins) {
+                into.put(values, (channel * bins + bin) * frames, frames)
+                into.put(pad)
+            }
+        }
+    }
+
+    /**
+     * Averages `mask = target / (mix + eps)` across a frequency band, then across channels.
+     *
+     * Band-averaging rather than a full per-bin mask: the only consumer is a single number per
+     * instant (how vocal this moment is), so per-bin resolution would be work with no reader.
+     * Only the frames carrying real audio are reduced; the padded tail's mask is meaningless and
+     * folding it in would drag every short window toward silence.
+     */
+    private fun reduceToBandCurve(
+        mix: FloatBuffer,
+        target: FloatBuffer,
+        bins: Int,
+        usableFrames: Int,
+    ): FloatArray {
+        val lowBin = floor(LOW_HZ * VocalSpectrogram.fftSize / VocalSpectrogram.sampleRate)
+            .toInt().coerceAtLeast(0)
+        val highBin = ceil(HIGH_HZ * VocalSpectrogram.fftSize / VocalSpectrogram.sampleRate)
+            .toInt().coerceAtMost(bins - 1)
+        if (highBin <= lowBin || usableFrames <= 0) return FloatArray(0)
+
+        val curve = FloatArray(usableFrames)
+        for (frame in 0 until usableFrames) {
+            var sum = 0.0
