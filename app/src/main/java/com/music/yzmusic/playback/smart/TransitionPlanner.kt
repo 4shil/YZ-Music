@@ -671,3 +671,188 @@ fun planWsolaTransition(
         incomingDropTime + ARRANGEMENT_OVERLAP_BEATS * incomingBeatSeconds
     val maxIncomingHandoff = incomingLength - MIN_CLEARANCE_SECONDS
     if (maxIncomingHandoff < incomingDropTime) return WsolaPlanResult.Refused("incoming-too-short")
+    val incomingHandoffTime = min(requestedIncomingHandoff, maxIncomingHandoff)
+    val incomingCueTime = incomingHandoffTime - overlapSeconds
+    if (incomingCueTime < audibleStart - 0.05) return WsolaPlanResult.Refused("incoming-no-runway")
+
+    val startTarget = overlapEndTarget - outgoingOverlapSeconds
+    val transitionStart = nearestAtOrBefore(analysis.downbeats, startTarget) ?: startTarget
+    if (transitionStart < MIN_CLEARANCE_SECONDS) return WsolaPlanResult.Refused("outgoing-too-short")
+    val transitionEnd = transitionStart + outgoingOverlapSeconds
+    if (transitionEnd > outgoingLength + 0.05) return WsolaPlanResult.Refused("outgoing-overlap-overruns")
+
+    val incomingResumeTime = incomingCueTime + overlapSeconds
+    if (incomingResumeTime + MIN_CLEARANCE_SECONDS > incomingLength) {
+        return WsolaPlanResult.Refused("incoming-too-short")
+    }
+
+    return WsolaPlanResult.Planned(
+        tier = policy.tier,
+        beatConfidence = policy.beatConfidence,
+        mixOutType = mixOutAnchor.type,
+        vocalClash = fadeVocalClash,
+        transitionStart = transitionStart,
+        transitionEnd = transitionEnd,
+        overlapSeconds = overlapSeconds,
+        beats = overlapBeats,
+        fadeBeats = overlapBeats,
+        handoffFraction = HANDOFF_FRACTION,
+        bedPosition = BED_POSITION,
+        bassSwapFraction = bassSwapFractionFor(
+            analysis = analysis,
+            nextAnalysis = nextAnalysis,
+            transitionStart = transitionStart,
+            incomingCueTime = incomingCueTime,
+            outgoingBeatSeconds = outgoingBeatSeconds,
+            incomingBeatSeconds = incomingBeatSeconds,
+            overlapSeconds = overlapSeconds,
+            overlapBeats = overlapBeats,
+        ),
+        filterSweep = FILTER_SWEEP,
+        outgoingBpm = outgoingBpm,
+        incomingBpm = incomingBpm,
+        stretchRatio = stretchRatio,
+        incomingCueTime = incomingCueTime,
+        incomingDropTime = incomingDropTime,
+        incomingHandoffTime = incomingHandoffTime,
+        incomingResumeTime = incomingResumeTime,
+    )
+}
+
+/**
+ * The most ambitious move available: run the incoming track's instrumental
+ * intro underneath the outgoing one and close on its drop. A refusal is a
+ * routing decision, not an error: the caller falls back to the adaptive
+ * overlap below, which degrades further on its own.
+ */
+private fun phraseSwitch(
+    analysis: TrackAnalysis,
+    nextAnalysis: TrackAnalysis,
+    length: Double,
+    nextLength: Double,
+): TransitionPlan? {
+    if (!harmonicallyCompatible(trustedKey(analysis), trustedKey(nextAnalysis))) return null
+
+    val planned = planWsolaTransition(
+        analysis = analysis,
+        nextAnalysis = nextAnalysis,
+        duration = length,
+        nextDuration = nextLength,
+    ) as? WsolaPlanResult.Planned ?: return null
+
+    val overlap = planned.transitionEnd - planned.transitionStart
+    return TransitionPlan(
+        markerVisible = true,
+        transitionStart = planned.transitionStart,
+        transitionEnd = planned.transitionEnd,
+        fadeSeconds = overlap,
+        handoffStartSeconds = 0.0,
+        handoffDuration = overlap,
+        incomingCueTime = planned.incomingCueTime,
+        incomingHandoffTime = planned.incomingHandoffTime,
+        incomingPlaybackRate = (planned.stretchRatio * 10000).roundToInt() / 10000.0,
+        pickupSeconds = incomingAudibleStart(nextAnalysis),
+        transitionBeats = planned.beats,
+        bassSwap = true,
+        handoffFraction = planned.handoffFraction,
+        bedPosition = planned.bedPosition,
+        bassSwapFraction = planned.bassSwapFraction,
+        // Deliberately not `planned.filterSweep`. A phrase switch is the one
+        // case where both decks are genuinely on the same grid, and the move
+        // there is to hand the low end over on a beat, not to hide the outgoing
+        // track behind a filter — filtering a blend this well aligned would
+        // throw away the reason it was worth aligning. The renderer reads a
+        // nonzero sweep as "ride the filter instead", so this says zero.
+        filterSweep = 0.0,
+        // The separation this style *does* need, and the one it cannot get from
+        // alignment. Two tracks on a shared grid are the worst case for
+        // overlapping voices precisely because nothing about the arrangement
+        // pulls them apart — they sit in the same bar, in the same range, for the
+        // whole blend. The renderer uses this to deepen the entry high-pass and
+        // the exit low-pass without turning the blend into a filter ride.
+        vocalOverlap = plannedVocalOverlap(
+            analysis = analysis,
+            nextAnalysis = nextAnalysis,
+            transitionStart = planned.transitionStart,
+            transitionEnd = planned.transitionEnd,
+            incomingCueTime = planned.incomingCueTime,
+            incomingPlaybackRate = planned.stretchRatio,
+        ),
+        outgoingBpm = planned.outgoingBpm,
+        incomingBpm = planned.incomingBpm,
+        transitionStyle = TransitionStyle.DJ_BLEND,
+    )
+}
+
+private data class Overlap(
+    val overlap: Double,
+    val transitionBeats: Int,
+    val incomingPlaybackRate: Double,
+)
+
+/** How long a mix should run when the tracks are related but not phrase-switchable. */
+private fun adaptiveOverlap(analysis: TrackAnalysis, nextAnalysis: TrackAnalysis): Overlap {
+    val currentBpm = analysis.bpm.orZero()
+    val nextBpm = nextAnalysis.bpm.orZero()
+    if (currentBpm <= 0 || nextBpm <= 0) {
+        return Overlap(AUTO_FALLBACK_SECONDS, 0, 1.0)
+    }
+
+    val ratio = normalizedTempoRatio(currentBpm, nextBpm)
+    val distance = keyDistance(trustedKey(analysis), trustedKey(nextAnalysis))
+    val vocalConflict = analysis.vocalProbability >= 0.62 && nextAnalysis.vocalProbability >= 0.62
+    val transitionBeats =
+        if (!vocalConflict && (abs(1 - ratio) > 0.07 || (distance != null && distance > 4))) 16 else 8
+    val beatSeconds = 60 / currentBpm
+    val minimumOverlap = if (currentBpm >= 140) AUTO_FAST_TRACK_MIN_SECONDS else AUTO_MIN_SECONDS
+
+    return Overlap(
+        overlap = clamp(transitionBeats * beatSeconds, minimumOverlap, AUTO_TRANSITION_MAX_SECONDS),
+        transitionBeats = transitionBeats,
+        incomingPlaybackRate = if (ratio in 0.9..1.1) {
+            (clamp(1 / ratio, 0.9, 1.1) * 10000).roundToInt() / 10000.0
+        } else {
+            1.0
+        },
+    )
+}
+
+private fun standardTransition(
+    length: Double,
+    playbackTime: Double,
+    fadeSeconds: Double,
+    minFadeSeconds: Double,
+    reason: String = "standard",
+): TransitionPlan {
+    val fade = clamp(fadeSeconds, minFadeSeconds, 12.0)
+    val transitionStart = max(0.0, length - fade)
+    val started = playbackTime >= transitionStart
+    return TransitionPlan(
+        shouldStart = started,
+        markerVisible = true,
+        transitionStart = transitionStart,
+        transitionEnd = length,
+        fadeSeconds = fade,
+        transitionStyle = TransitionStyle.EQUAL_POWER,
+        reason = if (started) reason else "before-$reason-window",
+    )
+}
+
+/** A stale analysis paired with the wrong track is worse than no analysis at all. */
+private fun analysisReadyForTrack(analysis: TrackAnalysis, track: TransitionTrackInfo?): Boolean {
+    if (analysis.status.isBlank()) return true
+    if (analysis.status != TrackAnalysis.STATUS_READY) return false
+    return analysis.trackId.isBlank() || track?.id.isNullOrBlank() || analysis.trackId == track.id
+}
+
+/**
+ * Plans the transition out of [currentTrack] and into [nextTrack].
+ *
+ * Called on every playback tick; the returned plan describes the transition
+ * whether or not it has started yet.
+ *
+ * @param albumSequential true only when this is an album genuinely being
+ *   played through in order, which is the sole case that earns a gapless
+ *   handoff instead of a mix.
+ * @param currentTime the outgoing track's playhead, in seconds.
+ */
