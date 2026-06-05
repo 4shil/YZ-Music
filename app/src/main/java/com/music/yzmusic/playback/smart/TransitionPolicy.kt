@@ -284,3 +284,25 @@ fun audibleSecondsBetween(analysis: TrackAnalysis, start: Double, end: Double): 
  */
 internal fun audibleStartOf(analysis: TrackAnalysis): Double {
     val firstBeat = analysis.firstBeat.takeIf { it.isFinite() && it > 0 }
+    val candidates = listOfNotNull(analysis.audibleStartTime, analysis.pickupTime, firstBeat)
+        .filter { it.isFinite() && it >= 0 }
+    return candidates.minOrNull() ?: 0.0
+}
+
+/** The value in [values] closest to [target] within [tolerance], or null when none qualifies. */
+internal fun nearestValue(values: List<Double>, target: Double, tolerance: Double): Double? =
+    values.filter { it.isFinite() && abs(it - target) <= tolerance }
+        .minByOrNull { abs(it - target) }
+
+/**
+ * Ranks a track's analyzed mix-in candidates as entry points for a
+ * transition, best first.
+ *
+ * Selection is a scoring problem, not a type lookup: the analyzer's own
+ * score, the candidate type, downbeat alignment, whether there is any intro
+ * before the point to bed under the outgoing track, and how vocal that intro
+ * is all move a candidate up or down.
+ */
+fun rankMixInCandidates(analysis: TrackAnalysis): List<RankedMixCandidate> {
+    val candidates = analysis.mixInCandidates.filter { it.time.isFinite() && it.time >= 0 }
+    if (candidates.isEmpty()) return emptyList()
