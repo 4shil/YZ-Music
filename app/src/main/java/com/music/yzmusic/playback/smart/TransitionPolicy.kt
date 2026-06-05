@@ -174,3 +174,41 @@ fun isVocalClash(outgoingActivity: Double?, incomingActivity: Double?): Boolean 
  * caller would have done anyway. Absence of a mask is not absence of a vocal —
  * but acting on it would filter every track a fallback analyzer handled.
  */
+fun vocalOverlapAmount(outgoingActivity: Double?, incomingActivity: Double?): Double {
+    if (outgoingActivity == null || incomingActivity == null) return 0.0
+    val both = min(outgoingActivity, incomingActivity)
+    if (both <= VOCAL_ACTIVE_THRESHOLD) return 0.0
+    return ((both - VOCAL_ACTIVE_THRESHOLD) / (1.0 - VOCAL_ACTIVE_THRESHOLD)).coerceIn(0.0, 1.0)
+}
+
+/**
+ * The fraction of a planned overlap where **both** tracks are singing at the
+ * same instant, or null when either side has no mask.
+ *
+ * Why this exists alongside [vocalActivityBetween]: that one answers with a
+ * *mean* over the window, and a mean is the wrong statistic for a clash. Twelve
+ * seconds holding three seconds of vocal and nine of instrumental averages well
+ * under [VOCAL_ACTIVE_THRESHOLD] and reads as clear — while the listener plainly
+ * hears two voices for those three seconds. Every clash short of about half the
+ * overlap was being averaged into silence, which is why a transition could be
+ * planned as clean and still land two vocals on top of each other.
+ *
+ * Instant by instant instead. The outgoing track's own energy-curve samples are
+ * the clock; each is mapped onto the incoming timeline through [rate], because a
+ * stretched incoming track covers proportionally more of its own timeline in the
+ * same wall-clock second. Unmeasured regions sit at the analyzer's neutral 0.5,
+ * below the threshold, so they count as "not singing" rather than as evidence.
+ *
+ * Both curves are time-ascending, so the incoming index only ever moves forward:
+ * this is one pass over each, not a search per sample.
+ */
+fun simultaneousVocalFraction(
+    outgoing: TrackAnalysis,
+    incoming: TrackAnalysis,
+    outStart: Double,
+    outEnd: Double,
+    inStart: Double,
+    rate: Double,
+): Double? {
+    val outMask = outgoing.vocalActivityMask
+    val outCurve = outgoing.energyCurve
