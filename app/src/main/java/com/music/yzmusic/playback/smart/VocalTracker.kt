@@ -101,3 +101,45 @@ class VocalTracker(private val context: Context) {
         synchronized(lock) {
             session?.let { return it }
             return runCatching {
+                val file = File(context.filesDir, MODEL_ASSET)
+                if (!file.exists() || file.length() == 0L) {
+                    context.assets.open(MODEL_ASSET).use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+                val options = OrtSession.SessionOptions().apply {
+                    setIntraOpNumThreads(INFERENCE_THREADS)
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                    // Same reasoning as BeatTracker: the arena retains every block it allocates for
+                    // the life of the session, which a backgrounded music player cannot justify.
+                    setCPUArenaAllocator(false)
+                    setMemoryPatternOptimization(false)
+                }
+                OrtEnvironment.getEnvironment().createSession(file.absolutePath, options)
+                    .also { session = it }
+            }.onFailure { Log.w(TAG, "Vocal model unavailable; no mask will be produced", it) }
+                .getOrNull()
+        }
+    }
+
+    /**
+     * Returns one vocal-presence value per STFT frame in [0, 1], or null when unavailable.
+     *
+     * The model's input width is fixed at [FIXED_FRAMES] (~22.8 s), which was chosen upstream to
+     * cover a transition overlap plus padding. Shorter input is zero-padded; longer is refused
+     * rather than chunked, because a transition never needs more than one window.
+     */
+    fun track(left: FloatArray, right: FloatArray, rate: Double): FloatArray? {
+        if (!VocalSpectrogram.available) return null
+        val resampledLeft = MelSpectrogram.resample(left, rate, VocalSpectrogram.sampleRate) ?: return null
+        val resampledRight = MelSpectrogram.resample(right, rate, VocalSpectrogram.sampleRate) ?: return null
+
+        val started = System.currentTimeMillis()
+        val spectrogram = VocalSpectrogram.compute(resampledLeft, resampledRight) ?: return null
+        if (spectrogram.frames > FIXED_FRAMES) {
+            Log.d(TAG, "Window of ${spectrogram.frames} frames exceeds the model's $FIXED_FRAMES")
+            return null
+        }
+        val active = session() ?: return null
+
+        return runCatching {
