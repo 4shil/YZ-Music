@@ -377,3 +377,38 @@ private fun resolveContentEnd(analysis: TrackAnalysis, contentEnd: Double, durat
  * and a mid-track silence gap will happily do exactly that. Silence is free,
  * so a genuine interior gap still wins the anchor it deserves.
  */
+fun rankMixOutCandidates(
+    analysis: TrackAnalysis,
+    contentEnd: Double = 0.0,
+    duration: Double = 0.0,
+): List<RankedMixCandidate> {
+    val end = resolveContentEnd(analysis, contentEnd, duration)
+    if (end <= 0) return emptyList()
+    return mixOutCandidatesOf(analysis, end)
+        .map { candidate ->
+            val measured = audibleSecondsBetween(analysis, candidate.time, end)
+            // With no energy curve there is no way to tell skipped music from skipped silence, so
+            // the raw gap is charged in full and the budget errs toward playing the track.
+            RankedMixCandidate(
+                time = candidate.time,
+                score = candidate.score,
+                type = candidate.type,
+                rankScore = candidate.score + (MIX_OUT_TYPE_SCORE[candidate.type] ?: 0.0),
+                discardedMusicSeconds = measured ?: max(0.0, end - candidate.time),
+                measured = measured != null,
+            )
+        }
+        .filter { it.discardedMusicSeconds <= MAX_DISCARDED_MUSIC_SECONDS }
+        .sortedWith(compareByDescending<RankedMixCandidate> { it.rankScore }.thenByDescending { it.time })
+}
+
+/**
+ * Where the outgoing track's transition ends: the best-ranked mix-out
+ * candidate that stays inside the discarded-music budget, or the end of
+ * content when none does.
+ */
+fun resolveMixOutAnchor(
+    analysis: TrackAnalysis,
+    contentEnd: Double = 0.0,
+    duration: Double = 0.0,
+): MixOutAnchor {
