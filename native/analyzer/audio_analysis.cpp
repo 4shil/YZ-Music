@@ -115,3 +115,99 @@ void Fft(std::vector<std::complex<double>>& values) {
     swapped ^= bit;
     if (index < swapped) std::swap(values[index], values[swapped]);
   }
+  for (size_t length = 2; length <= size; length <<= 1) {
+    const auto root = std::polar(1.0, -2.0 * kPi / length);
+    for (size_t start = 0; start < size; start += length) {
+      std::complex<double> weight(1, 0);
+      for (size_t offset = 0; offset < length / 2; ++offset) {
+        const auto even = values[start + offset];
+        const auto odd = values[start + offset + length / 2] * weight;
+        values[start + offset] = even + odd;
+        values[start + offset + length / 2] = even - odd;
+        weight *= root;
+      }
+    }
+  }
+}
+
+// Builds nominal 250 ms RMS windows. Percentile-derived reference/noise levels
+// adapt absolute gates to the track; sustained activity locates the pickup,
+// while a separate quiet-tail pass distinguishes content end from file duration.
+EnvelopeResult AnalyzeEnvelope(
+  const std::vector<float>& samples,
+  double sample_rate,
+  double duration
+) {
+  EnvelopeResult result;
+  const size_t window_size = std::max<size_t>(1, sample_rate * result.window_seconds);
+  for (size_t start = 0; start < samples.size(); start += window_size) {
+    const size_t end = std::min(samples.size(), start + window_size);
+    double sum = 0;
+    for (size_t index = start; index < end; ++index) sum += samples[index] * samples[index];
+    result.levels.push_back(std::sqrt(sum / std::max<size_t>(1, end - start)));
+  }
+  if (result.levels.empty()) return result;
+
+  result.noise_floor = Percentile(result.levels, 0.05);
+  result.reference = Percentile(result.levels, 0.85);
+  result.threshold = std::max({
+    0.0025,
+    std::min(result.noise_floor * 2.6, result.reference * 0.28),
+    result.reference * 0.1
+  });
+  const size_t sustain = std::max<size_t>(4, std::round(1.5 / result.window_seconds));
+  for (size_t index = 0; index + sustain <= result.levels.size(); ++index) {
+    size_t active = 0;
+    double peak = 0;
+    for (size_t cursor = index; cursor < index + sustain; ++cursor) {
+      if (result.levels[cursor] >= result.threshold) ++active;
+      peak = std::max(peak, result.levels[cursor]);
+    }
+    if (active < sustain * 2 / 3 || peak < result.threshold * 1.45) continue;
+    result.audible_start = std::max(0.0, index * result.window_seconds - 0.1);
+    const double local = Average(result.levels, index, index + sustain);
+    result.pickup_confidence = Clamp(
+      (local - result.noise_floor) / std::max(1e-6, result.reference - result.noise_floor),
+      0,
+      1
+    );
+    break;
+  }
+
+  result.content_end = duration;
+  const double silence_threshold = std::max(
+    0.0015,
+    std::min(result.threshold * 0.25, result.reference * 0.04)
+  );
+  size_t quiet_start = result.levels.size();
+  while (quiet_start > 0 && result.levels[quiet_start - 1] < silence_threshold) {
+    --quiet_start;
+  }
+  const double trailing_silence = duration - quiet_start * result.window_seconds;
+  if (trailing_silence >= 0.35) {
+    result.content_end = std::max(0.0, quiet_start * result.window_seconds);
+  } else {
+    for (size_t end = result.levels.size(); end > sustain; --end) {
+      const size_t start = end - sustain;
+      size_t active = 0;
+      for (size_t cursor = start; cursor < end; ++cursor) {
+        if (result.levels[cursor] >= result.threshold) ++active;
+      }
+      if (active >= sustain / 2 && Average(result.levels, start, end) >= result.threshold * 0.85) {
+        result.content_end = std::min(duration, end * result.window_seconds);
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+// Finds a late internal silence bordered by resumed audio, then backtracks to
+// its energy cliff. Terminal silence remains the envelope's content-end cue.
+double FindMixOutTime(
+  const std::vector<float>& samples,
+  double sample_rate,
+  double duration,
+  const EnvelopeResult& envelope
+) {
+  constexpr double window_seconds = 0.05;
