@@ -221,3 +221,44 @@ fun simultaneousVocalFraction(
 
     var inIndex = 0
     var both = 0
+    var total = 0
+    for (index in outMask.indices) {
+        val time = outCurve[index].time
+        if (!time.isFinite() || time < outStart) continue
+        if (time > outEnd) break
+        total += 1
+        if (outMask[index] < VOCAL_ACTIVE_THRESHOLD) continue
+        val target = inStart + (time - outStart) * step
+        while (inIndex + 1 < inCurve.size && inCurve[inIndex + 1].time <= target) inIndex += 1
+        if (inMask[inIndex] >= VOCAL_ACTIVE_THRESHOLD) both += 1
+    }
+    return if (total > 0) both.toDouble() / total else null
+}
+
+/**
+ * How much simultaneous vocal a transition may carry before it counts as a
+ * clash worth reshaping the overlap for.
+ *
+ * Not zero. A mask is a model's estimate sampled on a coarse grid, and both
+ * edges of a vocal phrase are soft, so demanding literal zero would refuse
+ * overlaps that sound clean and spend the fade budget chasing a rounding error.
+ * A twentieth of the window is roughly one energy-curve sample either side of a
+ * boundary.
+ */
+const val VOCAL_CLASH_TOLERANCE = 0.05
+
+/**
+ * Seconds of audible music in [start]..[end] on a track's own timeline,
+ * judged against the track's own loud-end reference so the measure is
+ * independent of how the analyzer scales energy. Returns null when there is
+ * no usable curve.
+ */
+fun audibleSecondsBetween(analysis: TrackAnalysis, start: Double, end: Double): Double? {
+    val curve = analysis.energyCurve
+    if (curve.size < 2 || end <= start) return null
+    val energies = curve.map { it.energy }.filter { it.isFinite() && it >= 0 }.sorted()
+    if (energies.isEmpty()) return null
+    val reference = energies[floor((energies.size - 1) * 0.85).toInt()].orZero()
+    if (reference <= 0) return 0.0
+    val threshold = reference * AUDIBLE_ENERGY_FRACTION
+    val first = curve.first().time
