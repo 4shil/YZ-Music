@@ -433,3 +433,34 @@ fun assessTransitionTier(
 ): TransitionPolicyVerdict {
     val outgoingBpm = analysis.bpm.orZero()
     val incomingBpm = nextAnalysis.bpm.orZero()
+    val outgoingConfidence = analysis.beatConfidence.orZero()
+    val incomingConfidence = nextAnalysis.beatConfidence.orZero()
+    val floorConfidence = min(outgoingConfidence, incomingConfidence)
+    val reasons = mutableListOf<String>()
+
+    if (outgoingBpm < MIN_BPM || outgoingBpm > MAX_BPM) reasons += "outgoing-tempo"
+    if (incomingBpm < MIN_BPM || incomingBpm > MAX_BPM) reasons += "incoming-tempo"
+    if (reasons.isNotEmpty()) {
+        return TransitionPolicyVerdict(TransitionTier.PLAIN_CROSSFADE, reasons, floorConfidence)
+    }
+
+    if (outgoingConfidence < MIN_DJ_CONFIDENCE && incomingConfidence < MIN_DJ_CONFIDENCE) {
+        return TransitionPolicyVerdict(
+            TransitionTier.PLAIN_CROSSFADE,
+            listOf("beat-confidence"),
+            floorConfidence,
+        )
+    }
+
+    val stretchRatio = outgoingBpm / alignTempoOctave(outgoingBpm, incomingBpm)
+    if (abs(stretchRatio - 1) > MAX_STRETCH_DEVIATION) reasons += "tempo-distance"
+    if (outgoingConfidence < MIN_BEATMATCH_CONFIDENCE || incomingConfidence < MIN_BEATMATCH_CONFIDENCE) {
+        reasons += "beat-confidence"
+    }
+
+    return TransitionPolicyVerdict(
+        tier = if (reasons.isEmpty()) TransitionTier.BEATMATCHED else TransitionTier.DJ_ASSISTED,
+        reasons = reasons,
+        beatConfidence = floorConfidence,
+    )
+}
