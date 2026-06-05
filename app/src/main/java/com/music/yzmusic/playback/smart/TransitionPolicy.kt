@@ -254,3 +254,11 @@ const val VOCAL_CLASH_TOLERANCE = 0.05
  * no usable curve.
  */
 fun audibleSecondsBetween(analysis: TrackAnalysis, start: Double, end: Double): Double? {
+    val curve = analysis.energyCurve
+    if (curve.size < 2 || end <= start) return null
+    val energies = curve.map { it.energy }.filter { it.isFinite() && it >= 0 }.sorted()
+    if (energies.isEmpty()) return null
+    val reference = energies[floor((energies.size - 1) * 0.85).toInt()].orZero()
+    if (reference <= 0) return 0.0
+    val threshold = reference * AUDIBLE_ENERGY_FRACTION
+    val first = curve.first().time
