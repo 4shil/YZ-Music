@@ -126,3 +126,33 @@ data class TransitionPlan(
     val transitionStart: Double = 0.0,
     val transitionEnd: Double = 0.0,
     val fadeSeconds: Double = 0.0,
+    val transitionStyle: TransitionStyle = TransitionStyle.EQUAL_POWER,
+    /** Where in the incoming track playback should be cued to when the transition opens. */
+    val incomingCueTime: Double = 0.0,
+    /** Where the incoming track's arrangement lands, on its own timeline. */
+    val incomingHandoffTime: Double = 0.0,
+    val incomingPlaybackRate: Double = 1.0,
+    val handoffStartSeconds: Double = 0.0,
+    val handoffDuration: Double = 0.0,
+    val pickupSeconds: Double = 0.0,
+    val transitionBeats: Int = 0,
+    val bassSwap: Boolean = false,
+    val handoffFraction: Double = HANDOFF_FRACTION,
+    val bedPosition: Double = BED_POSITION,
+    val bassSwapFraction: Double = 0.7,
+    val filterSweep: Double = 0.0,
+    /**
+     * How strongly the two tracks are expected to be singing over each other
+     * through this overlap, 0..1; see [vocalOverlapAmount].
+     *
+     * Separate from [filterSweep] because they answer to different things.
+     * [filterSweep] is a property of the *style* — a filter ride is what an
+     * unmatched pair gets instead of a beat-matched blend — and a blend
+     * deliberately asks for none of it. This is a property of the *material*, and
+     * it applies whatever the style: two tempo-matched vocals sitting on the same
+     * grid is the case a blend handles worst, precisely because nothing about the
+     * arrangement is going to separate them.
+     *
+     * Zero whenever either track lacks a vocal mask, which leaves every style
+     * rendering exactly as it did before this existed.
+     */
