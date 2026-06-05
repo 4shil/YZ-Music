@@ -403,3 +403,51 @@ void AnalyzeKeyAndTimbre(
   constexpr std::array<double, 12> minor = {6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17};
   constexpr std::array<const char*, 12> names = {
     "C", "C\xE2\x99\xAF", "D", "E\xE2\x99\xAD", "E", "F",
+    "F\xE2\x99\xAF", "G", "A\xE2\x99\xAD", "A", "B\xE2\x99\xAD", "B"
+  };
+  std::vector<std::pair<double, std::string>> candidates;
+  for (size_t root = 0; root < 12; ++root) {
+    double major_score = 0;
+    double minor_score = 0;
+    for (size_t pitch = 0; pitch < 12; ++pitch) {
+      major_score += result.chroma[pitch] * major[(pitch + 12 - root) % 12];
+      minor_score += result.chroma[pitch] * minor[(pitch + 12 - root) % 12];
+    }
+    candidates.emplace_back(major_score, std::string(names[root]) + " major");
+    candidates.emplace_back(minor_score, std::string(names[root]) + " minor");
+  }
+  std::sort(candidates.begin(), candidates.end(), std::greater<>());
+  if (chroma_weight > 0 && !candidates.empty()) {
+    result.key = candidates[0].second;
+    result.key_confidence = Clamp(
+      (candidates[0].first - candidates[1].first) / std::max(0.01, candidates[0].first) * 4.0,
+      0,
+      1
+    );
+  }
+
+  // The track-wide summary keeps its existing meaning -- the same logistic over
+  // whole-track band totals -- so callers that only want "is this a vocal
+  // track" are unaffected by the per-frame curve.
+  result.vocal_probability = VocalProbabilityFrom(
+    low_energy,
+    vocal_energy,
+    high_energy,
+    flatness_total / std::max<size_t>(1, accepted_frames)
+  );
+}
+
+// Models 4/4 music in eight-bar (32-beat) phrases and snaps transition cues to
+// the inferred downbeat grid; energy is used only for boundary/type refinement.
+void BuildStructure(const EnvelopeResult& envelope, AnalysisResult& result) {
+  const double phrase_seconds = result.beat_interval > 0 ? result.beat_interval * 32.0 : 16.0;
+  const double phrase_start = !result.downbeats.empty()
+    ? result.downbeats.front()
+    : envelope.audible_start;
+  const size_t first_window = static_cast<size_t>(envelope.audible_start / envelope.window_seconds);
+  const size_t four_seconds = std::max<size_t>(1, 4.0 / envelope.window_seconds);
+  const size_t quiet_windows = std::max<size_t>(1, std::round(3.0 / envelope.window_seconds));
+  const size_t recovery_windows = std::max<size_t>(1, std::round(3.0 / envelope.window_seconds));
+  size_t strong_window = first_window;
+  for (size_t index = first_window; index + four_seconds <= envelope.levels.size(); ++index) {
+    if (Average(envelope.levels, index, index + four_seconds) >= envelope.reference * 0.62) {
