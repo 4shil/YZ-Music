@@ -212,3 +212,12 @@ fun simultaneousVocalFraction(
 ): Double? {
     val outMask = outgoing.vocalActivityMask
     val outCurve = outgoing.energyCurve
+    val inMask = incoming.vocalActivityMask
+    val inCurve = incoming.energyCurve
+    if (outMask.isEmpty() || outMask.size != outCurve.size) return null
+    if (inMask.isEmpty() || inMask.size != inCurve.size) return null
+    if (outEnd <= outStart) return null
+    val step = if (rate.isFinite() && rate > 0) rate else 1.0
+
+    var inIndex = 0
+    var both = 0
