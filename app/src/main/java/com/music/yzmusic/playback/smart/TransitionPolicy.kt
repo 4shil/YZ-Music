@@ -262,3 +262,25 @@ fun audibleSecondsBetween(analysis: TrackAnalysis, start: Double, end: Double): 
     if (reference <= 0) return 0.0
     val threshold = reference * AUDIBLE_ENERGY_FRACTION
     val first = curve.first().time
+    val last = curve.last().time
+    if (!first.isFinite() || !last.isFinite() || last <= first) return null
+    val sampleSeconds = (last - first) / (curve.size - 1)
+    var audible = 0.0
+    for (point in curve) {
+        if (!point.time.isFinite() || point.time < start || point.time > end) continue
+        if (point.energy >= threshold) audible += sampleSeconds
+    }
+    return audible
+}
+
+/**
+ * The earliest point the analysis claims the track makes sound.
+ *
+ * [TrackAnalysis.firstBeat] is not nullable the way the other two are, and
+ * the analyzer uses 0.0 as its "nothing was measured" fallback. Counting that
+ * zero as a real audible start pins this to 0 for any track without a beat
+ * grid, which silently overrides a measured `audibleStartTime` and tells the
+ * planner the whole head of the track is intro it can fade across.
+ */
+internal fun audibleStartOf(analysis: TrackAnalysis): Double {
+    val firstBeat = analysis.firstBeat.takeIf { it.isFinite() && it > 0 }
