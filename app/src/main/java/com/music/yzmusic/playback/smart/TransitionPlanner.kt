@@ -588,3 +588,86 @@ fun planWsolaTransition(
     val stretchRatio = outgoingBpm / incomingBpm
 
     val outgoingLength = max(duration.orZero(), analysis.duration.orZero())
+    val incomingLength = max(nextDuration.orZero(), nextAnalysis.duration.orZero())
+    if (outgoingLength <= 0 || incomingLength <= 0) return WsolaPlanResult.Refused("missing-duration")
+
+    val incomingBeatSeconds = 60 / incomingBpm
+    val outgoingBeatSeconds = 60 / outgoingBpm
+
+    val incomingDropTime = incomingMixInPoint(nextAnalysis)
+    if (incomingDropTime == null || !incomingDropTime.isFinite() || incomingDropTime < 0) {
+        return WsolaPlanResult.Refused("incoming-mix-in")
+    }
+
+    val contentEnd = analysis.contentEndTime.orZero().takeIf { it != 0.0 } ?: outgoingLength
+    val mixOutAnchor = resolveMixOutAnchor(analysis, contentEnd = contentEnd, duration = outgoingLength)
+    val unshiftedOverlapEnd = min(outgoingLength, mixOutAnchor.time)
+    val outgoingArrangementOverlap =
+        if (mixOutAnchor.type == "content_end") {
+            min(ARRANGEMENT_OVERLAP_BEATS * outgoingBeatSeconds, MAX_DISCARDED_MUSIC_SECONDS)
+        } else {
+            0.0
+        }
+    val overlapEndTarget = max(MIN_CLEARANCE_SECONDS, unshiftedOverlapEnd - outgoingArrangementOverlap)
+
+    val audibleStart = incomingAudibleStart(nextAnalysis)
+    val availableFadeBeats = max(0.0, incomingDropTime - audibleStart) / incomingBeatSeconds
+    val cappedByOverlap = floor(floor(MAX_OVERLAP_SECONDS / incomingBeatSeconds) / 4).toInt() * 4
+    if (cappedByOverlap < MIN_FADE_BEATS) return WsolaPlanResult.Refused("overlap-too-long")
+    var fadeBeats = minOf(
+        MAX_FADE_BEATS,
+        cappedByOverlap,
+        floor(availableFadeBeats / 4).toInt() * 4,
+    )
+    if (fadeBeats < MIN_FADE_BEATS) fadeBeats = MIN_FADE_BEATS
+
+    fun clashOver(beats: Int): Boolean {
+        val outStart = overlapEndTarget - beats * outgoingBeatSeconds
+        val inStart = max(audibleStart, incomingDropTime - beats * incomingBeatSeconds)
+        val outVocal = vocalActivityBetween(analysis, outStart, overlapEndTarget)
+        val inVocal = vocalActivityBetween(nextAnalysis, inStart, incomingDropTime)
+
+        // Instant-by-instant first, because it is the question actually being
+        // asked. The mean-based test below only fires when *both* windows average
+        // vocal across their whole length, which a real clash routinely does not:
+        // an incoming track that starts singing a few seconds into the overlap
+        // averages clear and still puts its opening line under the outgoing
+        // vocal. This catches that, and it is what shrinks the overlap until the
+        // two voices stop landing together.
+        val simultaneous = simultaneousVocalFraction(
+            outgoing = analysis,
+            incoming = nextAnalysis,
+            outStart = outStart,
+            outEnd = overlapEndTarget,
+            inStart = inStart,
+            rate = if (outgoingBeatSeconds > 0) incomingBeatSeconds / outgoingBeatSeconds else 1.0,
+        )
+        if (simultaneous != null && simultaneous > VOCAL_CLASH_TOLERANCE) return true
+
+        if (isVocalClash(outVocal, inVocal)) return true
+
+        if (beats > 8 && outVocal != null && outVocal >= VOCAL_ACTIVE_THRESHOLD) {
+            val deepVocal = vocalActivityBetween(analysis, outStart, overlapEndTarget - 8 * outgoingBeatSeconds)
+            if (deepVocal != null && deepVocal >= VOCAL_ACTIVE_THRESHOLD) {
+                return true
+            }
+        }
+        return false
+    }
+    var fadeVocalClash = clashOver(fadeBeats)
+    while (fadeVocalClash && fadeBeats > MIN_FADE_BEATS) {
+        fadeBeats -= 4
+        fadeVocalClash = clashOver(fadeBeats)
+    }
+
+    val coverableBeats = floor(max(0.0, incomingDropTime - audibleStart) / incomingBeatSeconds).toInt()
+    val overlapBeats = min(fadeBeats, coverableBeats)
+    if (overlapBeats < 1) return WsolaPlanResult.Refused("incoming-no-intro")
+
+    val outgoingOverlapSeconds = overlapBeats * outgoingBeatSeconds
+    val overlapSeconds = overlapBeats * incomingBeatSeconds
+
+    val requestedIncomingHandoff =
+        incomingDropTime + ARRANGEMENT_OVERLAP_BEATS * incomingBeatSeconds
+    val maxIncomingHandoff = incomingLength - MIN_CLEARANCE_SECONDS
+    if (maxIncomingHandoff < incomingDropTime) return WsolaPlanResult.Refused("incoming-too-short")
