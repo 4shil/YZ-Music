@@ -50,3 +50,54 @@ object VocalSpectrogram {
      */
     fun compute(left: FloatArray, right: FloatArray, rate: Double = sampleRate): Spectrogram? {
         if (!available || left.isEmpty() || left.size != right.size) return null
+        val values = nativeCompute(left, right, rate)
+        if (values.isEmpty()) return null
+        return Spectrogram(values, frames = values.size / (CHANNELS * bins), bins = bins)
+    }
+
+    /**
+     * Bin-major, flattened: channel c, bin b, frame f is at `(c * bins + b) * frames + f`. That
+     * ordering is not the natural one for an STFT computed a frame at a time; it is chosen to
+     * match the model's `[1, 2, bins, frames]` tensor exactly, so nothing has to transpose.
+     */
+    data class Spectrogram(val values: FloatArray, val frames: Int, val bins: Int) {
+        override fun equals(other: Any?): Boolean =
+            this === other || (other is Spectrogram && frames == other.frames &&
+                bins == other.bins && values.contentEquals(other.values))
+
+        override fun hashCode(): Int = 31 * (31 * values.contentHashCode() + frames) + bins
+    }
+
+    const val CHANNELS = 2
+
+    @JvmStatic private external fun nativeCompute(left: FloatArray, right: FloatArray, rate: Double): FloatArray
+    @JvmStatic private external fun nativeBins(): Int
+    @JvmStatic private external fun nativeSampleRate(): Double
+    @JvmStatic private external fun nativeHop(): Int
+    @JvmStatic private external fun nativeFftSize(): Int
+}
+
+/**
+ * Vocal-presence tracking with open-unmix's "vocals" target (Stöter & Liutkus, Inria/SigSep).
+ *
+ * The transition policy uses this to avoid mixing two vocals over each other: a blend where both
+ * tracks are singing is the one case that reliably sounds wrong however well the beats line up.
+ *
+ * Chosen because its **weights** are MIT, confirmed on the Zenodo deposit rather than inferred from
+ * the code repository. Meta's htdemucs separates better but releases its pretrained weights under
+ * CC-BY-NC-4.0, which a distributed application cannot ship, and its ONNX export additionally has
+ * unresolved blockers around complex-valued STFT ops.
+ *
+ * Only the vocals target is used. open-unmix trains four independent checkpoints; YZ Music needs to
+ * know how much vocal content is present at an instant, not to reconstruct four stems.
+ */
+class VocalTracker(private val context: Context) {
+
+    @Volatile private var session: OrtSession? = null
+    private val lock = Any()
+
+    private fun session(): OrtSession? {
+        session?.let { return it }
+        synchronized(lock) {
+            session?.let { return it }
+            return runCatching {
