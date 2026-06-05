@@ -132,3 +132,14 @@ class VocalTracker(private val context: Context) {
     fun track(left: FloatArray, right: FloatArray, rate: Double): FloatArray? {
         if (!VocalSpectrogram.available) return null
         val resampledLeft = MelSpectrogram.resample(left, rate, VocalSpectrogram.sampleRate) ?: return null
+        val resampledRight = MelSpectrogram.resample(right, rate, VocalSpectrogram.sampleRate) ?: return null
+
+        val started = System.currentTimeMillis()
+        val spectrogram = VocalSpectrogram.compute(resampledLeft, resampledRight) ?: return null
+        if (spectrogram.frames > FIXED_FRAMES) {
+            Log.d(TAG, "Window of ${spectrogram.frames} frames exceeds the model's $FIXED_FRAMES")
+            return null
+        }
+        val active = session() ?: return null
+
+        return runCatching {
