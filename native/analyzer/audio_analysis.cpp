@@ -259,3 +259,51 @@ double FindMixOutTime(
             end,
             recovery_windows,
             envelope.reference,
+            quiet_level
+          )) &&
+          silence_duration > best_duration) {
+        best_index = index;
+        best_duration = silence_duration;
+      }
+    }
+    index = end;
+  }
+  if (!best_index) return envelope.content_end;
+
+  const double cliff_threshold = std::max(silence_threshold * 2, envelope.reference * 0.65);
+  const size_t maximum_backtrack = static_cast<size_t>(4.0 / window_seconds);
+  size_t cliff_start = best_index;
+  while (cliff_start > search_start && best_index - cliff_start < maximum_backtrack &&
+         levels[cliff_start - 1] < cliff_threshold) {
+    --cliff_start;
+  }
+  return cliff_start * window_seconds;
+}
+
+double NearestDownbeat(const std::vector<double>& downbeats, double target, double fallback) {
+  if (downbeats.empty()) return fallback;
+  auto found = std::lower_bound(downbeats.begin(), downbeats.end(), target);
+  if (found == downbeats.begin()) return *found;
+  if (found == downbeats.end()) return downbeats.back();
+  return target - *(found - 1) <= *found - target ? *(found - 1) : *found;
+}
+
+double DownbeatAtOrBefore(const std::vector<double>& downbeats, double target, double fallback) {
+  if (downbeats.empty()) return fallback;
+  auto found = std::upper_bound(downbeats.begin(), downbeats.end(), target);
+  return found == downbeats.begin() ? downbeats.front() : *(found - 1);
+}
+
+// Sparse 4096-point Hann frames feed chroma templates and broad spectral bands.
+// FFT power is log-compressed before aggregation; chroma is sum-normalized and
+// the vocal value is a bounded spectral heuristic rather than a classifier.
+// Band ratios and flatness map to a probability that a voice is present. Shared
+// by the per-frame curve and the track-wide summary so the two cannot drift.
+//
+// Compress spectral power before comparing bands. Raw FFT power lets kick
+// drums and bass overwhelm the much wider voice band, which made vocal-led
+// tracks look instrumental. Flatness adds a small boost for speech-like
+// broadband detail without making it the primary signal.
+double VocalProbabilityFrom(double low, double vocal, double high, double flatness) {
+  const double total = low + vocal + high;
+  const double mid_ratio = vocal / std::max(1e-12, total);
