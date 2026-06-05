@@ -117,3 +117,19 @@ internal fun clamp(value: Double, min: Double, max: Double): Double =
  */
 fun alignTempoOctave(outgoingBpm: Double, incomingBpm: Double): Double {
     if (outgoingBpm <= 0 || incomingBpm <= 0) return incomingBpm
+    var aligned = incomingBpm
+    while (aligned / outgoingBpm > 1.5) aligned /= 2
+    while (aligned / outgoingBpm < 0.67) aligned *= 2
+    return aligned
+}
+
+/**
+ * Mean vocal activity over [start]..[end] on a track's own timeline, or null
+ * when the analysis carries no usable mask there. The mask is indexed against
+ * [TrackAnalysis.energyCurve] times.
+ */
+fun vocalActivityBetween(analysis: TrackAnalysis, start: Double, end: Double): Double? {
+    val mask = analysis.vocalActivityMask
+    val curve = analysis.energyCurve
+    if (mask.isEmpty() || mask.size != curve.size || end <= start) return null
+    var sum = 0.0
