@@ -307,3 +307,99 @@ double DownbeatAtOrBefore(const std::vector<double>& downbeats, double target, d
 double VocalProbabilityFrom(double low, double vocal, double high, double flatness) {
   const double total = low + vocal + high;
   const double mid_ratio = vocal / std::max(1e-12, total);
+  const double low_ratio = low / std::max(1e-12, total);
+  const double score = -2.4 + 5.2 * mid_ratio - 0.8 * low_ratio + 0.6 * flatness;
+  return Clamp(1.0 / (1.0 + std::exp(-score)), 0, 1);
+}
+
+// `vocal_frames` receives one probability per accepted frame, which is what
+// makes vocal activity a curve rather than a single number for the whole
+// track. A transition needs to know whether a voice is present *at the
+// overlap*, not whether the track has singing in it somewhere.
+void AnalyzeKeyAndTimbre(
+  const std::vector<float>& samples,
+  double sample_rate,
+  double start_time,
+  double end_time,
+  AnalysisResult& result,
+  std::vector<EnergyPoint>& low_frames,
+  std::vector<EnergyPoint>& vocal_frames
+) {
+  constexpr size_t frame_size = 4096;
+  const size_t hop_size = std::max<size_t>(frame_size, sample_rate * 0.65);
+  const size_t first_sample = std::min(samples.size(), static_cast<size_t>(start_time * sample_rate));
+  const size_t final_sample = std::min(samples.size(), static_cast<size_t>(end_time * sample_rate));
+  std::array<double, 12> chroma{};
+  std::vector<std::complex<double>> spectrum(frame_size);
+  double chroma_weight = 0;
+  double low_energy = 0;
+  double vocal_energy = 0;
+  double high_energy = 0;
+  double flatness_total = 0;
+  size_t accepted_frames = 0;
+
+  for (size_t start = first_sample; start + frame_size <= final_sample; start += hop_size) {
+    double square_sum = 0;
+    for (size_t index = 0; index < frame_size; ++index) {
+      const double value = samples[start + index];
+      square_sum += value * value;
+      const double window = 0.5 - 0.5 * std::cos(2.0 * kPi * index / (frame_size - 1));
+      spectrum[index] = std::complex<double>(value * window, 0);
+    }
+    const double rms = std::sqrt(square_sum / frame_size);
+    if (rms < 0.0025) continue;
+    Fft(spectrum);
+
+    double frame_chroma = 0;
+    double log_sum = 0;
+    double arithmetic_sum = 0;
+    size_t flatness_bins = 0;
+    double frame_low = 0;
+    double frame_vocal = 0;
+    double frame_high = 0;
+    for (size_t bin = 1; bin < frame_size / 2; ++bin) {
+      const double frequency = bin * sample_rate / frame_size;
+      if (frequency < 45 || frequency > std::min(5000.0, sample_rate * 0.48)) continue;
+      const double power = std::norm(spectrum[bin]);
+      const double perceptual_power = std::log1p(power);
+      if (frequency < 250) frame_low += perceptual_power;
+      else if (frequency <= 4000) {
+        frame_vocal += perceptual_power;
+        log_sum += std::log(std::max(1e-12, power));
+        arithmetic_sum += power;
+        ++flatness_bins;
+      } else frame_high += perceptual_power;
+      if (frequency > 5000) continue;
+      const int midi = static_cast<int>(std::round(69.0 + 12.0 * std::log2(frequency / 440.0)));
+      const int pitch_class = (midi % 12 + 12) % 12;
+      const double weight = std::log1p(power);
+      chroma[pitch_class] += weight * rms;
+      frame_chroma += weight;
+    }
+    const double frame_flatness = flatness_bins && arithmetic_sum > 0
+      ? std::exp(log_sum / flatness_bins) / (arithmetic_sum / flatness_bins)
+      : 0.0;
+    flatness_total += frame_flatness;
+    low_energy += frame_low;
+    vocal_energy += frame_vocal;
+    high_energy += frame_high;
+    low_frames.push_back({
+      (start + frame_size / 2.0) / sample_rate,
+      frame_low
+    });
+    vocal_frames.push_back({
+      (start + frame_size / 2.0) / sample_rate,
+      VocalProbabilityFrom(frame_low, frame_vocal, frame_high, frame_flatness)
+    });
+    chroma_weight += std::max(1e-9, frame_chroma * rms);
+    ++accepted_frames;
+  }
+
+  result.chroma.assign(chroma.begin(), chroma.end());
+  const double chroma_sum = std::accumulate(result.chroma.begin(), result.chroma.end(), 0.0);
+  if (chroma_sum > 0) for (double& value : result.chroma) value /= chroma_sum;
+
+  constexpr std::array<double, 12> major = {6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88};
+  constexpr std::array<double, 12> minor = {6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17};
+  constexpr std::array<const char*, 12> names = {
+    "C", "C\xE2\x99\xAF", "D", "E\xE2\x99\xAD", "E", "F",
