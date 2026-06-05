@@ -412,3 +412,24 @@ fun resolveMixOutAnchor(
     contentEnd: Double = 0.0,
     duration: Double = 0.0,
 ): MixOutAnchor {
+    val end = resolveContentEnd(analysis, contentEnd, duration)
+    val best = rankMixOutCandidates(analysis, end, duration).firstOrNull()
+    return MixOutAnchor(
+        time = best?.time ?: end,
+        type = best?.type ?: "content_end",
+        discardedMusicSeconds = best?.discardedMusicSeconds ?: 0.0,
+    )
+}
+
+/**
+ * Decides how ambitious a transition the stored analysis supports.
+ *
+ * Reasons are ordered most-disqualifying first so callers can surface
+ * `reasons.first()` as the routing verdict.
+ */
+fun assessTransitionTier(
+    analysis: TrackAnalysis,
+    nextAnalysis: TrackAnalysis,
+): TransitionPolicyVerdict {
+    val outgoingBpm = analysis.bpm.orZero()
+    val incomingBpm = nextAnalysis.bpm.orZero()
