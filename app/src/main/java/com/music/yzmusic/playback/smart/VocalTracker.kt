@@ -229,3 +229,42 @@ class VocalTracker(private val context: Context) {
         val curve = FloatArray(usableFrames)
         for (frame in 0 until usableFrames) {
             var sum = 0.0
+            var count = 0
+            for (channel in 0 until VocalSpectrogram.CHANNELS) {
+                for (bin in lowBin..highBin) {
+                    // Both buffers carry the model's [1, 2, bins, FIXED_FRAMES]
+                    // layout, so one index reads the same cell of each. Absolute
+                    // get, so neither view's position matters.
+                    val index = (channel * bins + bin) * FIXED_FRAMES + frame
+                    val mixValue = mix.get(index)
+                    if (mixValue <= 1e-6f) continue
+                    val ratio = target.get(index) / mixValue
+                    sum += ratio.coerceIn(0f, 1f)
+                    count += 1
+                }
+            }
+            curve[frame] = if (count > 0) (sum / count).toFloat() else 0f
+        }
+        return curve
+    }
+
+    fun release() {
+        synchronized(lock) {
+            runCatching { session?.close() }
+            session = null
+        }
+    }
+
+    companion object {
+        private const val TAG = "YZMusicVocalTracker"
+        private const val MODEL_ASSET = "vocals_umxhq_int8.onnx"
+        private const val INFERENCE_THREADS = 4
+
+        /** The model's fixed input width, ~22.8 s, chosen upstream to cover a transition overlap. */
+        const val FIXED_FRAMES = 960
+
+        /** The band a vocal actually occupies; below and above it the mask says little. */
+        private const val LOW_HZ = 200.0
+        private const val HIGH_HZ = 4000.0
+    }
+}
