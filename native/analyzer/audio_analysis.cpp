@@ -307,3 +307,51 @@ double DownbeatAtOrBefore(const std::vector<double>& downbeats, double target, d
 double VocalProbabilityFrom(double low, double vocal, double high, double flatness) {
   const double total = low + vocal + high;
   const double mid_ratio = vocal / std::max(1e-12, total);
+  const double low_ratio = low / std::max(1e-12, total);
+  const double score = -2.4 + 5.2 * mid_ratio - 0.8 * low_ratio + 0.6 * flatness;
+  return Clamp(1.0 / (1.0 + std::exp(-score)), 0, 1);
+}
+
+// `vocal_frames` receives one probability per accepted frame, which is what
+// makes vocal activity a curve rather than a single number for the whole
+// track. A transition needs to know whether a voice is present *at the
+// overlap*, not whether the track has singing in it somewhere.
+void AnalyzeKeyAndTimbre(
+  const std::vector<float>& samples,
+  double sample_rate,
+  double start_time,
+  double end_time,
+  AnalysisResult& result,
+  std::vector<EnergyPoint>& low_frames,
+  std::vector<EnergyPoint>& vocal_frames
+) {
+  constexpr size_t frame_size = 4096;
+  const size_t hop_size = std::max<size_t>(frame_size, sample_rate * 0.65);
+  const size_t first_sample = std::min(samples.size(), static_cast<size_t>(start_time * sample_rate));
+  const size_t final_sample = std::min(samples.size(), static_cast<size_t>(end_time * sample_rate));
+  std::array<double, 12> chroma{};
+  std::vector<std::complex<double>> spectrum(frame_size);
+  double chroma_weight = 0;
+  double low_energy = 0;
+  double vocal_energy = 0;
+  double high_energy = 0;
+  double flatness_total = 0;
+  size_t accepted_frames = 0;
+
+  for (size_t start = first_sample; start + frame_size <= final_sample; start += hop_size) {
+    double square_sum = 0;
+    for (size_t index = 0; index < frame_size; ++index) {
+      const double value = samples[start + index];
+      square_sum += value * value;
+      const double window = 0.5 - 0.5 * std::cos(2.0 * kPi * index / (frame_size - 1));
+      spectrum[index] = std::complex<double>(value * window, 0);
+    }
+    const double rms = std::sqrt(square_sum / frame_size);
+    if (rms < 0.0025) continue;
+    Fft(spectrum);
+
+    double frame_chroma = 0;
+    double log_sum = 0;
+    double arithmetic_sum = 0;
+    size_t flatness_bins = 0;
+    double frame_low = 0;
