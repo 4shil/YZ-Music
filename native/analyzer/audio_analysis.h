@@ -90,3 +90,16 @@ struct AnalysisResult {
   std::string key;
   double key_confidence = 0;
   // Sum-normalized C through B pitch-class energy in chromatic order.
+  std::vector<double> chroma;
+  double audible_start_time = 0;
+  double pickup_time = 0;
+  double pickup_confidence = 0;
+  double mix_in_time = 0;
+  double mix_in_confidence = 0;
+  double intro_end_time = 0;
+  double outro_start_time = 0;
+  double content_end_time = 0;
+  double mix_out_time = 0;
+  // RMS dBFS with a -0.691 offset, not gated/K-weighted integrated LUFS.
+  double loudness_lufs = -70;
+  double peak_dbfs = -70;
