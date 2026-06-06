@@ -211,3 +211,51 @@ double FindMixOutTime(
   const EnvelopeResult& envelope
 ) {
   constexpr double window_seconds = 0.05;
+  const size_t window_size = std::max<size_t>(1, sample_rate * window_seconds);
+  std::vector<double> levels;
+  for (size_t start = 0; start < samples.size(); start += window_size) {
+    const size_t end = std::min(samples.size(), start + window_size);
+    double sum = 0;
+    for (size_t index = start; index < end; ++index) sum += samples[index] * samples[index];
+    levels.push_back(std::sqrt(sum / std::max<size_t>(1, end - start)));
+  }
+  if (levels.empty()) return envelope.content_end;
+
+  const double silence_threshold = std::max(
+    0.0015,
+    std::min(envelope.threshold * 0.25, envelope.reference * 0.04)
+  );
+  const size_t search_start = std::min(
+    levels.size(),
+    static_cast<size_t>(duration * 0.55 / window_seconds)
+  );
+  const size_t context_windows = static_cast<size_t>(2.0 / window_seconds);
+  const size_t recovery_windows = std::max<size_t>(1, std::round(3.0 / window_seconds));
+  size_t best_index = 0;
+  double best_duration = 0;
+
+  for (size_t index = search_start; index < levels.size();) {
+    if (levels[index] >= silence_threshold) {
+      ++index;
+      continue;
+    }
+    size_t end = index + 1;
+    while (end < levels.size() && levels[end] < silence_threshold) ++end;
+    const double silence_duration = (end - index) * window_seconds;
+    const double silence_end = end * window_seconds;
+    if (silence_duration >= 0.3 && silence_end <= duration - 4.0) {
+      const size_t before_start = index > context_windows ? index - context_windows : 0;
+      const size_t after_end = std::min(levels.size(), end + context_windows);
+      const double before_peak = *std::max_element(levels.begin() + before_start, levels.begin() + index);
+      const double after_peak = *std::max_element(levels.begin() + end, levels.begin() + after_end);
+      const double quiet_level = Average(levels, index, end);
+      // Late gaps often separate an outro/hidden track and remain useful mix
+      // points. Earlier gaps are protected when the main arrangement returns.
+      const bool early_gap = index * window_seconds < envelope.content_end * 0.8;
+      if (before_peak >= silence_threshold * 2 &&
+          after_peak >= silence_threshold * 2 &&
+          (!early_gap || !HasMaterialRecovery(
+            levels,
+            end,
+            recovery_windows,
+            envelope.reference,
