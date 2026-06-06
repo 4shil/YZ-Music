@@ -196,3 +196,24 @@ BeatSpectrogram ComputeBeatSpectrogram(
     const size_t start = frame * kBeatSpectrogramHop;
     for (size_t index = 0; index < kBeatSpectrogramFft; ++index) {
       spectrum[index] = std::complex<double>(padded[start + index] * window[index], 0.0);
+    }
+    Fft(spectrum);
+    for (size_t bin = 0; bin < bins; ++bin) {
+      magnitude[bin] = std::abs(spectrum[bin]) / normalization;
+    }
+    float* row = result.values.data() + frame * kBeatSpectrogramMels;
+    for (size_t mel = 0; mel < kBeatSpectrogramMels; ++mel) {
+      const auto& filter = filters[mel];
+      double energy = 0;
+      for (size_t offset = 0; offset < filter.weights.size(); ++offset) {
+        energy += magnitude[filter.first_bin + offset] * filter.weights[offset];
+      }
+      row[mel] = static_cast<float>(
+        std::log1p(kLogMultiplier * std::max(energy, kAmplitudeFloor))
+      );
+    }
+  }
+  return result;
+}
+
+}  // namespace yzmusic::smart
