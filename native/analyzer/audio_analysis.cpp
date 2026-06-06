@@ -451,3 +451,51 @@ void BuildStructure(const EnvelopeResult& envelope, AnalysisResult& result) {
   size_t strong_window = first_window;
   for (size_t index = first_window; index + four_seconds <= envelope.levels.size(); ++index) {
     if (Average(envelope.levels, index, index + four_seconds) >= envelope.reference * 0.62) {
+      strong_window = index;
+      break;
+    }
+  }
+  const double raw_intro = std::max(
+    phrase_start + phrase_seconds,
+    strong_window * envelope.window_seconds
+  );
+  result.intro_end_time = Clamp(
+    NearestDownbeat(result.downbeats, raw_intro, raw_intro),
+    envelope.audible_start,
+    std::min(envelope.content_end, 48.0)
+  );
+
+  double raw_outro = std::max(result.intro_end_time, envelope.content_end - phrase_seconds);
+  const size_t search_start = static_cast<size_t>(
+    std::max(result.intro_end_time, envelope.content_end * 0.6) / envelope.window_seconds
+  );
+  for (size_t index = search_start; index + four_seconds < envelope.levels.size(); ++index) {
+    const double section_average = Average(envelope.levels, index, index + four_seconds);
+    const double tail_average = Average(envelope.levels, index, envelope.levels.size());
+    if (section_average >= envelope.reference * 0.68 ||
+        tail_average >= envelope.reference * 0.72) {
+      continue;
+    }
+    // A candidate may begin just before a breakdown because its four-second
+    // average straddles the energy drop. Look for the complete quiet/recovery
+    // sequence instead of judging only the candidate's first window.
+    if (!HasQuietThenRecovery(
+      envelope.levels,
+      index,
+      std::max(quiet_windows, recovery_windows),
+      envelope.reference
+    )) {
+      raw_outro = index * envelope.window_seconds;
+      break;
+    }
+  }
+  result.outro_start_time = Clamp(
+    NearestDownbeat(result.downbeats, raw_outro, raw_outro),
+    result.intro_end_time,
+    envelope.content_end
+  );
+
+  result.phrase_boundaries.push_back(phrase_start);
+  for (double time = phrase_start + phrase_seconds; time < envelope.content_end; time += phrase_seconds) {
+    result.phrase_boundaries.push_back(time);
+  }
