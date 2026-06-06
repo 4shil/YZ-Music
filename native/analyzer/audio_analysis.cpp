@@ -547,3 +547,51 @@ void BuildStructure(const EnvelopeResult& envelope, AnalysisResult& result) {
   const double cue_energy = Average(envelope.levels, cue_window, cue_window + four_seconds);
   result.mix_in_confidence = Clamp(
     result.beat_confidence * 0.65 +
+      Clamp(cue_energy / std::max(1e-6, envelope.reference), 0, 1) * 0.35,
+    0,
+    1
+  );
+
+  std::vector<MixCuePoint> mix_ins;
+  mix_ins.push_back({result.audible_start_time, 0.8, "pickup"});
+  if (result.mix_in_time > result.audible_start_time + 0.1) {
+    mix_ins.push_back({result.mix_in_time, 0.9, "intro_drop"});
+  }
+  const double drop_cue = result.beat_interval > 0 ? phrase_start + result.beat_interval * 32.0 : result.intro_end_time;
+  if (drop_cue > result.mix_in_time + 0.5 && drop_cue < envelope.content_end * 0.4) {
+    const double aligned_drop = DownbeatAtOrBefore(result.downbeats, drop_cue, drop_cue);
+    mix_ins.push_back({aligned_drop, 0.95, "main_drop"});
+  }
+  result.mix_in_candidates = std::move(mix_ins);
+
+  std::vector<MixCuePoint> mix_outs;
+  if (result.mix_out_time > 0 && result.mix_out_time < envelope.content_end - 1.0) {
+    // FindMixOutTime only returns an interior anchor after observing an abrupt
+    // energy collapse into silence. Preserve that meaning for the planner: a
+    // cliff is useful because the remaining tail is silence, not because the
+    // song should be cut short at an arbitrary quiet passage.
+    mix_outs.push_back({result.mix_out_time, 0.95, "energy_cliff"});
+  }
+  mix_outs.push_back({result.outro_start_time, 0.9, "outro_start"});
+  mix_outs.push_back({envelope.content_end, 0.75, "content_end"});
+  result.mix_out_candidates = std::move(mix_outs);
+}
+
+}  // namespace
+
+// Orchestrates independent envelope, tempo, level, spectral, and structure
+// stages. Every temporary and returned allocation is owned by this call.
+AnalysisResult AnalyzeAudio(
+  const std::vector<float>& samples,
+  double sample_rate,
+  double supplied_duration
+) {
+  AnalysisResult result;
+  result.duration = supplied_duration > 0 ? supplied_duration : samples.size() / sample_rate;
+  if (samples.empty() || sample_rate < 1000 || result.duration <= 0) return result;
+  const auto envelope = AnalyzeEnvelope(samples, sample_rate, result.duration);
+  result.audible_start_time = envelope.audible_start;
+  result.pickup_time = envelope.audible_start;
+  result.pickup_confidence = envelope.pickup_confidence;
+  result.content_end_time = envelope.content_end;
+  result.mix_out_time = FindMixOutTime(samples, sample_rate, result.duration, envelope);
