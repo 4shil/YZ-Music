@@ -355,3 +355,51 @@ void AnalyzeKeyAndTimbre(
     double arithmetic_sum = 0;
     size_t flatness_bins = 0;
     double frame_low = 0;
+    double frame_vocal = 0;
+    double frame_high = 0;
+    for (size_t bin = 1; bin < frame_size / 2; ++bin) {
+      const double frequency = bin * sample_rate / frame_size;
+      if (frequency < 45 || frequency > std::min(5000.0, sample_rate * 0.48)) continue;
+      const double power = std::norm(spectrum[bin]);
+      const double perceptual_power = std::log1p(power);
+      if (frequency < 250) frame_low += perceptual_power;
+      else if (frequency <= 4000) {
+        frame_vocal += perceptual_power;
+        log_sum += std::log(std::max(1e-12, power));
+        arithmetic_sum += power;
+        ++flatness_bins;
+      } else frame_high += perceptual_power;
+      if (frequency > 5000) continue;
+      const int midi = static_cast<int>(std::round(69.0 + 12.0 * std::log2(frequency / 440.0)));
+      const int pitch_class = (midi % 12 + 12) % 12;
+      const double weight = std::log1p(power);
+      chroma[pitch_class] += weight * rms;
+      frame_chroma += weight;
+    }
+    const double frame_flatness = flatness_bins && arithmetic_sum > 0
+      ? std::exp(log_sum / flatness_bins) / (arithmetic_sum / flatness_bins)
+      : 0.0;
+    flatness_total += frame_flatness;
+    low_energy += frame_low;
+    vocal_energy += frame_vocal;
+    high_energy += frame_high;
+    low_frames.push_back({
+      (start + frame_size / 2.0) / sample_rate,
+      frame_low
+    });
+    vocal_frames.push_back({
+      (start + frame_size / 2.0) / sample_rate,
+      VocalProbabilityFrom(frame_low, frame_vocal, frame_high, frame_flatness)
+    });
+    chroma_weight += std::max(1e-9, frame_chroma * rms);
+    ++accepted_frames;
+  }
+
+  result.chroma.assign(chroma.begin(), chroma.end());
+  const double chroma_sum = std::accumulate(result.chroma.begin(), result.chroma.end(), 0.0);
+  if (chroma_sum > 0) for (double& value : result.chroma) value /= chroma_sum;
+
+  constexpr std::array<double, 12> major = {6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88};
+  constexpr std::array<double, 12> minor = {6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17};
+  constexpr std::array<const char*, 12> names = {
+    "C", "C\xE2\x99\xAF", "D", "E\xE2\x99\xAD", "E", "F",
