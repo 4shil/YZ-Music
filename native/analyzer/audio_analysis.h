@@ -64,3 +64,16 @@ struct Phrase {
 struct TempoResult {
   double bpm = 0;
   // Seconds per beat; zero means that no defensible tempo was found.
+  double beat_interval = 0;
+  double first_beat = 0;
+  double confidence = 0;
+  std::vector<double> beats;
+  std::vector<double> downbeats;
+};
+
+struct MixCuePoint {
+  double time = 0;
+  double score = 0;
+  std::string type;
+};
+
