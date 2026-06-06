@@ -74,3 +74,6 @@ struct BeatSpectrogram {
 BeatSpectrogram ComputeBeatSpectrogram(
   const std::vector<float>& samples,
   double sample_rate
+);
+
+}  // namespace yzmusic::smart
