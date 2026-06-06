@@ -44,3 +44,13 @@
 #include <cstddef>
 #include <vector>
 
+namespace yzmusic::smart {
+
+// The model's input rate. Audio at any other rate is refused rather than
+// resampled here, because resampling belongs upstream where the decoded
+// buffer still exists at full bandwidth.
+inline constexpr double kBeatSpectrogramSampleRate = 22050;
+inline constexpr size_t kBeatSpectrogramMels = 128;
+inline constexpr size_t kBeatSpectrogramFft = 1024;
+// 20 ms exactly, so the model's frame rate is 50 per second.
+inline constexpr size_t kBeatSpectrogramHop = 441;
