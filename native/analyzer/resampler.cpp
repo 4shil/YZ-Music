@@ -79,3 +79,27 @@ std::vector<float> Resample(
   // present in the audio.
   const size_t table_size =
     static_cast<size_t>(std::ceil(half_width * kKernelResolution)) + 2;
+  std::vector<double> kernel(table_size);
+  for (size_t index = 0; index < table_size; ++index) {
+    const double offset = static_cast<double>(index) / kKernelResolution;
+    const double window = Blackman((offset + half_width) / (2.0 * half_width));
+    kernel[index] = 2.0 * cutoff * Sinc(2.0 * cutoff * offset) * window;
+  }
+
+  std::vector<float> output(output_count, 0.0f);
+  const auto last = static_cast<long>(input.size()) - 1;
+
+  for (size_t index = 0; index < output_count; ++index) {
+    // Where this output sample sits on the input timeline.
+    const double centre = static_cast<double>(index) / ratio;
+    const long first_tap = static_cast<long>(std::ceil(centre - half_width));
+    const long last_tap = static_cast<long>(std::floor(centre + half_width));
+
+    double sum = 0.0;
+    double weight_sum = 0.0;
+    for (long tap = first_tap; tap <= last_tap; ++tap) {
+      const double offset = std::abs(centre - static_cast<double>(tap));
+      const double scaled = offset * kKernelResolution;
+      const auto slot = static_cast<size_t>(scaled);
+      if (slot + 1 >= table_size) continue;
+      const double fraction = scaled - static_cast<double>(slot);
