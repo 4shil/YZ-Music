@@ -86,3 +86,25 @@ double MelToHz(double mel) {
   return f_sp * mel;
 }
 
+// One triangular mel filter, stored as the run of FFT bins it actually
+// covers.
+//
+// Sparse rather than a dense [bins][mels] matrix on purpose: a triangle
+// spans a handful of bins, so the dense form is 98% zeros and costs
+// 513 x 128 multiplies per frame -- around 800 million for a four-minute
+// track, several seconds of pure zero-multiplying. Storing the run makes
+// the same work about 1,000 multiplies per frame.
+struct MelFilter {
+  size_t first_bin = 0;
+  std::vector<double> weights;
+};
+
+// Triangular filters, deliberately *not* area-normalized: torchaudio's
+// `norm=None` default leaves the triangles at unit peak, and the model was
+// trained on that. Slaney-normalizing here would scale every band by its
+// own width and quietly change the input distribution.
+std::vector<MelFilter> MelFilterbank(double sample_rate) {
+  const size_t bins = kBeatSpectrogramFft / 2 + 1;
+  const double mel_min = HzToMel(kMinHz);
+  const double mel_max = HzToMel(kMaxHz);
+
