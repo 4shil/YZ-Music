@@ -142,3 +142,9 @@ AnalysisResult AnalyzeAudio(
  */
 TempoResult AnalyzeTempo(
   const std::vector<float>& samples,
+  double sample_rate,
+  double duration,
+  double audible_start
+);
+
+}  // namespace yzmusic::smart
