@@ -51,3 +51,16 @@ struct EnergyPoint {
   double time = 0;
   // Energy relative to the corresponding whole-track reference, capped at 1.5.
   // `energy_curve` uses RMS; spectral band curves use FFT-band energy.
+  double energy = 0;
+};
+
+struct Phrase {
+  double start = 0;
+  double end = 0;
+  std::string type;
+  double confidence = 0;
+};
+
+struct TempoResult {
+  double bpm = 0;
+  // Seconds per beat; zero means that no defensible tempo was found.
