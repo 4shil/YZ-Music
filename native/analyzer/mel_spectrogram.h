@@ -54,3 +54,13 @@ inline constexpr size_t kBeatSpectrogramMels = 128;
 inline constexpr size_t kBeatSpectrogramFft = 1024;
 // 20 ms exactly, so the model's frame rate is 50 per second.
 inline constexpr size_t kBeatSpectrogramHop = 441;
+
+struct BeatSpectrogram {
+  // Row-major [frames][kBeatSpectrogramMels], flattened: frame f band b is at
+  // index f * kBeatSpectrogramMels + b. Flat because the only consumer hands
+  // it straight to an ONNX tensor of that shape.
+  std::vector<float> values;
+  size_t frames = 0;
+};
+
+/**
