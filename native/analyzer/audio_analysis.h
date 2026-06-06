@@ -116,3 +116,16 @@ struct AnalysisResult {
   std::vector<MixCuePoint> mix_in_candidates;
   std::vector<MixCuePoint> mix_out_candidates;
   double vocal_probability = 0;
+};
+
+/**
+ * Extracts envelope, transition, tempo, key, spectral, and structure
+ * features. Invalid top-level input returns the default result rather than
+ * throwing.
+ */
+AnalysisResult AnalyzeAudio(
+  const std::vector<float>& samples,
+  double sample_rate,
+  double supplied_duration
+);
+
