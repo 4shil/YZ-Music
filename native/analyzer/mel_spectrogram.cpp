@@ -64,3 +64,25 @@ void Fft(std::vector<std::complex<double>>& values) {
     }
   }
 }
+
+// Slaney mel scale: linear below 1 kHz, logarithmic above. This is the
+// variant torchaudio uses by default, and it is not interchangeable with
+// the HTK formula -- picking the wrong one silently shifts every filter.
+double HzToMel(double hz) {
+  constexpr double f_sp = 200.0 / 3.0;
+  constexpr double min_log_hz = 1000.0;
+  const double min_log_mel = min_log_hz / f_sp;
+  const double logstep = std::log(6.4) / 27.0;
+  if (hz >= min_log_hz) return min_log_mel + std::log(hz / min_log_hz) / logstep;
+  return hz / f_sp;
+}
+
+double MelToHz(double mel) {
+  constexpr double f_sp = 200.0 / 3.0;
+  constexpr double min_log_hz = 1000.0;
+  const double min_log_mel = min_log_hz / f_sp;
+  const double logstep = std::log(6.4) / 27.0;
+  if (mel >= min_log_mel) return min_log_hz * std::exp(logstep * (mel - min_log_mel));
+  return f_sp * mel;
+}
+
