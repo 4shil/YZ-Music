@@ -77,3 +77,16 @@ struct MixCuePoint {
   std::string type;
 };
 
+struct AnalysisResult {
+  double duration = 0;
+  double bpm = 0;
+  double beat_interval = 0;
+  double first_beat = 0;
+  double beat_confidence = 0;
+  std::vector<double> beats;
+  std::vector<double> downbeats;
+  std::vector<double> phrase_boundaries;
+  std::vector<Phrase> phrases;
+  std::string key;
+  double key_confidence = 0;
+  // Sum-normalized C through B pitch-class energy in chromatic order.
