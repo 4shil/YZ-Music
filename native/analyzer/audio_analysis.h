@@ -103,3 +103,16 @@ struct AnalysisResult {
   // RMS dBFS with a -0.691 offset, not gated/K-weighted integrated LUFS.
   double loudness_lufs = -70;
   double peak_dbfs = -70;
+  double dynamic_range_db = 0;
+  std::vector<EnergyPoint> energy_curve;
+  std::vector<EnergyPoint> low_energy_curve;
+  std::vector<EnergyPoint> mid_energy_curve;
+  std::vector<EnergyPoint> high_energy_curve;
+  // A DSP heuristic (spectral band ratios + flatness, see AnalyzeKeyAndTimbre
+  // in audio_analysis.cpp), not a trained classifier's output. Good enough to
+  // gate vocal-clash avoidance in the transition planner; a future ML pass
+  // (open-unmix) can replace it without changing what reads it.
+  std::vector<double> vocal_activity_mask;
+  std::vector<MixCuePoint> mix_in_candidates;
+  std::vector<MixCuePoint> mix_out_candidates;
+  double vocal_probability = 0;
