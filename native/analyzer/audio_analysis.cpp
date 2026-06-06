@@ -499,3 +499,51 @@ void BuildStructure(const EnvelopeResult& envelope, AnalysisResult& result) {
   for (double time = phrase_start + phrase_seconds; time < envelope.content_end; time += phrase_seconds) {
     result.phrase_boundaries.push_back(time);
   }
+  result.phrase_boundaries.push_back(result.intro_end_time);
+  result.phrase_boundaries.push_back(result.outro_start_time);
+  if (result.phrase_boundaries.empty() || result.phrase_boundaries.back() < envelope.content_end - 0.05) {
+    result.phrase_boundaries.push_back(envelope.content_end);
+  }
+  std::sort(result.phrase_boundaries.begin(), result.phrase_boundaries.end());
+  result.phrase_boundaries.erase(
+    std::unique(
+      result.phrase_boundaries.begin(),
+      result.phrase_boundaries.end(),
+      [](double left, double right) { return std::abs(left - right) < 0.05; }
+    ),
+    result.phrase_boundaries.end()
+  );
+  for (size_t index = 0; index + 1 < result.phrase_boundaries.size(); ++index) {
+    const double start = result.phrase_boundaries[index];
+    const double end = result.phrase_boundaries[index + 1];
+    const size_t energy_start = static_cast<size_t>(start / envelope.window_seconds);
+    const size_t energy_end = static_cast<size_t>(std::ceil(end / envelope.window_seconds));
+    const double energy = Average(envelope.levels, energy_start, energy_end);
+    std::string type = "body";
+    if (end <= result.intro_end_time + 0.1) type = "intro";
+    else if (start >= result.outro_start_time - 0.1) type = "outro";
+    else if (energy < envelope.reference * 0.58) type = "breakdown";
+    result.phrases.push_back({start, end, type, Clamp(energy / std::max(1e-6, envelope.reference), 0, 1)});
+  }
+
+  const double eight_bar_target = result.beat_interval > 0
+    ? phrase_start + result.beat_interval * 32.0
+    : result.intro_end_time;
+  const double latest_cue = std::max(
+    envelope.audible_start,
+    std::min(36.0, envelope.content_end * 0.28)
+  );
+  // The first eight-bar boundary is the useful dominance target. A later
+  // energy-based intro boundary can describe the song structure, but seeking
+  // to it discards a musical intro that can be pre-rolled under the outgoing
+  // track.
+  const double bounded_target = std::min(latest_cue, eight_bar_target);
+  result.mix_in_time = Clamp(
+    DownbeatAtOrBefore(result.downbeats, bounded_target, bounded_target),
+    envelope.audible_start,
+    latest_cue
+  );
+  const size_t cue_window = static_cast<size_t>(result.mix_in_time / envelope.window_seconds);
+  const double cue_energy = Average(envelope.levels, cue_window, cue_window + four_seconds);
+  result.mix_in_confidence = Clamp(
+    result.beat_confidence * 0.65 +
