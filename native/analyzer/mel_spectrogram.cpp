@@ -174,3 +174,25 @@ BeatSpectrogram ComputeBeatSpectrogram(
   padded.insert(padded.end(), samples.begin(), samples.end());
   for (size_t index = 1; index <= pad; ++index) {
     padded.push_back(samples[samples.size() - 1 - index]);
+  }
+
+  if (padded.size() < kBeatSpectrogramFft) return result;
+  const size_t frames = (padded.size() - kBeatSpectrogramFft) / kBeatSpectrogramHop + 1;
+
+  const auto window = HannWindow(kBeatSpectrogramFft);
+  const auto filters = MelFilterbank(sample_rate);
+  const size_t bins = kBeatSpectrogramFft / 2 + 1;
+  // torchaudio's `normalized=True` divides the transform by the square root
+  // of the window length.
+  const double normalization = std::sqrt(static_cast<double>(kBeatSpectrogramFft));
+
+  result.frames = frames;
+  result.values.assign(frames * kBeatSpectrogramMels, 0.0f);
+
+  std::vector<std::complex<double>> spectrum(kBeatSpectrogramFft);
+  std::vector<double> magnitude(bins);
+
+  for (size_t frame = 0; frame < frames; ++frame) {
+    const size_t start = frame * kBeatSpectrogramHop;
+    for (size_t index = 0; index < kBeatSpectrogramFft; ++index) {
+      spectrum[index] = std::complex<double>(padded[start + index] * window[index], 0.0);
