@@ -64,3 +64,8 @@ struct BeatSpectrogram {
 };
 
 /**
+ * Computes the log-mel spectrogram the beat model expects.
+ *
+ * Returns an empty result -- not an error -- when the sample rate is not
+ * kBeatSpectrogramSampleRate or the input is shorter than one padded frame.
+ * Callers treat that as "no model prediction available" and fall back to
