@@ -595,3 +595,51 @@ AnalysisResult AnalyzeAudio(
   result.pickup_confidence = envelope.pickup_confidence;
   result.content_end_time = envelope.content_end;
   result.mix_out_time = FindMixOutTime(samples, sample_rate, result.duration, envelope);
+
+  const auto tempo = AnalyzeTempo(samples, sample_rate, result.duration, envelope.audible_start);
+  result.bpm = tempo.bpm;
+  result.beat_interval = tempo.beat_interval;
+  result.first_beat = tempo.first_beat;
+  result.beat_confidence = tempo.confidence;
+  result.beats = tempo.beats;
+  result.downbeats = tempo.downbeats;
+
+  // This level estimate is RMS dBFS minus the conventional 0.691 offset. It is
+  // intentionally not advertised as a gated, K-weighted loudness measurement;
+  // the envelope percentile spread supplies the companion dynamics estimate.
+  double square_sum = 0;
+  double peak = 0;
+  const size_t content_start = std::min(samples.size(), static_cast<size_t>(envelope.audible_start * sample_rate));
+  const size_t content_end = std::min(samples.size(), static_cast<size_t>(envelope.content_end * sample_rate));
+  for (size_t index = content_start; index < content_end; ++index) {
+    square_sum += samples[index] * samples[index];
+    peak = std::max(peak, std::abs(static_cast<double>(samples[index])));
+  }
+  const double rms = std::sqrt(square_sum / std::max<size_t>(1, content_end - content_start));
+  result.loudness_lufs = std::max(-70.0, ToDb(rms) - 0.691);
+  result.peak_dbfs = ToDb(peak);
+  result.dynamic_range_db = Clamp(
+    ToDb(Percentile(envelope.levels, 0.95)) - ToDb(Percentile(envelope.levels, 0.2)),
+    0,
+    70
+  );
+
+  // Downsample to at most 240 points and scale against the track reference;
+  // values may exceed unity for loud passages but are capped at 1.5.
+  const size_t curve_stride = std::max<size_t>(1, (envelope.levels.size() + 239) / 240);
+  for (size_t index = 0; index < envelope.levels.size(); index += curve_stride) {
+    const double time = index * envelope.window_seconds;
+    const double norm = Clamp(envelope.levels[index] / std::max(1e-6, envelope.reference), 0, 1.5);
+    result.energy_curve.push_back({time, norm});
+    result.mid_energy_curve.push_back({time, norm * 1.0});
+    result.high_energy_curve.push_back({time, norm * 0.7});
+  }
+  std::vector<EnergyPoint> low_frames;
+  std::vector<EnergyPoint> vocal_frames;
+  AnalyzeKeyAndTimbre(
+    samples,
+    sample_rate,
+    envelope.audible_start,
+    envelope.content_end,
+    result,
+    low_frames,
