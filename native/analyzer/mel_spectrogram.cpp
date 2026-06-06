@@ -108,3 +108,47 @@ std::vector<MelFilter> MelFilterbank(double sample_rate) {
   const double mel_min = HzToMel(kMinHz);
   const double mel_max = HzToMel(kMaxHz);
 
+  std::vector<double> edges(kBeatSpectrogramMels + 2);
+  for (size_t index = 0; index < edges.size(); ++index) {
+    edges[index] = MelToHz(
+      mel_min + (mel_max - mel_min) * static_cast<double>(index) / (kBeatSpectrogramMels + 1)
+    );
+  }
+
+  std::vector<MelFilter> filters(kBeatSpectrogramMels);
+  for (size_t mel = 0; mel < kBeatSpectrogramMels; ++mel) {
+    const double left = edges[mel];
+    const double centre = edges[mel + 1];
+    const double right = edges[mel + 2];
+    // The triangle is non-zero strictly between its outer edges.
+    const auto to_bin = [&](double hz) {
+      return hz * kBeatSpectrogramFft / sample_rate;
+    };
+    const size_t first = static_cast<size_t>(std::max(0.0, std::floor(to_bin(left))));
+    const size_t last = std::min(bins - 1, static_cast<size_t>(std::ceil(to_bin(right))));
+    if (last < first) continue;
+
+    MelFilter filter;
+    filter.first_bin = first;
+    filter.weights.reserve(last - first + 1);
+    for (size_t bin = first; bin <= last; ++bin) {
+      const double hz = static_cast<double>(bin) * sample_rate / kBeatSpectrogramFft;
+      const double rising = centre > left ? (hz - left) / (centre - left) : 0.0;
+      const double falling = right > centre ? (right - hz) / (right - centre) : 0.0;
+      filter.weights.push_back(std::max(0.0, std::min(rising, falling)));
+    }
+    filters[mel] = std::move(filter);
+  }
+  return filters;
+}
+
+// Periodic Hann, matching torch.hann_window(periodic=True): the divisor is
+// the window length, not length - 1. The symmetric variant used elsewhere in
+// this addon would be a different window and a different spectrum.
+std::vector<double> HannWindow(size_t size) {
+  std::vector<double> window(size);
+  for (size_t index = 0; index < size; ++index) {
+    window[index] = 0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(index) / size);
+  }
+  return window;
+}
