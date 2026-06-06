@@ -152,3 +152,25 @@ std::vector<double> HannWindow(size_t size) {
   }
   return window;
 }
+
+}  // namespace
+
+BeatSpectrogram ComputeBeatSpectrogram(
+  const std::vector<float>& samples,
+  double sample_rate
+) {
+  BeatSpectrogram result;
+  if (std::abs(sample_rate - kBeatSpectrogramSampleRate) > 1.0) return result;
+
+  // torchaudio's stft(center=True, pad_mode="reflect") centres frame f on
+  // sample f * hop, which is what puts a predicted beat at f / 50 seconds
+  // rather than half a window later.
+  const size_t pad = kBeatSpectrogramFft / 2;
+  if (samples.size() <= pad + 1) return result;
+
+  std::vector<float> padded;
+  padded.reserve(samples.size() + 2 * pad);
+  for (size_t index = pad; index >= 1; --index) padded.push_back(samples[index]);
+  padded.insert(padded.end(), samples.begin(), samples.end());
+  for (size_t index = 1; index <= pad; ++index) {
+    padded.push_back(samples[samples.size() - 1 - index]);
