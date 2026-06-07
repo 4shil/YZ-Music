@@ -38,3 +38,11 @@
 
 #include <cstddef>
 #include <vector>
+
+namespace yzmusic::smart {
+
+// Zero crossings kept either side of each output sample. Higher is a better
+// stopband at linear cost; 32 puts the aliasing well below the noise floor of
+// anything that reaches this code as lossy audio.
+inline constexpr size_t kResamplerZeroCrossings = 32;
+
