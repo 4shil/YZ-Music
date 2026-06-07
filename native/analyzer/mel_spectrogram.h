@@ -59,3 +59,13 @@ struct BeatSpectrogram {
   // Row-major [frames][kBeatSpectrogramMels], flattened: frame f band b is at
   // index f * kBeatSpectrogramMels + b. Flat because the only consumer hands
   // it straight to an ONNX tensor of that shape.
+  std::vector<float> values;
+  size_t frames = 0;
+};
+
+/**
+ * Computes the log-mel spectrogram the beat model expects.
+ *
+ * Returns an empty result -- not an error -- when the sample rate is not
+ * kBeatSpectrogramSampleRate or the input is shorter than one padded frame.
+ * Callers treat that as "no model prediction available" and fall back to
