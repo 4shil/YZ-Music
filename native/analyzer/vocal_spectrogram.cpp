@@ -72,3 +72,16 @@ std::vector<double> HannWindow(size_t size) {
 }  // namespace
 
 VocalSpectrogram ComputeVocalSpectrogram(
+  const std::vector<std::vector<float>>& channels,
+  double sample_rate
+) {
+  VocalSpectrogram result;
+  if (std::abs(sample_rate - kVocalSpectrogramSampleRate) > 1.0) return result;
+  if (channels.size() != kVocalSpectrogramChannels) return result;
+  const size_t input_length = channels.front().size();
+  if (channels[1].size() != input_length) return result;
+
+  // torch.stft(center=True, pad_mode="reflect") centres frame f on sample
+  // f * hop, matching the mel front end's identical padding.
+  const size_t pad = kVocalSpectrogramFft / 2;
+  if (input_length <= pad + 1) return result;
