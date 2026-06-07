@@ -91,3 +91,27 @@ std::vector<float> Resample(
 
   for (size_t index = 0; index < output_count; ++index) {
     // Where this output sample sits on the input timeline.
+    const double centre = static_cast<double>(index) / ratio;
+    const long first_tap = static_cast<long>(std::ceil(centre - half_width));
+    const long last_tap = static_cast<long>(std::floor(centre + half_width));
+
+    double sum = 0.0;
+    double weight_sum = 0.0;
+    for (long tap = first_tap; tap <= last_tap; ++tap) {
+      const double offset = std::abs(centre - static_cast<double>(tap));
+      const double scaled = offset * kKernelResolution;
+      const auto slot = static_cast<size_t>(scaled);
+      if (slot + 1 >= table_size) continue;
+      const double fraction = scaled - static_cast<double>(slot);
+      const double weight =
+        kernel[slot] + fraction * (kernel[slot + 1] - kernel[slot]);
+
+      // Clamping rather than zero-padding at the edges: zeros would read as a
+      // hard cut and ring, which at the start of a track is exactly where the
+      // beat tracker is looking for the first onset.
+      const long clamped = std::min(std::max(tap, 0L), last);
+      sum += weight * static_cast<double>(input[static_cast<size_t>(clamped)]);
+      weight_sum += weight;
+    }
+
+    // Normalizing by the realized window keeps unity gain even where the taps
