@@ -105,3 +105,40 @@ struct OnsetEnvelopes {
 };
 
 // Normalizes an onset envelope in place: subtract a local mean to suppress
+// steady-state energy, then peak-normalize and sqrt-expand what remains so
+// the quieter onsets still participate in correlation and phase scoring.
+void NormalizeEnvelope(std::vector<double>& envelope, double frames_per_second) {
+  if (envelope.empty()) return;
+  const size_t radius = std::max<size_t>(2, static_cast<size_t>(frames_per_second * 0.35));
+  std::vector<double> prefix(envelope.size() + 1, 0);
+  for (size_t index = 0; index < envelope.size(); ++index) {
+    prefix[index + 1] = prefix[index] + envelope[index];
+  }
+  for (size_t index = 0; index < envelope.size(); ++index) {
+    const size_t left = index > radius ? index - radius : 0;
+    const size_t right = std::min(envelope.size(), index + radius + 1);
+    const double local_mean = (prefix[right] - prefix[left]) / std::max<size_t>(1, right - left);
+    envelope[index] = std::max(0.0, envelope[index] - local_mean * 1.08);
+  }
+
+  const double peak = *std::max_element(envelope.begin(), envelope.end());
+  if (peak > 0) {
+    for (double& value : envelope) value = std::sqrt(value / peak);
+  }
+}
+
+// Converts the track into full-band and bass-band spectral-flux onset
+// envelopes. Each Hann-windowed spectrum contributes only positive
+// log-magnitude changes; subtracting 1.08 times a roughly +/-350 ms local mean
+// suppresses steady-state energy, then peak normalization plus sqrt expands
+// quieter remaining onsets.
+OnsetEnvelopes OnsetEnvelope(
+  const std::vector<float>& samples,
+  double sample_rate,
+  size_t frame_size,
+  size_t hop_size
+) {
+  OnsetEnvelopes result;
+  const size_t maximum_samples = std::min(
+    samples.size(),
+    static_cast<size_t>(sample_rate * kMaxEnvelopeSeconds)
