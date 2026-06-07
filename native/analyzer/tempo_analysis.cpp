@@ -179,3 +179,40 @@ OnsetEnvelopes OnsetEnvelope(
   }
 
   const double frames_per_second = sample_rate / hop_size;
+  NormalizeEnvelope(result.full, frames_per_second);
+  NormalizeEnvelope(result.low, frames_per_second);
+  return result;
+}
+
+// Energy-normalized autocorrelation: sum(x[n]x[n-lag]) divided by the geometric
+// mean of both lagged energies. The epsilon keeps silent input finite.
+double Correlation(const std::vector<double>& values, int lag, size_t limit) {
+  const size_t length = std::min(limit, values.size());
+  if (lag <= 0 || static_cast<size_t>(lag) >= length) return 0;
+  double cross = 0;
+  double left_energy = 0;
+  double right_energy = 0;
+  for (size_t index = lag; index < length; ++index) {
+    const double left = values[index];
+    const double right = values[index - lag];
+    cross += left * right;
+    left_energy += left * left;
+    right_energy += right * right;
+  }
+  return cross / std::sqrt(std::max(1e-12, left_energy * right_energy));
+}
+
+// Linear interpolation lets sub-frame lag refinement participate in phase
+// scoring without resampling the complete onset envelope.
+double SampleEnvelope(const std::vector<double>& values, double position) {
+  if (position < 0 || position >= values.size() - 1) return 0;
+  const size_t left = static_cast<size_t>(position);
+  const double fraction = position - left;
+  return values[left] * (1.0 - fraction) + values[left + 1] * fraction;
+}
+
+// Log-Gaussian preference for tempi near 120 BPM, used only to choose between
+// metrical levels of the *same* reading -- never to move a tempo off its
+// measured lag. Width 0.7 octaves is inside the range the perceptual-tempo
+// literature reports and, measured here, is what separates a 140 BPM track from
+// its half-time reading without disturbing anything already near 120.
