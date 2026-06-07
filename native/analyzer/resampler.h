@@ -38,3 +38,7 @@
 
 #include <cstddef>
 #include <vector>
+
+namespace yzmusic::smart {
+
+// Zero crossings kept either side of each output sample. Higher is a better
