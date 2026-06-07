@@ -61,4 +61,3 @@ std::vector<float> Resample(
 );
 
 }  // namespace yzmusic::smart
-
