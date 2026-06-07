@@ -111,3 +111,16 @@ VocalSpectrogram ComputeVocalSpectrogram(
       const size_t start = frame * kVocalSpectrogramHop;
       for (size_t index = 0; index < kVocalSpectrogramFft; ++index) {
         spectrum[index] = std::complex<double>(source[start + index] * window[index], 0.0);
+      }
+      Fft(spectrum);
+
+      // torch.stft is called with normalized=False: the raw DFT magnitude,
+      // with no additional 1/sqrt(win_length) scaling. That is the one
+      // difference from the Beat This mel front end's `normalized=True`
+      // convention, and getting it backwards would feed the model a
+      // spectrogram scaled by sqrt(4096) ~= 64x too loud.
+      //
+      // Written bin-major (stride `frames` apart) rather than contiguously,
+      // to land directly in the [channel][bin][frame] layout the ONNX tensor
+      // needs; the FFT still produces one whole frame's bins at a time, only
+      // where each one is stored differs.
