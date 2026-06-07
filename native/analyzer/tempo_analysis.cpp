@@ -512,3 +512,37 @@ TempoResult AnalyzeTempo(
       downbeat_offset = offset;
     }
   }
+  for (size_t beat = downbeat_offset; beat < result.beats.size(); beat += 4) {
+    result.downbeats.push_back(result.beats[beat]);
+  }
+
+  // Everything above works in envelope-frame space, where frame f is indexed by
+  // its first sample. The flux it carries belongs to the whole 46 ms window,
+  // though, so an onset detected in frame f actually happened around the
+  // window's centre -- and reporting the frame start puts every beat time
+  // half a window early. Measured against a click track of known phase the bias
+  // was a constant 27 ms, which is a flam on its own.
+  //
+  // It cancels between two tracks aligned to each other, so it was never what
+  // made blends drift, but everything that maps a beat onto real audio -- where
+  // to cue the incoming deck, where the drop lands -- is straighter without it.
+  const double frame_centre_seconds = frame_size / (2.0 * sample_rate);
+  result.first_beat += frame_centre_seconds;
+  for (double& beat : result.beats) beat += frame_centre_seconds;
+  for (double& beat : result.downbeats) beat += frame_centre_seconds;
+
+  double runner_up = 0;
+  for (int lag = minimum_lag; lag <= maximum_lag; ++lag) {
+    if (std::abs(lag - best_lag) > 2) runner_up = std::max(runner_up, scores[lag]);
+  }
+  const double separation = (scores[best_lag] - runner_up) / std::max(0.05, scores[best_lag]);
+  result.confidence = Clamp(
+    0.35 * scores[best_lag] + 0.35 * best_phase_score + 0.3 * std::max(0.0, separation),
+    0.0,
+    1.0
+  );
+  if (!std::isfinite(result.bpm) || result.bpm < 60 || result.bpm > 220) return TempoResult{};
+  return result;
+}
+
+}  // namespace yzmusic::smart
