@@ -142,3 +142,40 @@ OnsetEnvelopes OnsetEnvelope(
   const size_t maximum_samples = std::min(
     samples.size(),
     static_cast<size_t>(sample_rate * kMaxEnvelopeSeconds)
+  );
+  if (maximum_samples < frame_size) return result;
+
+  const size_t frame_count = 1 + (maximum_samples - frame_size) / hop_size;
+  // Bins from DC up to kLowBandHz. At the normal 11,025 Hz rate with a
+  // 512-sample frame each bin spans 21.5 Hz, so this is bins 1 through 7.
+  const size_t low_band_bins = std::min<size_t>(
+    frame_size / 2,
+    std::max<size_t>(2, static_cast<size_t>(kLowBandHz * frame_size / sample_rate))
+  );
+  result.full.assign(frame_count, 0);
+  result.low.assign(frame_count, 0);
+  std::vector<double> previous(frame_size / 2, 0);
+  std::vector<std::complex<double>> spectrum(frame_size);
+
+  for (size_t frame = 0; frame < frame_count; ++frame) {
+    const size_t start = frame * hop_size;
+    for (size_t index = 0; index < frame_size; ++index) {
+      const double window = 0.5 - 0.5 * std::cos(2.0 * kPi * index / (frame_size - 1));
+      spectrum[index] = std::complex<double>(samples[start + index] * window, 0);
+    }
+    Fft(spectrum);
+
+    double flux = 0;
+    double low_flux = 0;
+    for (size_t bin = 1; bin < frame_size / 2; ++bin) {
+      const double magnitude = std::log1p(std::abs(spectrum[bin]));
+      const double rise = std::max(0.0, magnitude - previous[bin]);
+      flux += rise;
+      if (bin < low_band_bins) low_flux += rise;
+      previous[bin] = magnitude;
+    }
+    result.full[frame] = flux;
+    result.low[frame] = low_flux;
+  }
+
+  const double frames_per_second = sample_rate / hop_size;
