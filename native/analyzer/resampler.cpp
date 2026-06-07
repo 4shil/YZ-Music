@@ -43,3 +43,15 @@ double Sinc(double x) {
 // Blackman rather than Hann: the extra term buys roughly 20 dB of stopband
 // attenuation for one more cosine per tap, and the stopband is the only reason
 // this filter exists.
+double Blackman(double position) {
+  // `position` runs 0..1 across the whole window.
+  return 0.42 - 0.5 * std::cos(2.0 * kPi * position) +
+         0.08 * std::cos(4.0 * kPi * position);
+}
+
+}  // namespace
+
+std::vector<float> Resample(
+  const std::vector<float>& input,
+  double input_rate,
+  double output_rate
