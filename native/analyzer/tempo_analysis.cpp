@@ -290,3 +290,40 @@ TempoResult AnalyzeTempo(
         Correlation(envelope, candidate, search_limit) * MetricalPrior(bpm);
       if (score > best_metrical) {
         best_metrical = score;
+        metrical_lag = candidate;
+      }
+    }
+    best_lag = metrical_lag;
+  }
+
+  double refined_lag = best_lag;
+  if (best_lag > minimum_lag && best_lag < maximum_lag) {
+    // Refined against raw correlation rather than `scores`, because the octave
+    // decision above may have moved the winner to a lag whose combined score
+    // was never the local maximum the parabola assumes.
+    const double left = Correlation(envelope, best_lag - 1, search_limit);
+    const double center = Correlation(envelope, best_lag, search_limit);
+    const double right = Correlation(envelope, best_lag + 1, search_limit);
+    const double denominator = left - 2.0 * center + right;
+    if (std::abs(denominator) > 1e-9) {
+      refined_lag += Clamp(0.5 * (left - right) / denominator, -0.5, 0.5);
+    }
+  }
+
+  // Which offset within the beat carries the onsets, scored by laying a comb of
+  // period `lag` over the envelope and summing what it lands on.
+  //
+  // `limit` matters more than it looks. The comb only measures phase if it stays
+  // in step with the music across the window it reads, and the lag it is given
+  // is quantized -- 0.15% off is enough to walk a comb half a beat out of phase
+  // in three minutes, which flattens the score into noise and makes the argmax
+  // arbitrary. So the first estimate reads a short window, where a 0.15% error
+  // is a few milliseconds, and it is taken again over everything once the
+  // tracking loop below has locked the interval to within 0.001%.
+  const auto estimate_phase = [&](double lag, size_t limit) {
+    const int phase_count = std::max(1, static_cast<int>(std::round(lag)));
+    const double end = static_cast<double>(std::min(limit, envelope.size()));
+    double best_score = -1;
+    int best = 0;
+    for (int phase = 0; phase < phase_count; ++phase) {
+      double score = 0;
