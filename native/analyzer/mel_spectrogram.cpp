@@ -130,3 +130,47 @@ std::vector<MelFilter> MelFilterbank(double sample_rate) {
 
     MelFilter filter;
     filter.first_bin = first;
+    filter.weights.reserve(last - first + 1);
+    for (size_t bin = first; bin <= last; ++bin) {
+      const double hz = static_cast<double>(bin) * sample_rate / kBeatSpectrogramFft;
+      const double rising = centre > left ? (hz - left) / (centre - left) : 0.0;
+      const double falling = right > centre ? (right - hz) / (right - centre) : 0.0;
+      filter.weights.push_back(std::max(0.0, std::min(rising, falling)));
+    }
+    filters[mel] = std::move(filter);
+  }
+  return filters;
+}
+
+// Periodic Hann, matching torch.hann_window(periodic=True): the divisor is
+// the window length, not length - 1. The symmetric variant used elsewhere in
+// this addon would be a different window and a different spectrum.
+std::vector<double> HannWindow(size_t size) {
+  std::vector<double> window(size);
+  for (size_t index = 0; index < size; ++index) {
+    window[index] = 0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(index) / size);
+  }
+  return window;
+}
+
+}  // namespace
+
+BeatSpectrogram ComputeBeatSpectrogram(
+  const std::vector<float>& samples,
+  double sample_rate
+) {
+  BeatSpectrogram result;
+  if (std::abs(sample_rate - kBeatSpectrogramSampleRate) > 1.0) return result;
+
+  // torchaudio's stft(center=True, pad_mode="reflect") centres frame f on
+  // sample f * hop, which is what puts a predicted beat at f / 50 seconds
+  // rather than half a window later.
+  const size_t pad = kBeatSpectrogramFft / 2;
+  if (samples.size() <= pad + 1) return result;
+
+  std::vector<float> padded;
+  padded.reserve(samples.size() + 2 * pad);
+  for (size_t index = pad; index >= 1; --index) padded.push_back(samples[index]);
+  padded.insert(padded.end(), samples.begin(), samples.end());
+  for (size_t index = 1; index <= pad; ++index) {
+    padded.push_back(samples[samples.size() - 1 - index]);
