@@ -59,3 +59,16 @@ void Fft(std::vector<std::complex<double>>& values) {
 }
 
 // Periodic Hann, matching torch.hann_window(periodic=True) -- the divisor is
+// the window length, not length - 1. transforms.py's TorchSTFT uses this via
+// `nn.Parameter(torch.hann_window(n_fft))`.
+std::vector<double> HannWindow(size_t size) {
+  std::vector<double> window(size);
+  for (size_t index = 0; index < size; ++index) {
+    window[index] = 0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(index) / size);
+  }
+  return window;
+}
+
+}  // namespace
+
+VocalSpectrogram ComputeVocalSpectrogram(
