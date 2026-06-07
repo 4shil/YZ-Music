@@ -438,3 +438,77 @@ TempoResult AnalyzeTempo(
               best_offset += Clamp(0.5 * (left - right) / denominator, -0.5, 0.5);
             }
           }
+          const double error = best_offset - predicted;
+          position = predicted + kPhaseGain * error;
+          interval = Clamp(
+            interval + kIntervalGain * error,
+            start_lag - max_interval_drift,
+            start_lag + max_interval_drift
+          );
+          grid.intervals.push_back(interval);
+          continue;
+        }
+      }
+      position = predicted;
+    }
+    return grid;
+  };
+
+  // The locked interval is a better tempo estimate than the lag the search
+  // started from: it was fitted against every beat in the track rather than
+  // against a quantized autocorrelation peak. The stretch ratio a transition
+  // uses comes from this number, so it is worth the median.
+  const auto learning = track(refined_lag);
+  auto grid = learning;
+  if (learning.intervals.size() >= 8) {
+    auto sorted = learning.intervals;
+    std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2, sorted.end());
+    const double locked = sorted[sorted.size() / 2];
+    if (locked > 0) refined_lag = locked;
+    // Re-take the phase against the locked interval before laying the final
+    // grid. Skipping this leaves the second pass inheriting the first pass's
+    // starting phase, and a locked interval has no way to slide off a bad one:
+    // measured, two of six tempi sat a half-beat out for the whole track,
+    // because the search radius around a wrong phase never contains the right
+    // one. The comb can now read the entire envelope without smearing.
+    const auto relocked = estimate_phase(refined_lag, envelope.size());
+    best_phase = relocked.first;
+    best_phase_score = relocked.second;
+    anchor_first_beat(best_phase, refined_lag);
+    grid = track(refined_lag);
+  }
+  result.beats.reserve(grid.beats.size());
+  for (const double frame : grid.beats) result.beats.push_back(frame / frames_per_second);
+  result.bpm = frames_per_second * 60.0 / refined_lag;
+  result.beat_interval = 60.0 / result.bpm;
+
+  // Which of the four beats is beat one.
+  //
+  // This used to take the offset with the highest mean *full-band* onset
+  // strength, which finds the loudest recurring hit -- and in produced music
+  // that is the snare, on two and four. Measured on synthetic backbeat
+  // material it chose a backbeat in nine runs out of nine, which puts every
+  // mix a half-bar out of phase even when the beats themselves line up.
+  //
+  // Bass-band onset strength answers the question the full band cannot: kick
+  // drums are down there and snares are not. The full band still contributes,
+  // because on four-on-the-floor material every offset has the same kick and
+  // the decision falls back to whatever else marks the bar.
+  int downbeat_offset = 0;
+  double downbeat_score = -1;
+  for (int offset = 0; offset < 4; ++offset) {
+    double low_score = 0;
+    double full_score = 0;
+    int count = 0;
+    for (size_t beat = offset; beat < result.beats.size() && beat < 256; beat += 4) {
+      const double position_frames = result.beats[beat] * frames_per_second;
+      low_score += SampleEnvelope(envelopes.low, position_frames);
+      full_score += SampleEnvelope(envelope, position_frames);
+      ++count;
+    }
+    const double score = (low_score + 0.4 * full_score) / std::max(1, count);
+    if (score > downbeat_score) {
+      downbeat_score = score;
+      downbeat_offset = offset;
+    }
+  }
