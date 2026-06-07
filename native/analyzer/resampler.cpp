@@ -103,3 +103,15 @@ std::vector<float> Resample(
       const auto slot = static_cast<size_t>(scaled);
       if (slot + 1 >= table_size) continue;
       const double fraction = scaled - static_cast<double>(slot);
+      const double weight =
+        kernel[slot] + fraction * (kernel[slot + 1] - kernel[slot]);
+
+      // Clamping rather than zero-padding at the edges: zeros would read as a
+      // hard cut and ring, which at the start of a track is exactly where the
+      // beat tracker is looking for the first onset.
+      const long clamped = std::min(std::max(tap, 0L), last);
+      sum += weight * static_cast<double>(input[static_cast<size_t>(clamped)]);
+      weight_sum += weight;
+    }
+
+    // Normalizing by the realized window keeps unity gain even where the taps
