@@ -77,4 +77,3 @@ BeatSpectrogram ComputeBeatSpectrogram(
 );
 
 }  // namespace yzmusic::smart
-
