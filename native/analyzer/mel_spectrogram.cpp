@@ -108,3 +108,25 @@ std::vector<MelFilter> MelFilterbank(double sample_rate) {
   const double mel_min = HzToMel(kMinHz);
   const double mel_max = HzToMel(kMaxHz);
 
+  std::vector<double> edges(kBeatSpectrogramMels + 2);
+  for (size_t index = 0; index < edges.size(); ++index) {
+    edges[index] = MelToHz(
+      mel_min + (mel_max - mel_min) * static_cast<double>(index) / (kBeatSpectrogramMels + 1)
+    );
+  }
+
+  std::vector<MelFilter> filters(kBeatSpectrogramMels);
+  for (size_t mel = 0; mel < kBeatSpectrogramMels; ++mel) {
+    const double left = edges[mel];
+    const double centre = edges[mel + 1];
+    const double right = edges[mel + 2];
+    // The triangle is non-zero strictly between its outer edges.
+    const auto to_bin = [&](double hz) {
+      return hz * kBeatSpectrogramFft / sample_rate;
+    };
+    const size_t first = static_cast<size_t>(std::max(0.0, std::floor(to_bin(left))));
+    const size_t last = std::min(bins - 1, static_cast<size_t>(std::ceil(to_bin(right))));
+    if (last < first) continue;
+
+    MelFilter filter;
+    filter.first_bin = first;
