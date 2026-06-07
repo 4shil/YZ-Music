@@ -67,3 +67,15 @@ std::vector<float> Resample(
   const double half_width = static_cast<double>(kResamplerZeroCrossings) / (2.0 * cutoff);
 
   const size_t output_count =
+    static_cast<size_t>(std::floor(static_cast<double>(input.size()) * ratio));
+  if (output_count == 0) return {};
+
+  // The kernel is precomputed rather than evaluated per tap. Evaluating it
+  // inline costs a sin and two cos for every tap, and at ~128 taps per output
+  // sample that is a quarter of a billion transcendental calls for a thirty
+  // second window -- absorbed on a desktop, emphatically not on a phone. The
+  // kernel is symmetric about the centre, so a table over |offset| covers it,
+  // and linear interpolation between entries is far below the error already
+  // present in the audio.
+  const size_t table_size =
+    static_cast<size_t>(std::ceil(half_width * kKernelResolution)) + 2;
