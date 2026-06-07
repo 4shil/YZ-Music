@@ -115,3 +115,11 @@ std::vector<float> Resample(
     }
 
     // Normalizing by the realized window keeps unity gain even where the taps
+    // were clamped, so the edges do not come out quieter than the middle.
+    output[index] = static_cast<float>(weight_sum != 0.0 ? sum / weight_sum : 0.0);
+  }
+
+  return output;
+}
+
+}  // namespace yzmusic::smart
