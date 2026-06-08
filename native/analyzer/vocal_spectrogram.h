@@ -74,3 +74,7 @@ struct VocalSpectrogram {
 VocalSpectrogram ComputeVocalSpectrogram(
   const std::vector<std::vector<float>>& channels,
   double sample_rate
+);
+
+}  // namespace yzmusic::smart
+
