@@ -142,3 +142,77 @@ OnsetEnvelopes OnsetEnvelope(
   const size_t maximum_samples = std::min(
     samples.size(),
     static_cast<size_t>(sample_rate * kMaxEnvelopeSeconds)
+  );
+  if (maximum_samples < frame_size) return result;
+
+  const size_t frame_count = 1 + (maximum_samples - frame_size) / hop_size;
+  // Bins from DC up to kLowBandHz. At the normal 11,025 Hz rate with a
+  // 512-sample frame each bin spans 21.5 Hz, so this is bins 1 through 7.
+  const size_t low_band_bins = std::min<size_t>(
+    frame_size / 2,
+    std::max<size_t>(2, static_cast<size_t>(kLowBandHz * frame_size / sample_rate))
+  );
+  result.full.assign(frame_count, 0);
+  result.low.assign(frame_count, 0);
+  std::vector<double> previous(frame_size / 2, 0);
+  std::vector<std::complex<double>> spectrum(frame_size);
+
+  for (size_t frame = 0; frame < frame_count; ++frame) {
+    const size_t start = frame * hop_size;
+    for (size_t index = 0; index < frame_size; ++index) {
+      const double window = 0.5 - 0.5 * std::cos(2.0 * kPi * index / (frame_size - 1));
+      spectrum[index] = std::complex<double>(samples[start + index] * window, 0);
+    }
+    Fft(spectrum);
+
+    double flux = 0;
+    double low_flux = 0;
+    for (size_t bin = 1; bin < frame_size / 2; ++bin) {
+      const double magnitude = std::log1p(std::abs(spectrum[bin]));
+      const double rise = std::max(0.0, magnitude - previous[bin]);
+      flux += rise;
+      if (bin < low_band_bins) low_flux += rise;
+      previous[bin] = magnitude;
+    }
+    result.full[frame] = flux;
+    result.low[frame] = low_flux;
+  }
+
+  const double frames_per_second = sample_rate / hop_size;
+  NormalizeEnvelope(result.full, frames_per_second);
+  NormalizeEnvelope(result.low, frames_per_second);
+  return result;
+}
+
+// Energy-normalized autocorrelation: sum(x[n]x[n-lag]) divided by the geometric
+// mean of both lagged energies. The epsilon keeps silent input finite.
+double Correlation(const std::vector<double>& values, int lag, size_t limit) {
+  const size_t length = std::min(limit, values.size());
+  if (lag <= 0 || static_cast<size_t>(lag) >= length) return 0;
+  double cross = 0;
+  double left_energy = 0;
+  double right_energy = 0;
+  for (size_t index = lag; index < length; ++index) {
+    const double left = values[index];
+    const double right = values[index - lag];
+    cross += left * right;
+    left_energy += left * left;
+    right_energy += right * right;
+  }
+  return cross / std::sqrt(std::max(1e-12, left_energy * right_energy));
+}
+
+// Linear interpolation lets sub-frame lag refinement participate in phase
+// scoring without resampling the complete onset envelope.
+double SampleEnvelope(const std::vector<double>& values, double position) {
+  if (position < 0 || position >= values.size() - 1) return 0;
+  const size_t left = static_cast<size_t>(position);
+  const double fraction = position - left;
+  return values[left] * (1.0 - fraction) + values[left + 1] * fraction;
+}
+
+// Log-Gaussian preference for tempi near 120 BPM, used only to choose between
+// metrical levels of the *same* reading -- never to move a tempo off its
+// measured lag. Width 0.7 octaves is inside the range the perceptual-tempo
+// literature reports and, measured here, is what separates a 140 BPM track from
+// its half-time reading without disturbing anything already near 120.
