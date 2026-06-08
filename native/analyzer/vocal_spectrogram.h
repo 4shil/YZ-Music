@@ -59,3 +59,8 @@ struct VocalSpectrogram {
   // at a time in, specifically so it matches the ONNX model's expected tensor
   // shape [1, 2, kVocalSpectrogramBins, frames] exactly -- the caller hands
   // this straight to an inference call with no transpose.
+  std::vector<float> values;
+  size_t frames = 0;
+};
+
+/**
