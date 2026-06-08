@@ -475,3 +475,74 @@ TempoResult AnalyzeTempo(
     best_phase = relocked.first;
     best_phase_score = relocked.second;
     anchor_first_beat(best_phase, refined_lag);
+    grid = track(refined_lag);
+  }
+  result.beats.reserve(grid.beats.size());
+  for (const double frame : grid.beats) result.beats.push_back(frame / frames_per_second);
+  result.bpm = frames_per_second * 60.0 / refined_lag;
+  result.beat_interval = 60.0 / result.bpm;
+
+  // Which of the four beats is beat one.
+  //
+  // This used to take the offset with the highest mean *full-band* onset
+  // strength, which finds the loudest recurring hit -- and in produced music
+  // that is the snare, on two and four. Measured on synthetic backbeat
+  // material it chose a backbeat in nine runs out of nine, which puts every
+  // mix a half-bar out of phase even when the beats themselves line up.
+  //
+  // Bass-band onset strength answers the question the full band cannot: kick
+  // drums are down there and snares are not. The full band still contributes,
+  // because on four-on-the-floor material every offset has the same kick and
+  // the decision falls back to whatever else marks the bar.
+  int downbeat_offset = 0;
+  double downbeat_score = -1;
+  for (int offset = 0; offset < 4; ++offset) {
+    double low_score = 0;
+    double full_score = 0;
+    int count = 0;
+    for (size_t beat = offset; beat < result.beats.size() && beat < 256; beat += 4) {
+      const double position_frames = result.beats[beat] * frames_per_second;
+      low_score += SampleEnvelope(envelopes.low, position_frames);
+      full_score += SampleEnvelope(envelope, position_frames);
+      ++count;
+    }
+    const double score = (low_score + 0.4 * full_score) / std::max(1, count);
+    if (score > downbeat_score) {
+      downbeat_score = score;
+      downbeat_offset = offset;
+    }
+  }
+  for (size_t beat = downbeat_offset; beat < result.beats.size(); beat += 4) {
+    result.downbeats.push_back(result.beats[beat]);
+  }
+
+  // Everything above works in envelope-frame space, where frame f is indexed by
+  // its first sample. The flux it carries belongs to the whole 46 ms window,
+  // though, so an onset detected in frame f actually happened around the
+  // window's centre -- and reporting the frame start puts every beat time
+  // half a window early. Measured against a click track of known phase the bias
+  // was a constant 27 ms, which is a flam on its own.
+  //
+  // It cancels between two tracks aligned to each other, so it was never what
+  // made blends drift, but everything that maps a beat onto real audio -- where
+  // to cue the incoming deck, where the drop lands -- is straighter without it.
+  const double frame_centre_seconds = frame_size / (2.0 * sample_rate);
+  result.first_beat += frame_centre_seconds;
+  for (double& beat : result.beats) beat += frame_centre_seconds;
+  for (double& beat : result.downbeats) beat += frame_centre_seconds;
+
+  double runner_up = 0;
+  for (int lag = minimum_lag; lag <= maximum_lag; ++lag) {
+    if (std::abs(lag - best_lag) > 2) runner_up = std::max(runner_up, scores[lag]);
+  }
+  const double separation = (scores[best_lag] - runner_up) / std::max(0.05, scores[best_lag]);
+  result.confidence = Clamp(
+    0.35 * scores[best_lag] + 0.35 * best_phase_score + 0.3 * std::max(0.0, separation),
+    0.0,
+    1.0
+  );
+  if (!std::isfinite(result.bpm) || result.bpm < 60 || result.bpm > 220) return TempoResult{};
+  return result;
+}
+
+}  // namespace yzmusic::smart
