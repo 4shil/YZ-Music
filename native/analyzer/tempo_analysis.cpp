@@ -438,3 +438,40 @@ TempoResult AnalyzeTempo(
               best_offset += Clamp(0.5 * (left - right) / denominator, -0.5, 0.5);
             }
           }
+          const double error = best_offset - predicted;
+          position = predicted + kPhaseGain * error;
+          interval = Clamp(
+            interval + kIntervalGain * error,
+            start_lag - max_interval_drift,
+            start_lag + max_interval_drift
+          );
+          grid.intervals.push_back(interval);
+          continue;
+        }
+      }
+      position = predicted;
+    }
+    return grid;
+  };
+
+  // The locked interval is a better tempo estimate than the lag the search
+  // started from: it was fitted against every beat in the track rather than
+  // against a quantized autocorrelation peak. The stretch ratio a transition
+  // uses comes from this number, so it is worth the median.
+  const auto learning = track(refined_lag);
+  auto grid = learning;
+  if (learning.intervals.size() >= 8) {
+    auto sorted = learning.intervals;
+    std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2, sorted.end());
+    const double locked = sorted[sorted.size() / 2];
+    if (locked > 0) refined_lag = locked;
+    // Re-take the phase against the locked interval before laying the final
+    // grid. Skipping this leaves the second pass inheriting the first pass's
+    // starting phase, and a locked interval has no way to slide off a bad one:
+    // measured, two of six tempi sat a half-beat out for the whole track,
+    // because the search radius around a wrong phase never contains the right
+    // one. The comb can now read the entire envelope without smearing.
+    const auto relocked = estimate_phase(refined_lag, envelope.size());
+    best_phase = relocked.first;
+    best_phase_score = relocked.second;
+    anchor_first_beat(best_phase, refined_lag);
