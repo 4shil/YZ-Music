@@ -77,4 +77,3 @@ VocalSpectrogram ComputeVocalSpectrogram(
 );
 
 }  // namespace yzmusic::smart
-
