@@ -85,3 +85,16 @@ VocalSpectrogram ComputeVocalSpectrogram(
   // f * hop, matching the mel front end's identical padding.
   const size_t pad = kVocalSpectrogramFft / 2;
   if (input_length <= pad + 1) return result;
+
+  const auto window = HannWindow(kVocalSpectrogramFft);
+  std::vector<std::vector<float>> padded(kVocalSpectrogramChannels);
+  for (size_t channel = 0; channel < kVocalSpectrogramChannels; ++channel) {
+    auto& out = padded[channel];
+    const auto& in = channels[channel];
+    out.reserve(input_length + 2 * pad);
+    for (size_t index = pad; index >= 1; --index) out.push_back(in[index]);
+    out.insert(out.end(), in.begin(), in.end());
+    for (size_t index = 1; index <= pad; ++index) out.push_back(in[input_length - 1 - index]);
+  }
+
+  const size_t padded_length = padded.front().size();
