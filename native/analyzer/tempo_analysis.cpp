@@ -364,3 +364,40 @@ TempoResult AnalyzeTempo(
   // that estimate is quantized: at 11,025 Hz with a 128-sample hop, one frame of
   // autocorrelation lag is 3.17 BPM at 128 BPM, so sub-frame interpolation is
   // doing all the precision work and lands within roughly 0.15%. Harmless over a
+  // few bars; across the four minutes to a track's mix-out anchor it is 90 to
+  // 300 ms of accumulated phase error, measured on a *perfect* click track --
+  // up to 40% of a beat at 128 BPM, and both sides of a transition err
+  // independently. That is the single largest reason beat-matched blends do not
+  // line up.
+  //
+  // This is a phase-locked loop over the onset envelope: each beat is predicted
+  // from the running grid, the envelope is searched within a fraction of a beat
+  // for the onset that actually occurred, and the error feeds back as a fast
+  // phase correction plus a slow interval correction. The interval term is what
+  // removes the accumulating component -- a persistent error means the estimate
+  // is wrong, not that one beat moved. Both terms are bounded: phase to a
+  // quarter beat and interval to 3%, so the loop can follow a drifting
+  // performance but can never walk onto the offbeat.
+  //
+  // Run twice. The interval term needs on the order of 1/kIntervalGain beats to
+  // pull a 0.15% tempo error out of the loop, which is about two minutes of
+  // music -- so a single forward pass is still 160 ms out at the half-minute
+  // mark, and the incoming track's mix-in point lives exactly there. The first
+  // pass therefore only learns the interval; the second lays the grid down
+  // already locked to it, from the first beat.
+  const double envelope_end = static_cast<double>(envelope.size()) - 1;
+  const double last_frame = duration * frames_per_second;
+
+  struct TrackedGrid {
+    std::vector<double> beats;
+    std::vector<double> intervals;
+  };
+
+  const auto track = [&](double start_lag) {
+    TrackedGrid grid;
+    // A quarter beat: wide enough for real tempo drift, narrow enough that the
+    // adjacent beat is never a candidate.
+    const double search_radius = start_lag * 0.25;
+    constexpr double kPhaseGain = 0.20;
+    constexpr double kIntervalGain = 0.01;
+    const double max_interval_drift = start_lag * 0.03;
