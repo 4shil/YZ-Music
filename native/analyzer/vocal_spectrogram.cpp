@@ -124,3 +124,14 @@ VocalSpectrogram ComputeVocalSpectrogram(
       // to land directly in the [channel][bin][frame] layout the ONNX tensor
       // needs; the FFT still produces one whole frame's bins at a time, only
       // where each one is stored differs.
+      const size_t channel_base = channel * kVocalSpectrogramBins * frames;
+      for (size_t bin = 0; bin < kVocalSpectrogramBins; ++bin) {
+        result.values[channel_base + bin * frames + frame] =
+          static_cast<float>(std::abs(spectrum[bin]));
+      }
+    }
+  }
+  return result;
+}
+
+}  // namespace yzmusic::smart
