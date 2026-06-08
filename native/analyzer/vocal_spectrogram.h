@@ -69,3 +69,8 @@ struct VocalSpectrogram {
  * Returns an empty result -- not an error -- when the sample rate is not
  * kVocalSpectrogramSampleRate, the channel count is not
  * kVocalSpectrogramChannels, or the input is shorter than one padded frame.
+ * Callers treat that as "no mask available" and skip the vocal duck.
+ */
+VocalSpectrogram ComputeVocalSpectrogram(
+  const std::vector<std::vector<float>>& channels,
+  double sample_rate
