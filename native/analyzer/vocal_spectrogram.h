@@ -54,3 +54,8 @@ inline constexpr size_t kVocalSpectrogramHop = 1024;
 
 struct VocalSpectrogram {
   // Row-major [channel][bin][frame], flattened: channel c, bin b, frame f is
+  // at index (c * kVocalSpectrogramBins + b) * frames + f. This is bin-major
+  // rather than the more natural frame-major order an STFT computes one frame
+  // at a time in, specifically so it matches the ONNX model's expected tensor
+  // shape [1, 2, kVocalSpectrogramBins, frames] exactly -- the caller hands
+  // this straight to an inference call with no transpose.
