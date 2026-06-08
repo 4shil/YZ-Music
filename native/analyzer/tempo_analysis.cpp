@@ -327,3 +327,40 @@ TempoResult AnalyzeTempo(
     int best = 0;
     for (int phase = 0; phase < phase_count; ++phase) {
       double score = 0;
+      int count = 0;
+      for (double position = phase; position < end; position += lag) {
+        score += SampleEnvelope(envelope, position);
+        ++count;
+      }
+      score /= std::max(1, count);
+      if (score > best_score) {
+        best_score = score;
+        best = phase;
+      }
+    }
+    return std::pair<int, double>{best, best_score};
+  };
+
+  // Thirty seconds: long enough for a hundred-odd beats to vote, short enough
+  // that a quantized lag cannot smear them.
+  constexpr double kPhaseSearchSeconds = 30.0;
+  auto [best_phase, best_phase_score] = estimate_phase(
+    refined_lag,
+    static_cast<size_t>(frames_per_second * kPhaseSearchSeconds)
+  );
+
+  const auto anchor_first_beat = [&](int phase, double lag) {
+    const double interval_seconds = lag / frames_per_second;
+    double first = phase / frames_per_second;
+    while (first + interval_seconds < audible_start - 0.15) first += interval_seconds;
+    while (first > audible_start + interval_seconds) first -= interval_seconds;
+    result.first_beat = std::max(0.0, first);
+  };
+  anchor_first_beat(best_phase, refined_lag);
+
+  // Track the grid forward instead of extrapolating it.
+  //
+  // A rigid grid is only as good as the tempo estimate that generated it, and
+  // that estimate is quantized: at 11,025 Hz with a 128-sample hop, one frame of
+  // autocorrelation lag is 3.17 BPM at 128 BPM, so sub-frame interpolation is
+  // doing all the precision work and lands within roughly 0.15%. Harmless over a
