@@ -44,3 +44,8 @@
 #include <cstddef>
 #include <vector>
 
+namespace yzmusic::smart {
+
+inline constexpr double kVocalSpectrogramSampleRate = 44100;
+inline constexpr size_t kVocalSpectrogramChannels = 2;
+inline constexpr size_t kVocalSpectrogramFft = 4096;
