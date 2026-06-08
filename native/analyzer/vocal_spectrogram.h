@@ -1,0 +1,46 @@
+﻿/*
+ * Ported from Orchard (https://github.com/SFG5453/Orchard), whose native STFT
+ * front end this file is adapted from almost unchanged: every constant here
+ * is dictated by the open-unmix model's training data, not a preference, so
+ * reimplementing it from a description would feed the network an input
+ * distribution it has never seen.
+ *
+ * Copyright (C) 2026 SFG545 (original Orchard implementation)
+ * Copyright (C) 2026 Kushagra Singh (YZ Music adaptation)
+ *
+ * Orchard's original source is licensed under the GNU Affero General Public
+ * License, version 3 or later. Per AGPLv3 section 13, this file is combined
+ * here into YZ Music -- a work licensed under the GNU General Public
+ * License, version 3 or later -- and remains itself governed by the AGPLv3
+ * as part of that combination.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+// Linear-frequency STFT magnitude front end for the open-unmix vocal
+// separation model.
+//
+// Every constant here is dictated by the trained network, not chosen: the
+// model was trained on exactly this STFT (torch.stft with these settings,
+// see openunmix/transforms.py's TorchSTFT, MIT-licensed, Inria/SigSep), and
+// a front end that differs in window convention or normalization feeds it
+// something it has never seen -- the same lesson the Beat This mel front end
+// already encodes, see mel_spectrogram.h.
+//
+// `channels` is planar (non-interleaved) stereo Float32 PCM that must
+// already be at kVocalSpectrogramSampleRate; the caller owns resampling and
+// mono duplication. Calls borrow the input only until they return, own all
+// returned storage, and are reentrant. The work is O(n log n) and allocates,
+// so it belongs on a worker thread.
+
+#pragma once
+
+#include <cstddef>
+#include <vector>
+
