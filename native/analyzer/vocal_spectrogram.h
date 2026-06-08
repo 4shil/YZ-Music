@@ -49,3 +49,8 @@ namespace yzmusic::smart {
 inline constexpr double kVocalSpectrogramSampleRate = 44100;
 inline constexpr size_t kVocalSpectrogramChannels = 2;
 inline constexpr size_t kVocalSpectrogramFft = 4096;
+inline constexpr size_t kVocalSpectrogramBins = kVocalSpectrogramFft / 2 + 1;
+inline constexpr size_t kVocalSpectrogramHop = 1024;
+
+struct VocalSpectrogram {
+  // Row-major [channel][bin][frame], flattened: channel c, bin b, frame f is
