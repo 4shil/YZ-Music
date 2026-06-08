@@ -216,3 +216,77 @@ double SampleEnvelope(const std::vector<double>& values, double position) {
 // measured lag. Width 0.7 octaves is inside the range the perceptual-tempo
 // literature reports and, measured here, is what separates a 140 BPM track from
 // its half-time reading without disturbing anything already near 120.
+double MetricalPrior(double bpm) {
+  if (!(bpm > 0)) return 0;
+  const double octaves = std::log2(bpm / 120.0) / 0.7;
+  return std::exp(-0.5 * octaves * octaves);
+}
+
+}  // namespace
+
+// Searches 70-200 BPM. A candidate combines normalized correlation at its lag,
+// 0.42 times the double-lag correlation, and a small Gaussian prior around 118
+// BPM; the winner is then re-examined against its own half and double lag so a
+// pattern that repeats every two beats cannot pass itself off as the tempo.
+// Quadratic interpolation refines the winning lag by at most half a frame, and
+// phase maximizes onset strength. The grid is then tracked forward with a
+// phase-locked loop rather than extrapolated, and the four-beat downbeat offset
+// is chosen on bass-band onset strength. Confidence blends tempo strength,
+// phase strength, and separation from non-neighboring candidates.
+TempoResult AnalyzeTempo(
+  const std::vector<float>& samples,
+  double sample_rate,
+  double duration,
+  double audible_start
+) {
+  TempoResult result;
+  // At the normal 11,025 Hz analysis rate this is a 46 ms Hann window with an
+  // 11.6 ms hop. Other accepted sample rates retain the same sample counts.
+  constexpr size_t frame_size = 512;
+  constexpr size_t hop_size = 128;
+  const auto envelopes = OnsetEnvelope(samples, sample_rate, frame_size, hop_size);
+  const auto& envelope = envelopes.full;
+  // Short or silent-enough inputs fail closed to the default zero tempo.
+  if (envelope.size() < 64) return result;
+
+  const double frames_per_second = sample_rate / hop_size;
+  // The tempo search reads a bounded prefix; the tracking below reads all of it.
+  const size_t search_limit = std::min(
+    envelope.size(),
+    static_cast<size_t>(frames_per_second * kMaxTempoSearchSeconds)
+  );
+  const int minimum_lag = std::max(2, static_cast<int>(std::floor(frames_per_second * 60.0 / 200.0)));
+  const int maximum_lag = static_cast<int>(std::ceil(frames_per_second * 60.0 / 70.0));
+  std::vector<double> scores(maximum_lag + 1, 0);
+  int best_lag = minimum_lag;
+  for (int lag = minimum_lag; lag <= maximum_lag; ++lag) {
+    const double bpm = frames_per_second * 60.0 / lag;
+    const double tempo_prior = std::exp(-std::pow((bpm - 118.0) / 75.0, 2.0));
+    scores[lag] = Correlation(envelope, lag, search_limit) +
+      0.42 * Correlation(envelope, lag * 2, search_limit) +
+      0.08 * tempo_prior;
+    if (scores[lag] > scores[best_lag]) best_lag = lag;
+  }
+
+  // Resolve the metrical level. The 0.42 double-lag term above stabilizes the
+  // search against picking double time, but it does so by rewarding whichever
+  // lag has a strong correlation one octave up -- and in most produced music
+  // the drum pattern repeats every two beats, so the half-tempo lag inherits
+  // that reward and wins. Measured on synthetic backbeat material, 140, 150 and
+  // 174 BPM all came back at almost exactly half.
+  //
+  // So the winner is re-examined against its own half and double lag using the
+  // *raw* correlation, with no double-lag term to bias the comparison, scaled
+  // by a perceptual tempo prior. This can only move the reading by an octave;
+  // it never overrides which lag the search actually found.
+  {
+    double best_metrical = -1;
+    int metrical_lag = best_lag;
+    for (const double ratio : {0.5, 1.0, 2.0}) {
+      const int candidate = static_cast<int>(std::lround(best_lag * ratio));
+      if (candidate < minimum_lag || candidate > maximum_lag) continue;
+      const double bpm = frames_per_second * 60.0 / candidate;
+      const double score =
+        Correlation(envelope, candidate, search_limit) * MetricalPrior(bpm);
+      if (score > best_metrical) {
+        best_metrical = score;
