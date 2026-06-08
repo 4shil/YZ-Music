@@ -64,3 +64,8 @@ struct VocalSpectrogram {
 };
 
 /**
+ * Computes the linear-magnitude STFT the vocal-separation model expects.
+ *
+ * Returns an empty result -- not an error -- when the sample rate is not
+ * kVocalSpectrogramSampleRate, the channel count is not
+ * kVocalSpectrogramChannels, or the input is shorter than one padded frame.
