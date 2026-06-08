@@ -98,3 +98,16 @@ VocalSpectrogram ComputeVocalSpectrogram(
   }
 
   const size_t padded_length = padded.front().size();
+  if (padded_length < kVocalSpectrogramFft) return result;
+  const size_t frames = (padded_length - kVocalSpectrogramFft) / kVocalSpectrogramHop + 1;
+
+  result.frames = frames;
+  result.values.assign(kVocalSpectrogramChannels * frames * kVocalSpectrogramBins, 0.0f);
+
+  std::vector<std::complex<double>> spectrum(kVocalSpectrogramFft);
+  for (size_t channel = 0; channel < kVocalSpectrogramChannels; ++channel) {
+    const auto& source = padded[channel];
+    for (size_t frame = 0; frame < frames; ++frame) {
+      const size_t start = frame * kVocalSpectrogramHop;
+      for (size_t index = 0; index < kVocalSpectrogramFft; ++index) {
+        spectrum[index] = std::complex<double>(source[start + index] * window[index], 0.0);
