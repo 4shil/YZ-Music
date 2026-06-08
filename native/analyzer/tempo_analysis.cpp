@@ -401,3 +401,40 @@ TempoResult AnalyzeTempo(
     constexpr double kPhaseGain = 0.20;
     constexpr double kIntervalGain = 0.01;
     const double max_interval_drift = start_lag * 0.03;
+
+    double position = result.first_beat * frames_per_second;
+    double interval = start_lag;
+
+    while (position <= last_frame + 1e-6) {
+      grid.beats.push_back(std::max(0.0, position));
+      const double predicted = position + interval;
+      if (predicted > last_frame + 1e-6) break;
+
+      if (predicted + search_radius < envelope_end) {
+        // Find the strongest onset within the window, at whole-frame resolution
+        // refined by a parabola so the correction is not itself quantized.
+        double best_value = -1;
+        double best_offset = 0;
+        const int low = static_cast<int>(std::floor(predicted - search_radius));
+        const int high = static_cast<int>(std::ceil(predicted + search_radius));
+        for (int frame = std::max(0, low);
+             frame <= high && frame < static_cast<int>(envelope.size()); ++frame) {
+          if (envelope[frame] > best_value) {
+            best_value = envelope[frame];
+            best_offset = frame;
+          }
+        }
+        // Only a real onset may steer the loop. On a passage with no percussion
+        // the envelope is flat noise, and following it would be worse than
+        // coasting on the interval the loop has already learned.
+        if (best_value > 0.15) {
+          const auto index = static_cast<size_t>(best_offset);
+          if (index > 0 && index + 1 < envelope.size()) {
+            const double left = envelope[index - 1];
+            const double center = envelope[index];
+            const double right = envelope[index + 1];
+            const double denominator = left - 2.0 * center + right;
+            if (std::abs(denominator) > 1e-9) {
+              best_offset += Clamp(0.5 * (left - right) / denominator, -0.5, 0.5);
+            }
+          }
