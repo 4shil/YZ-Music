@@ -297,3 +297,17 @@ private fun TopBarBackdropPreview() {
         Column(
             Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+        ) {
+            Box(Modifier.height(160.dp)) {
+                FrostedTopBar(title = "At rest", scrolled = false)
+            }
+            Box(Modifier.height(160.dp)) {
+                FrostedTopBar(title = "Scrolled", scrolled = true)
+            }
+            Box(Modifier.height(160.dp)) {
+                FrostedTopBar(title = "Pushed page", scrolled = true, onBack = {})
+            }
+        }
+    }
+}
