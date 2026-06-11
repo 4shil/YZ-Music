@@ -48,3 +48,6 @@ fun rememberIsForeground(): Boolean {
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
+    }
+    return foreground
+}
