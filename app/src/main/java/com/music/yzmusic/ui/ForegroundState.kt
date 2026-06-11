@@ -36,3 +36,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 @Composable
 fun rememberIsForeground(): Boolean {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var foreground by remember(lifecycle) {
+        mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
