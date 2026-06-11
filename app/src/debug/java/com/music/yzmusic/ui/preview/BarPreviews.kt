@@ -177,3 +177,27 @@ private fun ChromeStack(scrolled: Boolean, withMiniPlayer: Boolean) {
         }
     }
 }
+
+@Preview(name = "Chrome · dark", device = "id:pixel_8", showBackground = true)
+@Composable
+private fun ChromeDarkPreview() {
+    YZMusicTheme(darkTheme = true) { ChromeStack(scrolled = true, withMiniPlayer = false) }
+}
+
+@Preview(name = "Chrome · light", device = "id:pixel_8", showBackground = true)
+@Composable
+private fun ChromeLightPreview() {
+    YZMusicTheme(darkTheme = false) { ChromeStack(scrolled = true, withMiniPlayer = false) }
+}
+
+/** The taller scrim, which the mini player's arrival grows it into. */
+@Preview(name = "Chrome · mini player", device = "id:pixel_8", showBackground = true)
+@Composable
+private fun ChromeMiniPlayerPreview() {
+    YZMusicTheme(darkTheme = true) { ChromeStack(scrolled = true, withMiniPlayer = true) }
+}
+
+/**
+ * The mini player on its own, at the three states the transport slot takes.
+ *
+ * This is the preview for the pill's geometry: the corner is half the height,
