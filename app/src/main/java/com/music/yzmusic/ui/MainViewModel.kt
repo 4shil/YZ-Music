@@ -928,3 +928,231 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_home.value is UiState.Success) refresh(Feed.HOME)
     }
 
+    private fun loadAccount() {
+        viewModelScope.launch {
+            _account.value = YtMusicRepository.account().getOrNull()
+        }
+    }
+
+    /**
+     * A feed that can be pulled down to refresh. Tracked per feed rather than
+     * as one flag: a pull on Library while Home is still refreshing in the
+     * background shouldn't leave the wrong tab showing a loader.
+     */
+    enum class Feed { HOME, EXPLORE, LIBRARY }
+
+    private val _refreshing = MutableStateFlow(emptySet<Feed>())
+    val refreshing: StateFlow<Set<Feed>> = _refreshing.asStateFlow()
+
+    /**
+     * Re-fetches [feed] in place. Unlike the `load*` entry points this leaves
+     * the current content on screen rather than dropping back to the loading
+     * state — a refresh that swapped the page for a spinner would be a worse
+     * experience than the stale content it replaces.
+     */
+    fun refresh(feed: Feed) {
+        if (feed in _refreshing.value) return
+        if (feed == Feed.LIBRARY && !_signedIn.value) return
+        _refreshing.value = _refreshing.value + feed
+        viewModelScope.launch {
+            when (feed) {
+                Feed.HOME -> fetchHome()
+                Feed.EXPLORE -> fetchExplore()
+                Feed.LIBRARY -> fetchLibrary()
+            }
+            _refreshing.value = _refreshing.value - feed
+        }
+    }
+
+    fun loadExplore() {
+        _explore.value = UiState.Loading
+        viewModelScope.launch { fetchExplore() }
+    }
+
+    private suspend fun fetchExplore() {
+        _explore.value = YtMusicRepository.explore().fold(
+            onSuccess = { shelves ->
+                if (shelves.isEmpty()) UiState.Error("Nothing to explore right now")
+                else UiState.Success(shelves)
+            },
+            onFailure = { UiState.Error(it.friendly()) },
+        )
+    }
+
+    /** Tapping a tab should leave any pushed page behind. */
+    fun clearDetail() {
+        if (_detailStack.value.isNotEmpty()) _detailStack.value = emptyList()
+    }
+
+    fun loadHome() {
+        _home.value = UiState.Loading
+        viewModelScope.launch { fetchHome() }
+    }
+
+    private suspend fun fetchHome() {
+        homeContinuation = null
+        homeSeenTitles.clear()
+        _home.value = YtMusicRepository.home().fold(
+            onSuccess = { feed ->
+                homeContinuation = feed.continuation
+                val shelves = feed.shelves.filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
+                if (shelves.isEmpty()) UiState.Error("No results from YouTube Music")
+                else UiState.Success(shelves)
+            },
+            onFailure = { UiState.Error(it.friendly()) },
+        )
+    }
+
+    /**
+     * Called as the Home list nears its end. A no-op while a page is already
+     * in flight, once the feed is exhausted, or before the first page has
+     * loaded — [homeContinuation] covers all three by construction.
+     */
+    fun loadMoreHome() {
+        val token = homeContinuation ?: return
+        if (_homeLoadingMore.value) return
+        _homeLoadingMore.value = true
+        viewModelScope.launch {
+            YtMusicRepository.moreHome(token).onSuccess { feed ->
+                val added = feed.shelves.filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
+                // A page with nothing new signals the feed has looped back on
+                // itself rather than run dry with a token still attached —
+                // treat it the same as exhausted so scrolling can't spin here.
+                homeContinuation = feed.continuation.takeIf { added.isNotEmpty() }
+                if (added.isNotEmpty()) {
+                    val existing = (_home.value as? UiState.Success)?.data ?: emptyList()
+                    _home.value = UiState.Success(existing + added)
+                }
+            }
+            _homeLoadingMore.value = false
+        }
+    }
+
+    fun loadLibrary() {
+        if (!_signedIn.value) return
+        _library.value = UiState.Loading
+        viewModelScope.launch { fetchLibrary() }
+    }
+
+    private suspend fun fetchLibrary() {
+        _library.value = YtMusicRepository.library().fold(
+            onSuccess = { page ->
+                if (page.isEmpty) UiState.Error("Nothing in your library yet")
+                else UiState.Success(page)
+            },
+            onFailure = { UiState.Error(it.friendly()) },
+        )
+    }
+
+    /**
+     * The account's listening history.
+     *
+     * Loaded on each visit rather than cached: it is a page whose whole subject
+     * is what happened most recently, and one that opened showing the state it
+     * was in last time would be answering a different question. Guests get the
+     * signed-out message straight away, since there is no account to have a
+     * history on.
+     */
+    fun loadHistory() {
+        if (!_signedIn.value) {
+            _history.value = UiState.Error("Sign in to see what you've been listening to")
+            return
+        }
+        _history.value = UiState.Loading
+        viewModelScope.launch {
+            _history.value = YtMusicRepository.history().fold(
+                onSuccess = { songs ->
+                    if (songs.isEmpty()) UiState.Error("Nothing played yet")
+                    else UiState.Success(songs)
+                },
+                onFailure = { UiState.Error(it.friendly()) },
+            )
+        }
+    }
+
+    /** Recent searches, kept on device. */
+    val searchHistory: StateFlow<List<String>> = SearchHistory.recent
+
+    fun onQueryChange(value: String) {
+        val previous = _query.value
+        _query.value = value
+        if (value.isBlank()) {
+            // Emptying the field is how the recent searches are got back to,
+            // so it takes down the suggestions and the results together.
+            // Nothing in flight can still be waiting to overwrite the latter:
+            // the id it would be checked against has already moved past it.
+            newestRequestId.incrementAndGet()
+            _results.value = null
+            _suggestions.value = emptyList()
+            return
+        }
+        // The previous keystroke's completions are left up beneath the new
+        // lead row while the fresh ones are fetched — the same reasoning as
+        // [prefixMatch]: they were right a letter ago, and a list that
+        // collapses to one row on every letter is what makes a typeahead feel
+        // broken. Text that isn't a continuation of what they were for (the
+        // whole field replaced at once, say) drops them instead of showing
+        // completions of a query that's gone.
+        val stale = if (value.startsWith(previous, true) || previous.startsWith(value, true)) {
+            _suggestions.value.drop(1)
+        } else {
+            emptyList()
+        }
+        _suggestions.value = listOf(value) + stale.filterNot { it.equals(value, true) }
+        suggestRequests.tryEmit(value)
+    }
+
+    /**
+     * Commits the current query to the history. Called when the user acts on
+     * what they found — submitting from the keyboard, or opening a result —
+     * rather than on every keystroke, which would fill the list with the
+     * prefixes typed on the way to the real query.
+     */
+    fun recordSearch() = SearchHistory.record(_query.value)
+
+    /**
+     * The search button — the keyboard's search action, or the magnifier in
+     * the field. The only thing that runs a search for text the user typed:
+     * keystrokes themselves ask for suggestions and nothing more, so a query
+     * is fetched once, when they say it's finished, instead of once per
+     * prefix on the way to it.
+     */
+    fun submitSearch() {
+        recordSearch()
+        _suggestions.value = emptyList()
+        runSearch()
+    }
+
+    /**
+     * Runs a term the user picked out of a list rather than typed — a recent
+     * search, or one of [suggestions] — and floats it to the top of the
+     * history. Picking is as deliberate as submitting, so it searches on the
+     * spot.
+     */
+    fun searchFor(term: String) {
+        _query.value = term
+        _suggestions.value = emptyList()
+        SearchHistory.record(term)
+        runSearch()
+    }
+
+    fun removeSearch(term: String) = SearchHistory.remove(term)
+
+    fun clearSearchHistory() = SearchHistory.clear()
+
+    fun onFilterChange(value: SearchFilter) {
+        if (_filter.value == value) return
+        _filter.value = value
+        runSearch()
+    }
+
+    /**
+     * A search asked for, as a request the pipeline below decides what to do
+     * with.
+     *
+     * [requestId] is what makes a late answer harmless: a response is only
+     * written to the screen if its id is still the newest one asked for.
+     */
+    private data class SearchRequest(
+        val query: String,
+        val filter: SearchFilter,
