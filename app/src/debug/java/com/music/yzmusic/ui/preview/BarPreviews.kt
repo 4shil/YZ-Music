@@ -129,3 +129,51 @@ private fun ChromeStack(scrolled: Boolean, withMiniPlayer: Boolean) {
         MockFeed(Modifier.hazeSource(hazeState))
 
         TopFadeBlur(
+            hazeState = hazeState,
+            pageColor = MaterialTheme.colorScheme.background,
+            // The blur does not render here, but the scrim over it does — so
+            // this artboard is where the wash's weight can actually be judged.
+            scrimColor = MaterialTheme.colorScheme.background,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+        FrostedTopBar(
+            title = "Listen Now",
+            scrolled = scrolled,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+
+        BottomFadeScrim(
+            withMiniPlayer = withMiniPlayer,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+        // The same column MainActivity stacks these in, down to the 8dp gap —
+        // the point of this preview is the spacing between the two bars, so it
+        // has to be the spacing the app actually uses.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (withMiniPlayer) {
+                MiniPlayer(
+                    song = PreviewSong,
+                    isPlaying = true,
+                    isLoading = false,
+                    hazeState = hazeState,
+                    onPlayPause = {},
+                    onNext = {},
+                    onExpand = {},
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            FloatingBottomBar(
+                tabs = PreviewTabs,
+                selectedIndex = 0,
+                onTabSelected = {},
+                hazeState = hazeState,
+            )
+        }
+    }
+}
