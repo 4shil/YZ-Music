@@ -1576,3 +1576,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (!LocalMediaRepository.hasStoragePermission(context)) {
                         UiState.Error("Storage permission required to view local audio files")
                     } else {
+                        val songs = LocalMediaRepository.getLocalMusic(context)
+                        if (songs.isEmpty()) UiState.Error("No audio files found on device")
+                        else UiState.Success(songs)
+                    }
+                }
+                else -> return@launch
+            }
+            _detailStack.value = _detailStack.value.map {
+                if (it.browseId == browseId) {
+                    it.copy(songs = state)
+                } else it
+            }
+        }
+    }
+
+    /**
+     * The tracks of the downloaded playlist [browseId] names that are still on
+     * disk, in the order the playlist had.
+     *
+     * Reads the whole Downloads folder rather than the record's own uris,
+     * because that read is what fills in an album tag the record never carried
+     * and what collapses a music video's two ids down to the one file it saved —
+     * see [Downloads.collectionsAmong], of which this is a single-playlist view.
+     *
+     * Empty is the honest answer for a record whose files have all been deleted
+     * from under it, and callers turn that into [DOWNLOADS_GONE] rather than
+     * into a blank page.
+     */
+    private suspend fun downloadedPlaylist(browseId: String): List<Song> {
+        val id = Downloads.recordIdOf(browseId) ?: return emptyList()
+        val folder = LocalMediaRepository.getDownloadedSongs(getApplication())
+        return Downloads.collectionsAmong(folder).firstOrNull { it.id == id }?.songs.orEmpty()
+    }
+
+    /**
+     * Follows a detail page's continuations in the background, appending each
+     * page to what is already being read.
+     *
+     * A playlist of a few hundred tracks is several round trips, and taking
+     * them before showing anything meant a spinner for all of them. Growing
+     * the list underneath the reader is also what makes it safe to keep
+     * following continuations [YtMusicRepository.MAX_PAGES] deep — nobody is
+     * waiting on the last one.
+     *
+     * Stops the moment the page leaves the stack: there is no one to append
+     * for.
+     */
+    private fun fillIn(browseId: String, token: String, artworkFallback: String?) {
+        viewModelScope.launch {
+            var next: String? = token
+            var page = 1
+            while (next != null && page++ < YtMusicRepository.MAX_PAGES) {
+                val fetched = YtMusicRepository.moreSongs(next).getOrNull() ?: return@launch
+                val stack = _detailStack.value
+                val index = stack.indexOfFirst { it.browseId == browseId }
+                if (index < 0) return@launch
+                val current = stack[index]
+                val existing = (current.songs as? UiState.Success)?.data ?: return@launch
+                val known = existing.mapTo(HashSet()) { it.videoId }
