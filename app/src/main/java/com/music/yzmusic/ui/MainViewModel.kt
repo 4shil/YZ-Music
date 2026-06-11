@@ -193,3 +193,114 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * is on disk — and one that fails outright with the connection off, which
      * is what made a downloaded song show nothing offline.
      */
+    fun loadLyrics(
+        videoId: String,
+        title: String,
+        artist: String,
+        durationMs: Long,
+        album: String? = null,
+        localUri: String? = null,
+    ) {
+        val sources = if (AppSettings.syncedLyrics.value) {
+            AppSettings.lyricsSources.value
+        } else {
+            emptySet()
+        }
+        val key = videoId to sources
+        if (lyricsFor == key) return
+        lyricsFor = key
+        _lyrics.value = null
+        _lyricsSource.value = null
+        lyricsJob?.cancel()
+        if (sources.isEmpty()) {
+            // Switched off, or every source unticked. Nothing to look up, and
+            // nothing to say about it — the player drops the lyric strip
+            // rather than reporting a track with no lyrics.
+            _lyricsChecked.value = true
+            return
+        }
+        _lyricsChecked.value = false
+        lyricsJob = viewModelScope.launch {
+            // The file first, and without the duration gate below: a length is
+            // only needed to *match* a track against a stranger's database, and
+            // nothing is being matched here — these lyrics were written into
+            // this exact file, for this exact recording.
+            if (localUri != null) {
+                EmbeddedLyrics.forUri(getApplication(), localUri)?.let { embedded ->
+                    _lyrics.value = embedded
+                    // No source to name: what the file records is the lyrics,
+                    // not which of the eight services they came from months ago.
+                    _lyricsSource.value = null
+                    _lyricsChecked.value = true
+                    return@launch
+                }
+            }
+            if (durationMs <= 0L) {
+                // Duration arrives a beat after the track does; wait for it.
+                lyricsFor = null
+                return@launch
+            }
+            val found = LyricsRepository.lyrics(
+                videoId, title, artist, durationMs, album, sources,
+                AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
+            )
+            _lyrics.value = found?.lines
+            _lyricsSource.value = found?.source
+            _lyricsChecked.value = true
+        }
+    }
+
+    private val _account = MutableStateFlow<Account?>(null)
+    val account: StateFlow<Account?> = _account.asStateFlow()
+
+    private val _history = MutableStateFlow<UiState<List<Song>>>(UiState.Loading)
+    val history: StateFlow<UiState<List<Song>>> = _history.asStateFlow()
+
+    private val _library = MutableStateFlow<UiState<LibraryPage>>(UiState.Loading)
+    val library: StateFlow<UiState<LibraryPage>> = _library.asStateFlow()
+
+    /**
+     * Album / artist / playlist pages, as a stack — opening an artist from an
+     * album page and pressing back returns to the album, not to search.
+     */
+    private val _detailStack = MutableStateFlow<List<DetailPage>>(emptyList())
+    val detailStack: StateFlow<List<DetailPage>> = _detailStack.asStateFlow()
+
+
+    /** Set once per launch if GitHub has a release newer than this build. */
+    val updateAvailable: StateFlow<AppUpdateChecker.UpdateInfo?> = AppUpdateChecker.available
+
+    // ---- Ratings, library and playlists -------------------------------------
+
+    /**
+     * Ratings this session has set, which win over whatever the library feed
+     * last said.
+     *
+     * Kept apart from the library rather than folded into it because the two
+     * answer different questions: Liked Music is what YouTube knew when the
+     * page was fetched, and this is what the user has done since. Layering
+     * them ([likeStatuses]) means a tap shows immediately without the library
+     * having to be re-fetched, and a later refresh can't undo it.
+     */
+    /** Every rating known for this account: the library's, then this session's. */
+    val likeStatuses: StateFlow<Map<String, LikeStatus>> =
+        combine(_library, LikeState.overrides) { library, overrides ->
+            val liked = (library as? UiState.Success)?.data?.likedSongs
+                ?.associate { it.videoId to LikeStatus.LIKE }
+                .orEmpty()
+            liked + overrides
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    fun likeStatusOf(videoId: String): LikeStatus =
+        likeStatuses.value[videoId] ?: LikeStatus.INDIFFERENT
+
+    /**
+     * Sets (or clears) the thumbs rating on [videoId].
+     *
+     * Written to the screen first and rolled back if YouTube refuses. A rating
+     * is a one-tap, low-stakes action taken while a song is playing; waiting
+     * on a round trip before the heart fills reads as the tap not having
+     * registered, and people tap again.
+     */
+    fun setLike(videoId: String, status: LikeStatus) {
+        if (!requireSignIn()) return
