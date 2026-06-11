@@ -225,3 +225,27 @@ private fun MiniPlayerPreview() {
         ) {
             val haze = remember { HazeState() }
             MiniPlayer(
+                song = PreviewSong,
+                isPlaying = true,
+                isLoading = false,
+                hazeState = haze,
+                onPlayPause = {}, onNext = {}, onExpand = {},
+                modifier = Modifier.fillMaxWidth(),
+            )
+            MiniPlayer(
+                song = PreviewSong.copy(title = "A considerably longer track title that has to truncate"),
+                isPlaying = false,
+                isLoading = false,
+                hazeState = haze,
+                onPlayPause = {}, onNext = {}, onExpand = {},
+                modifier = Modifier.fillMaxWidth(),
+            )
+            MiniPlayer(
+                song = PreviewSong,
+                isPlaying = false,
+                isLoading = true,
+                hazeState = haze,
+                onPlayPause = {}, onNext = {}, onExpand = {},
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
