@@ -201,3 +201,51 @@ private fun ChromeMiniPlayerPreview() {
  * The mini player on its own, at the three states the transport slot takes.
  *
  * This is the preview for the pill's geometry: the corner is half the height,
+ * so it moves whenever the row's padding or the artwork's size does, and the
+ * thing to look at is whether the artwork and the skip glyph still clear the
+ * curve at either end. The glass does not render here — what is being judged
+ * is the shape and the spacing inside it.
+ */
+@Preview(name = "Mini player · dark", widthDp = 400, heightDp = 260)
+@Preview(
+    name = "Mini player · light",
+    widthDp = 400,
+    heightDp = 260,
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+private fun MiniPlayerPreview() {
+    YZMusicTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            val haze = remember { HazeState() }
+            MiniPlayer(
+                song = PreviewSong,
+                isPlaying = true,
+                isLoading = false,
+                hazeState = haze,
+                onPlayPause = {}, onNext = {}, onExpand = {},
+                modifier = Modifier.fillMaxWidth(),
+            )
+            MiniPlayer(
+                song = PreviewSong.copy(title = "A considerably longer track title that has to truncate"),
+                isPlaying = false,
+                isLoading = false,
+                hazeState = haze,
+                onPlayPause = {}, onNext = {}, onExpand = {},
+                modifier = Modifier.fillMaxWidth(),
+            )
+            MiniPlayer(
+                song = PreviewSong,
+                isPlaying = false,
+                isLoading = true,
+                hazeState = haze,
+                onPlayPause = {}, onNext = {}, onExpand = {},
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
