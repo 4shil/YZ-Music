@@ -1053,3 +1053,106 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * signed-out message straight away, since there is no account to have a
      * history on.
      */
+    fun loadHistory() {
+        if (!_signedIn.value) {
+            _history.value = UiState.Error("Sign in to see what you've been listening to")
+            return
+        }
+        _history.value = UiState.Loading
+        viewModelScope.launch {
+            _history.value = YtMusicRepository.history().fold(
+                onSuccess = { songs ->
+                    if (songs.isEmpty()) UiState.Error("Nothing played yet")
+                    else UiState.Success(songs)
+                },
+                onFailure = { UiState.Error(it.friendly()) },
+            )
+        }
+    }
+
+    /** Recent searches, kept on device. */
+    val searchHistory: StateFlow<List<String>> = SearchHistory.recent
+
+    fun onQueryChange(value: String) {
+        val previous = _query.value
+        _query.value = value
+        if (value.isBlank()) {
+            // Emptying the field is how the recent searches are got back to,
+            // so it takes down the suggestions and the results together.
+            // Nothing in flight can still be waiting to overwrite the latter:
+            // the id it would be checked against has already moved past it.
+            newestRequestId.incrementAndGet()
+            _results.value = null
+            _suggestions.value = emptyList()
+            return
+        }
+        // The previous keystroke's completions are left up beneath the new
+        // lead row while the fresh ones are fetched — the same reasoning as
+        // [prefixMatch]: they were right a letter ago, and a list that
+        // collapses to one row on every letter is what makes a typeahead feel
+        // broken. Text that isn't a continuation of what they were for (the
+        // whole field replaced at once, say) drops them instead of showing
+        // completions of a query that's gone.
+        val stale = if (value.startsWith(previous, true) || previous.startsWith(value, true)) {
+            _suggestions.value.drop(1)
+        } else {
+            emptyList()
+        }
+        _suggestions.value = listOf(value) + stale.filterNot { it.equals(value, true) }
+        suggestRequests.tryEmit(value)
+    }
+
+    /**
+     * Commits the current query to the history. Called when the user acts on
+     * what they found — submitting from the keyboard, or opening a result —
+     * rather than on every keystroke, which would fill the list with the
+     * prefixes typed on the way to the real query.
+     */
+    fun recordSearch() = SearchHistory.record(_query.value)
+
+    /**
+     * The search button — the keyboard's search action, or the magnifier in
+     * the field. The only thing that runs a search for text the user typed:
+     * keystrokes themselves ask for suggestions and nothing more, so a query
+     * is fetched once, when they say it's finished, instead of once per
+     * prefix on the way to it.
+     */
+    fun submitSearch() {
+        recordSearch()
+        _suggestions.value = emptyList()
+        runSearch()
+    }
+
+    /**
+     * Runs a term the user picked out of a list rather than typed — a recent
+     * search, or one of [suggestions] — and floats it to the top of the
+     * history. Picking is as deliberate as submitting, so it searches on the
+     * spot.
+     */
+    fun searchFor(term: String) {
+        _query.value = term
+        _suggestions.value = emptyList()
+        SearchHistory.record(term)
+        runSearch()
+    }
+
+    fun removeSearch(term: String) = SearchHistory.remove(term)
+
+    fun clearSearchHistory() = SearchHistory.clear()
+
+    fun onFilterChange(value: SearchFilter) {
+        if (_filter.value == value) return
+        _filter.value = value
+        runSearch()
+    }
+
+    /**
+     * A search asked for, as a request the pipeline below decides what to do
+     * with.
+     *
+     * [requestId] is what makes a late answer harmless: a response is only
+     * written to the screen if its id is still the newest one asked for.
+     */
+    private data class SearchRequest(
+        val query: String,
+        val filter: SearchFilter,
