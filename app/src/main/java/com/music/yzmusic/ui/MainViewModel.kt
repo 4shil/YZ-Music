@@ -723,3 +723,208 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * a network failure. A page still loading is left alone too: the fetch in
      * flight is newer than this and will land with the addition already in it.
      */
+    private fun appendToOpenPlaylist(browseId: String, song: Song, setVideoId: String?) {
+        val added = song.copy(setVideoId = setVideoId)
+        _detailStack.value = _detailStack.value.map { page ->
+            if (page.browseId != browseId) return@map page
+            val songs = when (val state = page.songs) {
+                is UiState.Success -> state.data
+                is UiState.Error -> if (state.message == NO_TRACKS) emptyList() else return@map page
+                UiState.Loading -> return@map page
+            }
+            // Already there — a track added twice is two real entries on
+            // YouTube's side, but a duplicate row from a double tap is not
+            // something the user asked for.
+            if (songs.any { it.videoId == song.videoId }) return@map page
+            page.copy(
+                songs = UiState.Success(
+                    songs + added.copy(
+                        thumbnailUrl = added.thumbnailUrl ?: page.thumbnailUrl,
+                    ),
+                ),
+            )
+        }
+    }
+
+    /**
+     * Renames a playlist, and says so everywhere it is named — see
+     * [setPlaylistTitle]. Renaming is nearly always done from the playlist's
+     * own page or its card, so there is always something on screen still
+     * showing the old name.
+     */
+    fun renamePlaylist(playlist: UserPlaylist, title: String) {
+        if (!requireSignIn()) return
+        val name = title.trim()
+        if (name.isBlank() || name == playlist.title) return
+        viewModelScope.launch {
+            YtMusicRepository.renamePlaylist(playlist.playlistId, name).fold(
+                onSuccess = {
+                    setPlaylistTitle(playlist, name)
+                    libraryStale = true
+                },
+                onFailure = {},
+            )
+        }
+    }
+
+    fun deletePlaylist(playlist: UserPlaylist) {
+        if (!requireSignIn()) return
+        viewModelScope.launch {
+            YtMusicRepository.deletePlaylist(playlist.playlistId).fold(
+                onSuccess = {
+                    _playlists.value = _playlists.value
+                        .filterNot { it.playlistId == playlist.playlistId }
+                    // The card in the library tab, which is the surface the
+                    // deletion was almost certainly ordered from — and which the
+                    // re-fetch that used to stand in for this left in place; see
+                    // [editPlaylistShelf].
+                    editPlaylistShelf { items ->
+                        items.filterNot { it.browseId == playlist.browseId }
+                    }
+                    // Its page may be the one open; a deleted playlist has
+                    // nothing left to show.
+                    _detailStack.value = _detailStack.value
+                        .filterNot { it.browseId == playlist.browseId }
+                    libraryStale = true
+                },
+                onFailure = {},
+            )
+        }
+    }
+
+    /**
+     * Whether [browseId] is a playlist this account can be asked to edit.
+     *
+     * Only ever yes for a playlist [playlistOwned] has confirmed the account
+     * made. "In this account's library" is not the same thing and cannot stand
+     * in for it: `FEmusic_liked_playlists` lists a playlist saved from someone
+     * else in exactly the shape it lists one this account created, so a lookup
+     * in [playlists] alone called a stranger's playlist editable and the menus
+     * offered Rename and Delete on it — neither of which YouTube would have
+     * honoured.
+     *
+     * Strict rather than permissive-until-proven, so that every surface gives
+     * the same answer for the same playlist. The permissive version was right on
+     * a playlist's own page — where the page load supplies the answer — and
+     * wrong on a card until that page had been opened once, which is a menu that
+     * changes its mind about what a playlist is depending on where it is held.
+     */
+    fun editablePlaylist(browseId: String?): UserPlaylist? {
+        if (browseId == null || _playlistOwned.value[browseId] != true) return null
+        return _playlists.value.firstOrNull { it.browseId == browseId }
+    }
+
+    /**
+     * Which playlists in this account's library the account actually made, by
+     * browse id — see
+     * [com.music.yzmusic.data.innertube.InnertubeParser.parsePlaylistOwned].
+     * An id absent from the map is one nothing has asked about yet, which is not
+     * the same as a no.
+     *
+     * Observable, because the answer routinely arrives after whatever wanted it
+     * is already on screen: a card's menu opens with nothing fetched, and the
+     * rows that depend on this appear as [resolvePlaylistOwnership] answers.
+     */
+    private val _playlistOwned = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val playlistOwned: StateFlow<Map<String, Boolean>> = _playlistOwned.asStateFlow()
+
+    /**
+     * Finds out who made the playlist at [browseId], if it isn't already known.
+     *
+     * Only the playlist's own page states this, so a surface that has no page —
+     * a card in the library, a search result — has to ask for one. Which is why
+     * this is on demand rather than swept up front: the alternative is a request
+     * per playlist every time the library loads, for a question most of them
+     * will never be asked.
+     *
+     * Silent about anything that isn't a playlist in this account's library.
+     * Nothing else can be renamed or deleted whatever the answer, so asking
+     * would be a request spent to rule out what was never on offer.
+     */
+    fun resolvePlaylistOwnership(browseId: String?) {
+        if (!_signedIn.value || browseId == null) return
+        if (browseId in _playlistOwned.value || browseId in ownershipInFlight) return
+        if (_playlists.value.none { it.browseId == browseId }) return
+        ownershipInFlight += browseId
+        viewModelScope.launch {
+            YtMusicRepository.playlistOwned(browseId).onSuccess { owned ->
+                if (owned != null) setPlaylistOwned(browseId, owned)
+            }
+            // Released either way. A failed lookup that stayed marked would
+            // never be retried, leaving Rename off the user's own playlist for
+            // the rest of the session over one dropped request.
+            ownershipInFlight -= browseId
+        }
+    }
+
+    /** Guards against a second lookup while the first is still out. */
+    private val ownershipInFlight = mutableSetOf<String>()
+
+    private fun setPlaylistOwned(browseId: String, owned: Boolean) {
+        _playlistOwned.value = _playlistOwned.value + (browseId to owned)
+    }
+
+
+    /**
+     * Guards every account write. All of them are signed-in-only, and the UI
+     * hides them for guests — this is the backstop for a session that expired
+     * between the menu opening and the tap.
+     */
+    private fun requireSignIn(): Boolean = _signedIn.value
+
+    /**
+     * Whether the library needs re-fetching. Set by every write above and
+     * acted on when the tab is next opened, for the same reason [homeStale]
+     * exists: rearranging a page under whoever is reading it is worse than
+     * showing it a moment out of date.
+     */
+    private var libraryStale = false
+
+    /** Call when the library tab becomes visible. */
+    fun onLibraryShown() {
+        loadPlaylists()
+        if (!libraryStale) return
+        libraryStale = false
+        if (_library.value is UiState.Success) refresh(Feed.LIBRARY)
+    }
+
+    init {
+        startSearchPipeline()
+        startSuggestPipeline()
+        loadHome()
+        loadExplore()
+        if (_signedIn.value) {
+            loadLibrary()
+            loadAccount()
+            loadPlaylists()
+        }
+        viewModelScope.launch {
+            // drop(1): the current value is just the count so far, not a play.
+            PlaybackTracker.registeredPlays.drop(1).collect { homeStale = true }
+        }
+        viewModelScope.launch {
+            // A leftover APK only means "Install Now" for the session that
+            // downloaded it — see AppUpdateChecker.clearCache.
+            AppUpdateChecker.clearCache(getApplication())
+            AppUpdateChecker.check()
+        }
+    }
+
+    /**
+     * Whether a play has been registered since the home feed was last fetched.
+     *
+     * The feed leads with listening history, so it's out of date the moment a
+     * track starts — but re-fetching there would rearrange the page under
+     * whoever is reading it, and the tab is usually in the background anyway.
+     * It's re-fetched when the tab is next opened instead.
+     */
+    private var homeStale = false
+
+    /** Call when the home tab becomes visible. */
+    fun onHomeShown() {
+        if (!homeStale) return
+        homeStale = false
+        // A first load already in flight will pick the new play up by itself.
+        if (_home.value is UiState.Success) refresh(Feed.HOME)
+    }
+
