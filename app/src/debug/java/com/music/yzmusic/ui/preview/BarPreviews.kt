@@ -249,3 +249,27 @@ private fun MiniPlayerPreview() {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+}
+
+/**
+ * The scrim alone, over a flat field.
+ *
+ * The stack above shows it in place; this shows the ramp itself, which is what
+ * banding would be visible in. Judge it here before judging it there.
+ */
+@Preview(name = "Scrim ramp · dark", widthDp = 300, heightDp = 260)
+@Preview(
+    name = "Scrim ramp · light",
+    widthDp = 300,
+    heightDp = 260,
+    uiMode = Configuration.UI_MODE_NIGHT_NO,
+)
+@Composable
+private fun ScrimRampPreview() {
+    YZMusicTheme {
+        Box(Modifier.fillMaxSize()) {
+            // A mid grey under it: the ramp reads as a ramp against this,
+            // whereas over the theme's own background it is invisible by
+            // construction — it is fading *to* that colour.
+            Box(
