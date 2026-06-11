@@ -273,3 +273,27 @@ private fun ScrimRampPreview() {
             // whereas over the theme's own background it is invisible by
             // construction — it is fading *to* that colour.
             Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF7A7A7E)),
+            )
+            BottomFadeScrim(modifier = Modifier.align(Alignment.BottomCenter))
+        }
+    }
+}
+
+/**
+ * The bar's two backdrops side by side.
+ *
+ * Left is the shipping case — no backdrop, the fade behind it carries the
+ * legibility. Right is Reduce dynamic blur, where the bar fills itself solid
+ * and takes the hairline. The blur behind the left one does not render here;
+ * what is being compared is the bar's own paint.
+ */
+@Preview(name = "Top bar · backdrops", device = "id:pixel_8", showBackground = true)
+@Composable
+private fun TopBarBackdropPreview() {
+    YZMusicTheme(darkTheme = true) {
+        Column(
+            Modifier
+                .fillMaxSize()
