@@ -1156,3 +1156,189 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private data class SearchRequest(
         val query: String,
         val filter: SearchFilter,
+        val requestId: Long,
+    )
+
+    private fun cacheKey(query: String, filter: SearchFilter) = "${filter.name}:$query"
+
+    /**
+     * The results of the longest earlier query this one starts with — near
+     * enough to leave up while the narrower search runs.
+     */
+    private fun prefixMatch(query: String, filter: SearchFilter): List<SearchResult>? {
+        val prefix = "${filter.name}:"
+        return searchCache.snapshot()
+            .filterKeys { it.startsWith(prefix) && query.startsWith(it.removePrefix(prefix), true) }
+            .maxByOrNull { it.key.length }
+            ?.value
+    }
+
+    private fun runSearch() {
+        val query = _query.value
+        if (query.isBlank()) {
+            // Nothing in flight can still be waiting to overwrite this: the
+            // id it would be checked against has already moved past it.
+            newestRequestId.incrementAndGet()
+            _results.value = null
+            return
+        }
+        val id = newestRequestId.incrementAndGet()
+        searchRequests.tryEmit(SearchRequest(query, _filter.value, id))
+    }
+
+    /**
+     * The search pipeline, started once and left running for the lifetime of
+     * the view model.
+     *
+     * The point of it being one long-lived collector is that a new search no
+     * longer cancels the request before it out of a fresh coroutine.
+     * Cancelling a call mid-flight tears down its socket, and on a pooled HTTP
+     * client that is felt by whatever picks that connection up next — which is
+     * how one search could end in "Software caused connection abort" for a
+     * request that was never itself in any trouble.
+     *
+     * There is no debounce here any more, and nothing to absorb: a search is
+     * only ever asked for by a deliberate act — the search button, a
+     * suggestion or history row, a filter tab — so the request that arrives is
+     * already the one the user meant, and making them wait out a timer for it
+     * would be a delay with nothing behind it. Typing asks
+     * [startSuggestPipeline] for completions instead and leaves the results
+     * alone.
+     */
+    private fun startSearchPipeline() = viewModelScope.launch {
+        searchRequests
+            .collectLatest { request ->
+                val key = cacheKey(request.query, request.filter)
+                // Something to look at immediately: the exact answer if this
+                // query has been run before, otherwise the closest earlier
+                // one. Only fall back to a spinner with neither.
+                val exact = searchCache.get(key)
+                val cached = exact ?: prefixMatch(request.query, request.filter)
+                _results.value = cached?.let { UiState.Success(it) } ?: UiState.Loading
+                if (exact != null) return@collectLatest
+
+                // Search is YouTube's alone. A module is a *substitution*
+                // layer, not a catalogue to browse: it never has cover art,
+                // radio, related tracks or an album page, so its rows arrived
+                // in the results list looking like YouTube's and then behaved
+                // nothing like them. Every track found here takes the ordinary
+                // YouTube path and is handed to the module at playback time —
+                // see [SourceResolver.substituteForYouTube] — which upgrades
+                // the ones it holds without any of them having to be a
+                // separate row to pick between.
+                val result = YtMusicRepository.search(request.query, request.filter)
+                // A search that has been superseded shouldn't land on screen,
+                // whether it succeeded or failed.
+                if (request.requestId != newestRequestId.get()) return@collectLatest
+                _results.value = result.fold(
+                    onSuccess = { rows -> published(rows, key) },
+                    onFailure = { failure -> UiState.Error(failure.friendly()) },
+                )
+            }
+    }
+
+    /**
+     * The typeahead pipeline, alongside [startSearchPipeline] and for the same
+     * structural reason — one long-lived collector rather than a coroutine per
+     * keystroke, so a lookup the user has typed past doesn't take a pooled
+     * socket down with it.
+     *
+     * This one *does* debounce, and that isn't the timer that was taken off the
+     * search. It's two orders of magnitude shorter, and it's paid for by the
+     * request behind it being a few hundred bytes rather than a full page of
+     * results — a burst of keystrokes shouldn't each cost a round trip, but the
+     * gap has to be short enough that the list is up before the next letter is
+     * typed. Nothing is waiting on it either way: the row the user typed is
+     * already on screen from the keystroke itself.
+     *
+     * A failure is left on the floor. There is no worthwhile way to report
+     * "couldn't suggest anything" in a list of suggestions, and the typed text
+     * is standing there as a working first row regardless.
+     */
+    @OptIn(FlowPreview::class)
+    private fun startSuggestPipeline() = viewModelScope.launch {
+        // Whether a list for [input] is still wanted. False once the field has
+        // moved on: typed further, or searched — which empties [_suggestions],
+        // and a late answer writing to it would reopen the suggestions over
+        // the results the user is by then reading.
+        fun stillWanted(input: String) =
+            _query.value == input && _suggestions.value.isNotEmpty()
+
+        suggestRequests
+            .debounce(SUGGEST_DEBOUNCE_MS)
+            .collectLatest { input ->
+                if (!stillWanted(input)) return@collectLatest
+                val fetched = YtMusicRepository.searchSuggestions(input).getOrNull()
+                    ?: return@collectLatest
+                // Asked again on the way back; the field is live throughout.
+                if (!stillWanted(input)) return@collectLatest
+                _suggestions.value = listOf(input) +
+                    fetched.filterNot { it.equals(input, ignoreCase = true) }
+            }
+    }
+
+    /** Caches and publishes one result list. */
+    private fun published(rows: List<SearchResult>, key: String): UiState<List<SearchResult>> {
+        if (rows.isEmpty()) return UiState.Error("No results")
+        searchCache.put(key, rows)
+        prefetchTopResult(rows)
+        return UiState.Success(rows)
+    }
+
+    /**
+     * The enabled non-YouTube sources, asked at the same time and returned
+     * split at YouTube's own place in the order.
+     *
+     * The split is what makes the Sources screen's ordering visible where it
+     * matters most. A library server ranked above YouTube puts its own copies
+     * at the top of the results — which is the whole point of ranking it there —
+     * and one ranked below appears under them instead.
+     *
+     * Only the Songs filter fans out: albums, artists and playlists are
+     * browse-shaped, and [MusicSource] deliberately answers for tracks only.
+     */
+    private suspend fun sourceResults(
+        query: String,
+        filter: SearchFilter,
+    ): Pair<List<SearchResult>, List<SearchResult>> = coroutineScope {
+        if (filter != SearchFilter.SONGS) return@coroutineScope emptyList<SearchResult>() to emptyList()
+        val active = SourceRegistry.active()
+        val youtubeRank = active.indexOfFirst { it.kind == SourceKind.YOUTUBE }
+            .let { if (it < 0) active.size else it }
+
+        val answers = active
+            .filter { it.kind != SourceKind.YOUTUBE }
+            .map { source ->
+                source to async {
+                    // Per-source, so one slow or unreachable server delays the
+                    // results by at most this much rather than for as long as
+                    // its socket takes to give up.
+                    runCatching {
+                        withTimeout(SOURCE_SEARCH_TIMEOUT_MS) { source.search(query, SOURCE_SEARCH_LIMIT) }
+                    }.getOrDefault(emptyList())
+                }
+            }
+
+        val above = mutableListOf<SearchResult>()
+        val below = mutableListOf<SearchResult>()
+        answers.forEach { (source, job) ->
+            val rows = job.await().map { SearchResult.Track(it) }
+            val rank = active.indexOfFirst { it.configId == source.configId }
+            if (rank in 0 until youtubeRank) above += rows else below += rows
+        }
+        above to below
+    }
+
+    /**
+     * Warms the stream URL for the top song result the instant results land,
+     * not when it's tapped. [AudioCache] gives a head start to whatever's
+     * already queued; a fresh search has nothing queued yet, and the top
+     * result is overwhelmingly what gets tapped — see [play][MainActivity.play].
+     * [resolveAudio][YtMusicRepository.resolveAudio] first, same as the tap
+     * path itself, so a video-tagged result warms the catalogue audio's id
+     * rather than one nothing will ever ask for.
+     */
+    private fun prefetchTopResult(rows: List<SearchResult>) {
+        val song = rows.filterIsInstance<SearchResult.Track>().firstOrNull()?.song ?: return
+        viewModelScope.launch {
+            runCatching {
