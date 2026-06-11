@@ -81,3 +81,27 @@ private fun MockFeed(modifier: Modifier = Modifier) {
                 Column(Modifier.padding(start = 12.dp)) {
                     Text("Track title $i", style = MaterialTheme.typography.titleMedium)
                     Text(
+                        "Artist name",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A track with no artwork URL, deliberately.
+ *
+ * Coil cannot reach the network from the preview renderer, so a real URL would
+ * draw the same empty box this does — only after a failed load rather than
+ * instead of one. Nulling it hands the box straight to the placeholder tint
+ * [MiniPlayer] already paints under its artwork, which is what the device shows
+ * for the beat before the real art arrives anyway.
+ */
+private val PreviewSong = Song(
+    videoId = "preview",
+    title = "Rains Again",
+    artist = "Solji",
+    thumbnailUrl = null,
