@@ -105,3 +105,27 @@ private val PreviewSong = Song(
     title = "Rains Again",
     artist = "Solji",
     thumbnailUrl = null,
+)
+
+private val PreviewTabs = listOf(
+    BottomTab("Play", YZMusicIcons.Play),
+    BottomTab("Explore", YZMusicIcons.Explore),
+    BottomTab("Library", YZMusicIcons.Library),
+    BottomTab("Search", YZMusicIcons.Search),
+)
+
+/**
+ * The whole chrome stack in the order [com.music.yzmusic.MainActivity] draws
+ * it: feed, top fade, bar, bottom scrim, pill.
+ */
+@Composable
+private fun ChromeStack(scrolled: Boolean, withMiniPlayer: Boolean) {
+    val hazeState = remember { HazeState() }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        MockFeed(Modifier.hazeSource(hazeState))
+
+        TopFadeBlur(
