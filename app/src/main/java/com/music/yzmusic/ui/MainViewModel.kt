@@ -1463,3 +1463,116 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             /** YouTube's own "About" blurb — see [DetailPage.description]. */
             var description: String? = null
             /** Artist header stats — see [DetailPage.subscriberCountText]. */
+            var subscriberCountText: String? = null
+            var monthlyListenerCount: String? = null
+            val state = when {
+                Downloads.recordIdOf(browseId) != null -> {
+                    val songs = downloadedPlaylist(browseId)
+                    if (songs.isEmpty()) UiState.Error(DOWNLOADS_GONE) else UiState.Success(songs)
+                }
+                browseId == "local:downloads" -> {
+                    val context = getApplication<Application>()
+                    val songs = LocalMediaRepository.getDownloadedSongs(context)
+                    if (songs.isEmpty()) UiState.Error("No downloaded tracks in Music/YZ Music")
+                    else UiState.Success(songs)
+                }
+                browseId == "local:all" -> {
+                    val context = getApplication<Application>()
+                    if (!LocalMediaRepository.hasStoragePermission(context)) {
+                        UiState.Error("Storage permission required to view local audio files")
+                    } else {
+                        val songs = LocalMediaRepository.getLocalMusic(context)
+                        if (songs.isEmpty()) UiState.Error("No audio files found on device")
+                        else UiState.Success(songs)
+                    }
+                }
+                resolved == BrowseType.ARTIST -> {
+                    YtMusicRepository.artistPage(browseId).fold(
+                        onSuccess = { page ->
+                            sections = page.sections
+                            artwork = page.thumbnailUrl
+                            name = page.name
+                            description = page.description
+                            subscriberCountText = page.subscriberCountText
+                            monthlyListenerCount = page.monthlyListenerCount
+                            if (page.songs.isEmpty()) {
+                                UiState.Error(NO_TRACKS)
+                            } else {
+                                UiState.Success(page.songs.withArtwork(thumbnailUrl))
+                            }
+                        },
+                        onFailure = { UiState.Error(it.friendly()) },
+                    )
+                }
+                else -> {
+                    YtMusicRepository.browseSongs(browseId).fold(
+                        onSuccess = { page ->
+                            // Free here — the page that returned these rows is
+                            // the one thing that states who made the playlist,
+                            // so its own menu never has to go and ask. Recorded
+                            // even when the listing came back empty.
+                            page.owned?.let { setPlaylistOwned(browseId, it) }
+                            // Only for the caller that had nothing: a card's own
+                            // title is what the user just tapped, and must not
+                            // be swapped for the header's wording underneath them.
+                            page.header?.let { header ->
+                                if (title.isBlank()) name = header.title
+                                if (subtitle.isBlank()) credit = header.subtitle
+                                if (thumbnailUrl == null) artwork = header.thumbnailUrl
+                            }
+                            description = page.description
+                            if (page.songs.isEmpty()) {
+                                UiState.Error(NO_TRACKS)
+                            } else {
+                                more = page.continuation
+                                suggested = page.suggested.withArtwork(thumbnailUrl)
+                                library = page.library
+                                UiState.Success(page.songs.withArtwork(thumbnailUrl))
+                            }
+                        },
+                        onFailure = { UiState.Error(it.friendly()) },
+                    )
+                }
+            }
+            // Update by id — the user may have pushed another page meanwhile.
+            _detailStack.value = _detailStack.value.map {
+                if (it.browseId == browseId && it.songs is UiState.Loading) {
+                    it.copy(
+                        songs = state,
+                        sections = sections,
+                        thumbnailUrl = artwork ?: it.thumbnailUrl,
+                        title = name ?: it.title,
+                        subtitle = credit ?: it.subtitle,
+                        suggestedSongs = suggested,
+                        library = library,
+                        description = description,
+                        subscriberCountText = subscriberCountText,
+                        monthlyListenerCount = monthlyListenerCount,
+                    )
+                } else {
+                    it
+                }
+            }
+            // Only once the first page is on screen: [fillIn] appends to it,
+            // and has nothing to append to before this.
+            more?.let { fillIn(browseId, it, thumbnailUrl) }
+        }
+    }
+
+    fun reloadLocalDetail(browseId: String) {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val state: UiState<List<Song>> = when {
+                Downloads.recordIdOf(browseId) != null -> {
+                    val songs = downloadedPlaylist(browseId)
+                    if (songs.isEmpty()) UiState.Error(DOWNLOADS_GONE) else UiState.Success(songs)
+                }
+                browseId == "local:downloads" -> {
+                    val songs = LocalMediaRepository.getDownloadedSongs(context)
+                    if (songs.isEmpty()) UiState.Error("No downloaded tracks in Music/YZ Music")
+                    else UiState.Success(songs)
+                }
+                browseId == "local:all" -> {
+                    if (!LocalMediaRepository.hasStoragePermission(context)) {
+                        UiState.Error("Storage permission required to view local audio files")
+                    } else {
