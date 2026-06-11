@@ -928,3 +928,128 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_home.value is UiState.Success) refresh(Feed.HOME)
     }
 
+    private fun loadAccount() {
+        viewModelScope.launch {
+            _account.value = YtMusicRepository.account().getOrNull()
+        }
+    }
+
+    /**
+     * A feed that can be pulled down to refresh. Tracked per feed rather than
+     * as one flag: a pull on Library while Home is still refreshing in the
+     * background shouldn't leave the wrong tab showing a loader.
+     */
+    enum class Feed { HOME, EXPLORE, LIBRARY }
+
+    private val _refreshing = MutableStateFlow(emptySet<Feed>())
+    val refreshing: StateFlow<Set<Feed>> = _refreshing.asStateFlow()
+
+    /**
+     * Re-fetches [feed] in place. Unlike the `load*` entry points this leaves
+     * the current content on screen rather than dropping back to the loading
+     * state — a refresh that swapped the page for a spinner would be a worse
+     * experience than the stale content it replaces.
+     */
+    fun refresh(feed: Feed) {
+        if (feed in _refreshing.value) return
+        if (feed == Feed.LIBRARY && !_signedIn.value) return
+        _refreshing.value = _refreshing.value + feed
+        viewModelScope.launch {
+            when (feed) {
+                Feed.HOME -> fetchHome()
+                Feed.EXPLORE -> fetchExplore()
+                Feed.LIBRARY -> fetchLibrary()
+            }
+            _refreshing.value = _refreshing.value - feed
+        }
+    }
+
+    fun loadExplore() {
+        _explore.value = UiState.Loading
+        viewModelScope.launch { fetchExplore() }
+    }
+
+    private suspend fun fetchExplore() {
+        _explore.value = YtMusicRepository.explore().fold(
+            onSuccess = { shelves ->
+                if (shelves.isEmpty()) UiState.Error("Nothing to explore right now")
+                else UiState.Success(shelves)
+            },
+            onFailure = { UiState.Error(it.friendly()) },
+        )
+    }
+
+    /** Tapping a tab should leave any pushed page behind. */
+    fun clearDetail() {
+        if (_detailStack.value.isNotEmpty()) _detailStack.value = emptyList()
+    }
+
+    fun loadHome() {
+        _home.value = UiState.Loading
+        viewModelScope.launch { fetchHome() }
+    }
+
+    private suspend fun fetchHome() {
+        homeContinuation = null
+        homeSeenTitles.clear()
+        _home.value = YtMusicRepository.home().fold(
+            onSuccess = { feed ->
+                homeContinuation = feed.continuation
+                val shelves = feed.shelves.filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
+                if (shelves.isEmpty()) UiState.Error("No results from YouTube Music")
+                else UiState.Success(shelves)
+            },
+            onFailure = { UiState.Error(it.friendly()) },
+        )
+    }
+
+    /**
+     * Called as the Home list nears its end. A no-op while a page is already
+     * in flight, once the feed is exhausted, or before the first page has
+     * loaded — [homeContinuation] covers all three by construction.
+     */
+    fun loadMoreHome() {
+        val token = homeContinuation ?: return
+        if (_homeLoadingMore.value) return
+        _homeLoadingMore.value = true
+        viewModelScope.launch {
+            YtMusicRepository.moreHome(token).onSuccess { feed ->
+                val added = feed.shelves.filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
+                // A page with nothing new signals the feed has looped back on
+                // itself rather than run dry with a token still attached —
+                // treat it the same as exhausted so scrolling can't spin here.
+                homeContinuation = feed.continuation.takeIf { added.isNotEmpty() }
+                if (added.isNotEmpty()) {
+                    val existing = (_home.value as? UiState.Success)?.data ?: emptyList()
+                    _home.value = UiState.Success(existing + added)
+                }
+            }
+            _homeLoadingMore.value = false
+        }
+    }
+
+    fun loadLibrary() {
+        if (!_signedIn.value) return
+        _library.value = UiState.Loading
+        viewModelScope.launch { fetchLibrary() }
+    }
+
+    private suspend fun fetchLibrary() {
+        _library.value = YtMusicRepository.library().fold(
+            onSuccess = { page ->
+                if (page.isEmpty) UiState.Error("Nothing in your library yet")
+                else UiState.Success(page)
+            },
+            onFailure = { UiState.Error(it.friendly()) },
+        )
+    }
+
+    /**
+     * The account's listening history.
+     *
+     * Loaded on each visit rather than cached: it is a page whose whole subject
+     * is what happened most recently, and one that opened showing the state it
+     * was in last time would be answering a different question. Guests get the
+     * signed-out message straight away, since there is no account to have a
+     * history on.
+     */
