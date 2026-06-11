@@ -304,3 +304,128 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun setLike(videoId: String, status: LikeStatus) {
         if (!requireSignIn()) return
+        val previous = likeStatusOf(videoId)
+        if (previous == status) return
+        LikeState.set(videoId, status)
+        viewModelScope.launch {
+            YtMusicRepository.rate(videoId, status).fold(
+                onSuccess = {
+                    // Liked Music is now out of date either way.
+                    libraryStale = true
+                    if (status != LikeStatus.LIKE) dropFromLikedLists(videoId)
+                    // Clearing the heart means forgetting the song, not
+                    // demoting it — see [forgetFromLibrary].
+                    val unliked = previous == LikeStatus.LIKE &&
+                        status == LikeStatus.INDIFFERENT
+                    if (unliked) forgetFromLibrary(videoId)
+                },
+                onFailure = {
+                    LikeState.set(videoId, previous)
+                },
+            )
+        }
+    }
+
+    /**
+     * Takes an un-liked track out of the library as well, and reports whether
+     * it did.
+     *
+     * Liking and saving are two independent flags on YouTube's side, and
+     * clearing only the first leaves the song saved — still feeding the
+     * Library tab's Artists shelf, still in the library feeds, with nowhere
+     * left in this app to reach it and finish the job. Clearing the heart
+     * reads as "forget this song", so it clears both.
+     *
+     * The token is fetched here rather than taken from [songMenu] because the
+     * heart in the player never opens a menu, so there is often nothing
+     * cached to take. One extra request, on an action nobody performs in bulk.
+     * A song that was never saved has no removal token and this is a no-op.
+     */
+    private suspend fun forgetFromLibrary(videoId: String): Boolean {
+        val menu = YtMusicRepository.songMenu(videoId).getOrNull() ?: return false
+        val token = menu.removeFromLibraryToken?.takeIf { menu.inLibrary } ?: return false
+        if (YtMusicRepository.setLibraryStatus(token).isFailure) return false
+        // The menu may be the one on screen; don't leave it offering a
+        // removal that has already happened.
+        _songMenu.value = _songMenu.value?.copy(inLibrary = false)
+        return true
+    }
+
+    /**
+     * Takes an un-liked track out of the lists that exist *because* it was
+     * liked — the Library tab's Liked Music section, and the Liked Music page
+     * itself if it happens to be open.
+     *
+     * Marking the library stale isn't enough on its own: that only acts when
+     * the tab is next opened, and un-liking is nearly always done from inside
+     * one of these two lists, looking straight at the row. Leaving it there
+     * reads as the tap not having worked — the menu says "Like" again while
+     * the song sits in Liked Music.
+     *
+     * Only ever removes. A track liked from somewhere else doesn't get spliced
+     * into a list that YouTube orders for itself; the next fetch places it.
+     */
+    private fun dropFromLikedLists(videoId: String) {
+        val library = (_library.value as? UiState.Success)?.data
+        if (library != null && library.likedSongs.any { it.videoId == videoId }) {
+            _library.value = UiState.Success(
+                library.copy(likedSongs = library.likedSongs.filterNot { it.videoId == videoId }),
+            )
+        }
+        _detailStack.value = _detailStack.value.map { page ->
+            val songs = (page.songs as? UiState.Success)?.data
+            if (page.browseId != YtMusicRepository.LIKED_MUSIC || songs == null) {
+                page
+            } else {
+                page.copy(songs = UiState.Success(songs.filterNot { it.videoId == videoId }))
+            }
+        }
+    }
+
+    /** The heart: liked becomes neutral, anything else becomes liked. */
+    fun toggleLike(videoId: String) = setLike(
+        videoId,
+        if (likeStatusOf(videoId) == LikeStatus.LIKE) LikeStatus.INDIFFERENT else LikeStatus.LIKE,
+    )
+
+    /** As [toggleLike], for the thumb-down. */
+    fun toggleDislike(videoId: String) = setLike(
+        videoId,
+        if (likeStatusOf(videoId) == LikeStatus.DISLIKE) {
+            LikeStatus.INDIFFERENT
+        } else {
+            LikeStatus.DISLIKE
+        },
+    )
+
+    /**
+     * Saves the album or playlist [browseId] to the library, or takes it out.
+     *
+     * Written to the screen first and rolled back if YouTube refuses, for the
+     * same reason [setLike] is: it is one tap on a page the user is looking at,
+     * and a control that waits on a round trip before it changes reads as a tap
+     * that missed.
+     *
+     * A page with no [DetailPage.library] is one YouTube never offered to save
+     * — a local page, an auto-playlist, a generated mix — and the UI has no
+     * control on it to have been tapped, so this is a no-op rather than a guess.
+     */
+    fun toggleLibrary(browseId: String) {
+        if (!requireSignIn()) return
+        val current = _detailStack.value.firstOrNull { it.browseId == browseId }?.library ?: return
+        val target = !current.saved
+        setSavedOnPage(browseId, target)
+        viewModelScope.launch {
+            if (YtMusicRepository.setSaved(current.playlistId, target).isSuccess) {
+                // The Library tab's Albums/Playlists shelf is now out of date.
+                libraryStale = true
+            } else {
+                setSavedOnPage(browseId, current.saved)
+            }
+        }
+    }
+
+    /**
+     * Restates whether a page is saved. By id rather than by index: the user may
+     * have pushed or popped pages while the write was in flight.
+     */
