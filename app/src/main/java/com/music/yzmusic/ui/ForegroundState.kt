@@ -39,3 +39,6 @@ fun rememberIsForeground(): Boolean {
     var foreground by remember(lifecycle) {
         mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
+    DisposableEffect(lifecycle) {
+        // Every event rather than ON_RESUME/ON_PAUSE alone: the state is read
+        // back off the lifecycle instead of inferred from which event arrived,
