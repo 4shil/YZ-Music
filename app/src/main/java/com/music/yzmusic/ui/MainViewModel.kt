@@ -1256,3 +1256,210 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * is standing there as a working first row regardless.
      */
     @OptIn(FlowPreview::class)
+    private fun startSuggestPipeline() = viewModelScope.launch {
+        // Whether a list for [input] is still wanted. False once the field has
+        // moved on: typed further, or searched — which empties [_suggestions],
+        // and a late answer writing to it would reopen the suggestions over
+        // the results the user is by then reading.
+        fun stillWanted(input: String) =
+            _query.value == input && _suggestions.value.isNotEmpty()
+
+        suggestRequests
+            .debounce(SUGGEST_DEBOUNCE_MS)
+            .collectLatest { input ->
+                if (!stillWanted(input)) return@collectLatest
+                val fetched = YtMusicRepository.searchSuggestions(input).getOrNull()
+                    ?: return@collectLatest
+                // Asked again on the way back; the field is live throughout.
+                if (!stillWanted(input)) return@collectLatest
+                _suggestions.value = listOf(input) +
+                    fetched.filterNot { it.equals(input, ignoreCase = true) }
+            }
+    }
+
+    /** Caches and publishes one result list. */
+    private fun published(rows: List<SearchResult>, key: String): UiState<List<SearchResult>> {
+        if (rows.isEmpty()) return UiState.Error("No results")
+        searchCache.put(key, rows)
+        prefetchTopResult(rows)
+        return UiState.Success(rows)
+    }
+
+    /**
+     * The enabled non-YouTube sources, asked at the same time and returned
+     * split at YouTube's own place in the order.
+     *
+     * The split is what makes the Sources screen's ordering visible where it
+     * matters most. A library server ranked above YouTube puts its own copies
+     * at the top of the results — which is the whole point of ranking it there —
+     * and one ranked below appears under them instead.
+     *
+     * Only the Songs filter fans out: albums, artists and playlists are
+     * browse-shaped, and [MusicSource] deliberately answers for tracks only.
+     */
+    private suspend fun sourceResults(
+        query: String,
+        filter: SearchFilter,
+    ): Pair<List<SearchResult>, List<SearchResult>> = coroutineScope {
+        if (filter != SearchFilter.SONGS) return@coroutineScope emptyList<SearchResult>() to emptyList()
+        val active = SourceRegistry.active()
+        val youtubeRank = active.indexOfFirst { it.kind == SourceKind.YOUTUBE }
+            .let { if (it < 0) active.size else it }
+
+        val answers = active
+            .filter { it.kind != SourceKind.YOUTUBE }
+            .map { source ->
+                source to async {
+                    // Per-source, so one slow or unreachable server delays the
+                    // results by at most this much rather than for as long as
+                    // its socket takes to give up.
+                    runCatching {
+                        withTimeout(SOURCE_SEARCH_TIMEOUT_MS) { source.search(query, SOURCE_SEARCH_LIMIT) }
+                    }.getOrDefault(emptyList())
+                }
+            }
+
+        val above = mutableListOf<SearchResult>()
+        val below = mutableListOf<SearchResult>()
+        answers.forEach { (source, job) ->
+            val rows = job.await().map { SearchResult.Track(it) }
+            val rank = active.indexOfFirst { it.configId == source.configId }
+            if (rank in 0 until youtubeRank) above += rows else below += rows
+        }
+        above to below
+    }
+
+    /**
+     * Warms the stream URL for the top song result the instant results land,
+     * not when it's tapped. [AudioCache] gives a head start to whatever's
+     * already queued; a fresh search has nothing queued yet, and the top
+     * result is overwhelmingly what gets tapped — see [play][MainActivity.play].
+     * [resolveAudio][YtMusicRepository.resolveAudio] first, same as the tap
+     * path itself, so a video-tagged result warms the catalogue audio's id
+     * rather than one nothing will ever ask for.
+     */
+    private fun prefetchTopResult(rows: List<SearchResult>) {
+        val song = rows.filterIsInstance<SearchResult.Track>().firstOrNull()?.song ?: return
+        viewModelScope.launch {
+            runCatching {
+                val audio = YtMusicRepository.resolveAudio(song)
+                // A source-backed row resolves through its own source already
+                // and never takes the YouTube path — warming either half of
+                // this for one would be work nothing asks for.
+                if (SourceRegistry.parseTrackKey(audio.videoId) != null) return@runCatching
+                // JioSaavn first, on the same reasoning as the queue's
+                // read-ahead: it is the copy that will actually be played if it
+                // has the track, so warming YouTube's URL instead warms the one
+                // that loses. Pinned through [StreamChoice] so playback opens
+                // this very stream rather than racing for it again — see
+                // [SourceResolver.prefetchSubstitute], which requires it.
+                val warmed = SourceResolver.prefetchSubstitute(
+                    TrackMatcher.Target(
+                        title = audio.title,
+                        artist = audio.artist,
+                        durationSec = TrackMatcher.secondsOf(audio.durationText),
+                    ),
+                )
+                if (warmed != null) {
+                    StreamChoice.remember(audio.videoId, warmed, substituted = true)
+                    return@runCatching
+                }
+                // Disabled, or hasn't got it: the tap path falls back to
+                // YouTube, so that is what is worth having ready.
+                StreamResolver.resolve(audio.videoId)
+            }
+        }
+    }
+
+    private companion object {
+        /**
+         * How long a keystroke waits before the typeahead is asked about it.
+         *
+         * Not the search's timer — searches aren't on a timer any more. This
+         * one only stops a fast typist spending a round trip per letter, so it
+         * wants to be as short as it can be while still collapsing a burst:
+         * long enough that "cold" isn't four lookups, short enough that the
+         * list is up by the time the thumb has left the key.
+         */
+        const val SUGGEST_DEBOUNCE_MS = 180L
+
+        const val SEARCH_CACHE_ENTRIES = 100
+
+        /**
+         * How long any one source gets to answer a search.
+         *
+         * Short on purpose: these run alongside the YouTube search, and their
+         * only job is to be *there* when it lands. A home server reached over
+         * a VPN that takes eight seconds has effectively not answered, and
+         * holding the whole result list for it would make search feel worse
+         * for the sake of results the user can still get by searching again.
+         */
+        const val SOURCE_SEARCH_TIMEOUT_MS = 4000L
+
+        /** Enough to be worth scrolling, short enough not to bury YouTube's own rows. */
+        const val SOURCE_SEARCH_LIMIT = 12
+
+        /**
+         * What a page with an empty listing says.
+         *
+         * Named because it is a state one can be got *out* of, not just a
+         * message: an own playlist with nothing in it lands here, and adding the
+         * first track to it has to be able to tell "this page is empty" apart
+         * from "this page failed to load" — see [appendToOpenPlaylist].
+         */
+        private const val NO_TRACKS = "No tracks here"
+
+        /**
+         * What a downloaded playlist's page says once the files under it are
+         * gone.
+         *
+         * A record here outlives the folder it names — the user is expected to
+         * manage Downloads with a file manager — so this is a state its page has
+         * to be able to reach, not an error. Named because three places say it:
+         * the page, its refresh, and the long-press menu that queues it without
+         * opening it.
+         */
+        private const val DOWNLOADS_GONE = "Nothing from this playlist is on this device any more"
+    }
+
+    fun openDetail(
+        browseId: String,
+        title: String,
+        subtitle: String = "",
+        thumbnailUrl: String? = null,
+        type: BrowseType = BrowseType.OTHER,
+    ) {
+        val resolved = browseTypeOf(browseId, type)
+        _detailStack.value += DetailPage(
+            browseId = browseId,
+            title = title,
+            subtitle = subtitle,
+            thumbnailUrl = thumbnailUrl,
+            songs = UiState.Loading,
+            type = resolved,
+        )
+        viewModelScope.launch {
+            var sections = emptyList<HomeShelf>()
+            // Callers that open an artist from a track — the player, the
+            // long-press menu — only have that track's cover art and its full
+            // credit ("A, B & C") to hand, so the page swaps in the artist's
+            // own picture and name once they arrive.
+            var artwork: String? = null
+            var name: String? = null
+            /**
+             * The credit line, when the page had to supply its own.
+             *
+             * Only a link tapped outside the app arrives with neither — see
+             * [com.music.yzmusic.playback.MusicLink]. Every other caller was
+             * looking at a card that already said this.
+             */
+            var credit: String? = null
+            /** Set when the track list carries on past its first response. */
+            var more: String? = null
+            /** Tracks YouTube offers to round the playlist out — see [DetailPage.suggestedSongs]. */
+            var suggested: List<Song> = emptyList()
+            /** Whether this release is already saved — see [DetailPage.library]. */
+            var library: LibraryState? = null
+            /** YouTube's own "About" blurb — see [DetailPage.description]. */
+            var description: String? = null
+            /** Artist header stats — see [DetailPage.subscriberCountText]. */
