@@ -45,3 +45,9 @@ fun rememberIsForeground(): Boolean {
         // so there is no transition this can be left out of step by.
         val observer = LifecycleEventObserver { owner, _ ->
             foreground = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    return foreground
+}
