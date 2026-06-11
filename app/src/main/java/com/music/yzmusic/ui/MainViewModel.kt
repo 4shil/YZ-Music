@@ -429,3 +429,96 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Restates whether a page is saved. By id rather than by index: the user may
      * have pushed or popped pages while the write was in flight.
      */
+    private fun setSavedOnPage(browseId: String, saved: Boolean) {
+        _detailStack.value = _detailStack.value.map { page ->
+            val library = page.library
+            if (page.browseId != browseId || library == null) {
+                page
+            } else {
+                page.copy(library = library.copy(saved = saved))
+            }
+        }
+    }
+
+    /**
+     * The open track menu's account state, or null while it is still being
+     * fetched. Only one menu can be open at a time, so one slot is enough.
+     */
+    private val _songMenu = MutableStateFlow<SongMenu?>(null)
+    val songMenu: StateFlow<SongMenu?> = _songMenu.asStateFlow()
+
+    private var songMenuJob: Job? = null
+
+    /**
+     * Loads the account state behind an opening track menu — the library
+     * tokens, and any rating the response happens to state.
+     *
+     * The rating is only ever taken when it *adds* something: a LIKE or a
+     * DISLIKE the library couldn't have told us, such as a disliked track or
+     * one liked past the tenth page of Liked Music. An INDIFFERENT is
+     * discarded.
+     *
+     * That asymmetry is not fussiness. This lookup reads a watch queue, and a
+     * watch queue routinely renders a liked track with no rating on it at all;
+     * believing that silence downgraded songs sitting in Liked Music to
+     * "not liked" a beat after their menu opened — the label changing under
+     * the user, with no request sent and nothing removed.
+     */
+    fun loadSongMenu(videoId: String?) {
+        songMenuJob?.cancel()
+        _songMenu.value = null
+        if (videoId == null || !_signedIn.value) return
+        songMenuJob = viewModelScope.launch {
+            val menu = YtMusicRepository.songMenu(videoId).getOrNull() ?: return@launch
+            _songMenu.value = menu
+            val stated = menu.likeStatus
+            if (stated != null && stated != LikeStatus.INDIFFERENT &&
+                videoId !in LikeState.overrides.value
+            ) {
+                LikeState.set(videoId, stated)
+            }
+        }
+    }
+
+    /** The account's own playlists, for the picker and the library tab. */
+    private val _playlists = MutableStateFlow<List<UserPlaylist>>(emptyList())
+    val playlists: StateFlow<List<UserPlaylist>> = _playlists.asStateFlow()
+
+    private val _playlistsLoading = MutableStateFlow(false)
+    val playlistsLoading: StateFlow<Boolean> = _playlistsLoading.asStateFlow()
+
+    /** Re-fetched rather than cached for the session: playlists are edited here. */
+    fun loadPlaylists() {
+        if (!_signedIn.value || _playlistsLoading.value) return
+        _playlistsLoading.value = true
+        viewModelScope.launch {
+            YtMusicRepository.userPlaylists().onSuccess { _playlists.value = it }
+            _playlistsLoading.value = false
+        }
+    }
+
+    /**
+     * The library feed's Playlists shelf, rewritten by [edit].
+     *
+     * Every playlist edit has to do this by hand, because the library tab reads
+     * `_library` and nothing else — [playlists] is the picker's list, not the
+     * tab's — so a rename that only updated that list left the card on screen
+     * still bearing the old name.
+     *
+     * Re-fetching instead is what this replaces, and it did not work: YouTube's
+     * `FEmusic_liked_playlists` is eventually consistent, and a fetch fired the
+     * moment an edit returns reliably answers with the state from *before* it.
+     * So the edit was applied, the feed denied it, and the denial is what
+     * reached the screen — the bug this exists to fix. The re-fetch still
+     * happens, via [libraryStale], once the tab is next opened and the feed has
+     * caught up.
+     *
+     * A shelf that isn't there yet is created by [edit] returning rows for it
+     * (a first playlist has no shelf to add to), and one left empty is dropped —
+     * see [LibraryScreen], which draws the create tile with or without a shelf.
+     */
+    private fun editPlaylistShelf(edit: (List<ShelfItem>) -> List<ShelfItem>) {
+        val page = (_library.value as? UiState.Success)?.data ?: return
+        val existing = page.shelves.firstOrNull { it.title == YtMusicRepository.PLAYLISTS_SHELF }
+        val items = edit(existing?.items.orEmpty())
+        if (items == existing?.items) return
