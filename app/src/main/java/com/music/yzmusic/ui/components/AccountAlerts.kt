@@ -296,3 +296,52 @@ fun TextValueAlert(
  */
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
+fun <T> ChoiceAlert(
+    hazeState: HazeState,
+    title: String,
+    message: String?,
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    detail: (T) -> String? = { null },
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertScaffold(hazeState = hazeState, onDismiss = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 19.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            if (message != null) {
+                Text(
+                    text = message,
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        options.forEach { option ->
+            AlertRule()
+            ChoiceRow(
+                label = label(option),
+                detail = detail(option),
+                checked = option == selected,
+                onClick = { onSelect(option) },
+            )
+        }
+        AlertRule()
+        AlertAction(label = "Cancel", emphasised = false, onClick = onDismiss)
+    }
+}
+
+@Composable
