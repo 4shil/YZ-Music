@@ -61,3 +61,5 @@ data class BrowseTarget(
      */
     val browseId: String?,
     val title: String,
+    val subtitle: String,
+    val thumbnailUrl: String? = null,
