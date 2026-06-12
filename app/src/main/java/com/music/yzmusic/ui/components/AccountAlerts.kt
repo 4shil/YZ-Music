@@ -345,3 +345,9 @@ fun <T> ChoiceAlert(
 }
 
 @Composable
+private fun ChoiceRow(
+    label: String,
+    detail: String?,
+    checked: Boolean,
+    onClick: () -> Unit,
+) {
