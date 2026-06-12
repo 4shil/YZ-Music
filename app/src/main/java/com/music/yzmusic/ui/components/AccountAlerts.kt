@@ -99,3 +99,76 @@ fun ListenBrainzTokenAlert(
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
+fun LastfmLoginAlert(
+    hazeState: HazeState,
+    usernameInput: String,
+    onUsernameInputChange: (String) -> Unit,
+    passwordInput: String,
+    onPasswordInputChange: (String) -> Unit,
+    error: String?,
+    loading: Boolean,
+    onSignIn: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertScaffold(hazeState = hazeState, onDismiss = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 19.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "Last.fm Login",
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = error ?: "Sign in with your Last.fm account to enable scrobbling.",
+                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
+                color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            AlertTextField(
+                value = usernameInput,
+                onValueChange = onUsernameInputChange,
+                placeholder = "Username",
+                enabled = !loading,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            )
+            Spacer(Modifier.height(8.dp))
+            AlertTextField(
+                value = passwordInput,
+                onValueChange = onPasswordInputChange,
+                placeholder = "Password",
+                enabled = !loading,
+                isPassword = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = { if (usernameInput.isNotBlank() && passwordInput.isNotBlank()) onSignIn() },
+                ),
+            )
+        }
+        AlertRule()
+        AlertAction(
+            label = if (loading) "Signing in..." else "Sign in",
+            emphasised = true,
+            onClick = onSignIn,
+            enabled = !loading && usernameInput.isNotBlank() && passwordInput.isNotBlank(),
+        )
+        AlertRule()
+        AlertAction(label = "Cancel", emphasised = false, onClick = onDismiss, enabled = !loading)
+    }
+}
+
+/**
+ * Manual token entry, for when the in-app login can't run — a WebView an OEM
+ * has broken, or a token lifted from a desktop client.
+ *
+ * [error] carries back what the verification attempt said, because a token that
+ * was mistyped or has expired is indistinguishable from one that works until
+ * Discord is asked about it.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
