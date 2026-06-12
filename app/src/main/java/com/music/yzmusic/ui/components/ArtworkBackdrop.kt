@@ -88,3 +88,5 @@ fun ArtworkBackdrop(
             )
         }
         val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+        val alpha0 = if (isDark) 0.40f else 0.08f
+        val alpha1 = if (isDark) 0.55f else 0.25f
