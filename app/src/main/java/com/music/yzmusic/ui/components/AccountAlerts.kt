@@ -351,3 +351,4 @@ private fun ChoiceRow(
     checked: Boolean,
     onClick: () -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
