@@ -157,3 +157,4 @@ fun AppLanguageDialog(
 }
 
 @Composable
+private fun LanguageRow(language: AppLanguage, selected: Boolean, onClick: () -> Unit) {
