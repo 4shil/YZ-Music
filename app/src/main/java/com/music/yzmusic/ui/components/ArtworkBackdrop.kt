@@ -1,0 +1,68 @@
+﻿package com.music.yzmusic.ui.components
+
+import android.os.Build
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
+import com.music.yzmusic.data.model.CARD_ART_PX
+import com.music.yzmusic.data.model.artworkAt
+import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.ui.theme.ArtworkPalette
+
+/**
+ * The colour a surface takes from the artwork it is about: a flat tint
+ * everywhere, with the artwork itself blurred across the top and dissolved
+ * down into that tint.
+ *
+ * For surfaces that show no artwork of their own — a sheet, whose whole top is
+ * this wash. A page that has the real sleeve above it wants [ArtworkWash]
+ * instead: a second, blurrier copy of a picture already on screen only reads as
+ * the picture again.
+ *
+ * Sized entirely by [modifier] — inside a wrap-content parent, pass
+ * `Modifier.matchParentSize()` so the wash follows the content rather than
+ * stretching it to the full screen.
+ *
+ * The blur is a one-off: nothing animates it, so it is rasterised once and
+ * then only composited. It still needs API 31 for `RenderEffect`; below that,
+ * and when the user has asked for less dynamic blur, the flat tint carries the
+ * surface on its own.
+ */
+@Composable
+fun ArtworkBackdrop(
+    palette: ArtworkPalette,
+    imageUrl: String?,
+    modifier: Modifier = Modifier,
+    /** How far down the surface the blurred artwork reaches. */
+    washFraction: Float = 0.72f,
+    /**
+     * The artwork size to fetch, which should be whichever one the surface
+     * *already* has on screen.
+     *
+     * Nothing here survives a 72dp blur, so resolution is worth nothing and a
+     * cache hit is worth everything: ask for a size the caller isn't already
+     * showing and the wash sits on the theme colour until a fresh copy comes
+     * over the wire. A sheet opened from a list row passes `ROW_ART_PX` and is
+     * tinted on the frame it opens.
+     */
+    artPx: Int = CARD_ART_PX,
+) {
