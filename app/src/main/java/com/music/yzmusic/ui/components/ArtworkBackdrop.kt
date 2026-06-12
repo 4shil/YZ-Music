@@ -90,3 +90,37 @@ fun ArtworkBackdrop(
         val isDark = androidx.compose.foundation.isSystemInDarkTheme()
         val alpha0 = if (isDark) 0.40f else 0.08f
         val alpha1 = if (isDark) 0.55f else 0.25f
+        val alpha2 = if (isDark) 0.85f else 0.72f
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to palette.background.copy(alpha = alpha0),
+                        0.20f to palette.background.copy(alpha = alpha1),
+                        0.55f to palette.background.copy(alpha = alpha2),
+                        washFraction to palette.background,
+                    ),
+                ),
+        )
+    }
+}
+
+/**
+ * The colour a detail page is made of below its artwork.
+ *
+ * Holds [ArtworkPalette.wash] — the colour the sleeve's own blur ends on —
+ * across the height the artwork occupies and a little past it, so the page
+ * reads as that blur carrying on rather than as a second surface starting, and
+ * then settles into the flat page tint on the way down.
+ *
+ * Two soft blobs of the artwork's other colours keep that from being a dead
+ * vertical ramp. They are radial gradients rather than a blurred copy of the
+ * sleeve, which is the whole point: a full-screen blur of a picture that is
+ * *also on screen* still reads as the picture, and the faces in it show through
+ * the song list. Nothing here is an image, so there is nothing to recognise —
+ * and no full-screen `RenderEffect` behind a scrolling list either, so it costs
+ * the same on every API level and under "reduce dynamic blur".
+ */
+@Composable
