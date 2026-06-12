@@ -404,3 +404,81 @@ private fun AlertScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val shape = RoundedCornerShape(ALERT_CORNER)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(SCRIM_COLOR)
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(ALERT_WIDTH)
+                .clip(shape)
+                .then(
+                    if (reduceDynamicBlur) {
+                        Modifier.background(MaterialTheme.colorScheme.surface)
+                    } else {
+                        Modifier.hazeEffect(state = hazeState, style = HazeMaterials.regular(MaterialTheme.colorScheme.surface))
+                    },
+                )
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = {},
+                ),
+            content = content,
+        )
+    }
+}
+
+/** The narrow, pill-shaped field iOS alerts and this app's search bar both use. */
+@Composable
+private fun AlertTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    isPassword: Boolean = false,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(11.dp))
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (value.isEmpty()) {
+            Text(
+                text = placeholder,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            enabled = enabled,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
