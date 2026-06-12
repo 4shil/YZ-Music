@@ -66,3 +66,25 @@ fun ArtworkBackdrop(
      */
     artPx: Int = CARD_ART_PX,
 ) {
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val canBlur = !reduceDynamicBlur && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
+    Box(modifier.background(palette.background)) {
+        if (canBlur && imageUrl != null) {
+            AsyncImage(
+                model = imageUrl.artworkAt(artPx),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(washFraction)
+                    // Overscaled so the blur's clamped edges never reach a
+                    // visible one, exactly as the player's mesh does.
+                    .graphicsLayer {
+                        scaleX = 1.4f
+                        scaleY = 1.4f
+                    }
+                    .blur(72.dp, BlurredEdgeTreatment.Unbounded),
+            )
+        }
+        val isDark = androidx.compose.foundation.isSystemInDarkTheme()
