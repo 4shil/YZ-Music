@@ -84,3 +84,15 @@ fun BottomFadeScrim(
         animationSpec = tween(220),
         label = "bottomScrimHeight",
     )
+
+    val brush = remember(pageColor) {
+        Brush.verticalGradient(
+            // A cubic ease-in rather than a straight ramp: the alpha then holds
+            // under a few percent for the first half of the strip, which is what
+            // stops the eye from finding the line where the layer starts. Its
+            // whole run is spent arriving — the same curve the blur it replaced
+            // ramped its radius along, so the strip reads at the same weight.
+            colorStops = Array(STOPS) { i ->
+                val t = i / (STOPS - 1f)
+                t to pageColor.copy(alpha = EaseInCubic.transform(t))
+            },
