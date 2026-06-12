@@ -96,3 +96,13 @@ fun BottomFadeScrim(
                 val t = i / (STOPS - 1f)
                 t to pageColor.copy(alpha = EaseInCubic.transform(t))
             },
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .background(brush),
+    )
+}
