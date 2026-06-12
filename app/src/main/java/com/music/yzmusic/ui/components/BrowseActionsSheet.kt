@@ -80,3 +80,22 @@ data class BrowseTarget(
      * null by every caller, and null is also the honest answer while the
      * question is still out.
      */
+    val playlist: UserPlaylist? = null,
+    /**
+     * False when the menu was opened from the page it would otherwise navigate
+     * to — the release page's own overflow. Play, Shuffle and Open are already
+     * on that page, so there they are left off the sheet.
+     */
+    val fromCard: Boolean = true,
+    /**
+     * The id this release is recorded under in [com.music.yzmusic.download.Downloads.collections],
+     * when it was downloaded whole — set so [onDelete] in the caller can offer
+     * "Delete download" alongside (or instead of) deleting the account's own
+     * copy.
+     *
+     * Left for the caller to resolve rather than derived here: a card off the
+     * Local Music screen has no browse id to derive it from at all (see
+     * `albumEntries` in `LocalMusicScreen`), while a real page's id needs
+     * `Downloads.recordIdOf` run on it first for a downloaded playlist. Both are
+     * questions about the download record, not about what this sheet is.
+     */
