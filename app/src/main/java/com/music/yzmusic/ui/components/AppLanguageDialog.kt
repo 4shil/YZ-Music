@@ -58,3 +58,19 @@ val SUPPORTED_LANGUAGES = listOf(
     AppLanguage("zh", R.string.chinese),
 )
 
+fun languageDisplayNameRes(languageTag: String): Int =
+    SUPPORTED_LANGUAGES.firstOrNull { it.tag == languageTag }?.nameRes ?: R.string.english
+
+/**
+ * Same frosted iOS alert as [LyricsSourcesDialog], but single-select rather
+ * than checkable — there's no order or multiple-participation question here,
+ * just one active language, so tapping a row applies it and closes the sheet
+ * immediately rather than waiting on a separate Done action.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+fun AppLanguageDialog(
+    hazeState: HazeState,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
