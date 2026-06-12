@@ -69,3 +69,8 @@ fun languageDisplayNameRes(languageTag: String): Int =
  */
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
+fun AppLanguageDialog(
+    hazeState: HazeState,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
