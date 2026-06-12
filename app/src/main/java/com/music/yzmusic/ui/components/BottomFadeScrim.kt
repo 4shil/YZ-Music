@@ -60,3 +60,15 @@ private const val STOPS = 16
  * edges run to the screen edges, so they have no seam of their own to soften.
  *
  * Unlike the blur it replaced, this stays on under Reduce dynamic blur: it is
+ * not a blur, it costs nothing to leave in, and with the bars filled solid it
+ * is the only thing keeping content from running out from under them.
+ */
+@Composable
+fun BottomFadeScrim(
+    modifier: Modifier = Modifier,
+    withMiniPlayer: Boolean = false,
+    /**
+     * The colour to fade in — whatever the page is painting at the foot of the
+     * screen. The theme's background on a tab, and on a detail page the tint
+     * its wash has settled into down here rather than the wash itself.
+     */
