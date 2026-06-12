@@ -164,3 +164,15 @@ fun ArtworkWash(
 
 /** One mesh lobe: a colour at its centre, gone by [radiusFraction] of the width. */
 private fun DrawScope.blob(color: Color, at: Offset, radiusFraction: Float) {
+    val center = Offset(at.x * size.width, at.y * size.height)
+    val radius = size.width * radiusFraction
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(color, color.copy(alpha = 0f)),
+            center = center,
+            radius = radius,
+        ),
+        radius = radius,
+        center = center,
+    )
+}
