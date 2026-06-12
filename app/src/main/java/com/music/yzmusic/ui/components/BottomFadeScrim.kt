@@ -48,3 +48,15 @@ private const val STOPS = 16
  * The floor the floating bars sit on: the page's own colour, faded in from
  * nothing at the top to solid at the very bottom.
  *
+ * Flat colour rather than glass, deliberately. A blur here has to sample the
+ * feed scrolling under it, and what it costs is paid on every frame of that
+ * scroll; a gradient costs one shader over a fixed rect. The bars themselves
+ * still carry glass, so the frosted look survives where it is actually read —
+ * on the pill and the mini player, against a floor that is only ever a wash of
+ * the colour already behind them.
+ *
+ * The ramp is the feathering. The top edge is fully transparent, which is what
+ * keeps the strip from reading as a rectangle stuck over the feed, and the side
+ * edges run to the screen edges, so they have no seam of their own to soften.
+ *
+ * Unlike the blur it replaced, this stays on under Reduce dynamic blur: it is
