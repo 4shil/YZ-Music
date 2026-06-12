@@ -1635,3 +1635,158 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val current = stack[index]
                 val existing = (current.songs as? UiState.Success)?.data ?: return@launch
                 val known = existing.mapTo(HashSet()) { it.videoId }
+                val added = fetched.songs
+                    .filter { known.add(it.videoId) }
+                    .withArtwork(artworkFallback)
+                // Suggestions can arrive on a later page than the real
+                // tracks, once the playlist's own continuation runs dry —
+                // see parsePlaylistShelf — so they're tracked separately
+                // rather than folded into [known].
+                val knownSuggested = current.suggestedSongs.mapTo(HashSet()) { it.videoId }
+                val addedSuggested = fetched.suggested
+                    .filter { it.videoId !in known && knownSuggested.add(it.videoId) }
+                    .withArtwork(artworkFallback)
+                // A page with nothing new on it means the feed has looped back
+                // rather than run dry with a token still attached.
+                if (added.isEmpty() && addedSuggested.isEmpty()) return@launch
+                _detailStack.value = stack.toMutableList().also {
+                    it[index] = current.copy(
+                        songs = UiState.Success(existing + added),
+                        suggestedSongs = current.suggestedSongs + addedSuggested,
+                    )
+                }
+                next = fetched.continuation
+            }
+        }
+    }
+
+    /**
+     * An album's track listing doesn't repeat the cover on every row — the
+     * page carries it once — so rows arrive with no artwork and stay blank
+     * through to the queue and the notification. Fall back to the page's.
+     */
+    private fun List<Song>.withArtwork(fallback: String?): List<Song> {
+        if (fallback == null) return this
+        return map { if (it.thumbnailUrl == null) it.copy(thumbnailUrl = fallback) else it }
+    }
+
+    /**
+     * Home and Explore cards don't say what they point at, and an artist
+     * fetched as an album only yields the five songs on its landing page.
+     * YouTube's browse ids are prefixed by kind, so use that.
+     *
+     * Public because the long-press menus ask the same question of a card
+     * before offering to queue what is behind it — an artist is not a running
+     * order, so it gets no queue actions.
+     */
+    fun browseTypeOf(browseId: String, fallback: BrowseType = BrowseType.OTHER): BrowseType = when {
+        // Not one of YouTube's, and the only one of these that says outright what
+        // it is rather than being read off a prefix convention.
+        browseId.startsWith(Downloads.PLAYLIST_PREFIX) -> BrowseType.PLAYLIST
+        browseId.startsWith("UC") -> BrowseType.ARTIST
+        browseId.startsWith("MPREb") -> BrowseType.ALBUM
+        browseId.startsWith("VL") || browseId.startsWith("PL") -> BrowseType.PLAYLIST
+        else -> fallback
+    }
+
+    /**
+     * Every track behind an album or playlist, handed to [onResult] once it is
+     * all in.
+     *
+     * What a long-press on a card is acting on. A card has nothing but a browse
+     * id — its page was never opened, so there is no track list anywhere to
+     * read — and "add this album to the queue" means the whole album, so this
+     * follows continuations to the end rather than taking the first page.
+     *
+     * Runs in [viewModelScope], not the caller's: the sheet the tap came from
+     * closes immediately, and a three-hundred-track playlist must not be
+     * abandoned halfway because of it.
+     */
+    fun collectSongs(
+        browseId: String,
+        artworkFallback: String? = null,
+        onResult: (Result<List<Song>>) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val result = when {
+                Downloads.recordIdOf(browseId) != null -> runCatching {
+                    downloadedPlaylist(browseId).ifEmpty { error(DOWNLOADS_GONE) }
+                }
+                browseId == "local:downloads" -> runCatching {
+                    LocalMediaRepository.getDownloadedSongs(context)
+                        .ifEmpty { error("No downloaded tracks in Music/YZ Music") }
+                }
+                browseId == "local:all" -> runCatching {
+                    if (!LocalMediaRepository.hasStoragePermission(context)) {
+                        error("Storage permission required to read local audio files")
+                    }
+                    LocalMediaRepository.getLocalMusic(context)
+                        .ifEmpty { error("No audio files found on device") }
+                }
+                else -> YtMusicRepository.allSongs(browseId)
+            }
+            onResult(result.map { it.withArtwork(artworkFallback) })
+        }
+    }
+
+    /** Pops one page; returns false when there was nothing to pop. */
+    fun closeDetail(): Boolean {
+        val stack = _detailStack.value
+        if (stack.isEmpty()) return false
+        _detailStack.value = stack.dropLast(1)
+        return true
+    }
+
+    fun onSignedIn(cookie: String) {
+        authStore.cookie = cookie
+        Innertube.cookie = cookie
+        // Every "this track can't be played" the resolver recorded while there
+        // was no session was recorded under different rules. An age-gated track
+        // is the whole point of signing in, and it is the one verdict a session
+        // overturns — so a listener who signs in to play a track must not spend
+        // the next ten minutes being told it still cannot be played.
+        StreamResolver.onSessionChanged()
+        _signedIn.value = true
+        // Before the reloads below, and the reason they are inside a coroutine
+        // now: which of the cookie's accounts was just signed into decides what
+        // "the library" and "the history" even refer to. Loading them first and
+        // scoping second shows the listener the wrong account's music and then
+        // silently disagrees with itself.
+        viewModelScope.launch {
+            Innertube.ensureSessionScope()
+            loadHome()
+            loadLibrary()
+            loadAccount()
+            loadPlaylists()
+        }
+    }
+
+    fun signOut() {
+        authStore.signOut()
+        Innertube.cookie = null
+        // The mirror image: verdicts reached with a session in hand say nothing
+        // about what an anonymous walk will be told, and the clients stood down
+        // for refusing the session deserve a fresh hearing without it.
+        StreamResolver.onSessionChanged()
+        _signedIn.value = false
+        _account.value = null
+        _library.value = UiState.Loading
+        // Ratings and playlists belong to the account that just left; keeping
+        // them would show the next signed-in user someone else's hearts.
+        LikeState.clear()
+        _playlists.value = emptyList()
+        _playlistOwned.value = emptyMap()
+        ownershipInFlight.clear()
+        _songMenu.value = null
+        loadHome()
+    }
+
+    private fun Throwable.friendly(): String = when {
+        message?.contains("resolve host", true) == true ||
+            message?.contains("Unable to resolve", true) == true -> "No internet connection"
+        message?.contains("401") == true || message?.contains("403") == true ->
+            "YouTube Music rejected the request — try signing in again"
+        else -> message ?: "Something went wrong"
+    }
+}
