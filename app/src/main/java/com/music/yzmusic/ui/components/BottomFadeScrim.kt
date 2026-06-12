@@ -72,3 +72,27 @@ fun BottomFadeScrim(
      * screen. The theme's background on a tab, and on a detail page the tint
      * its wash has settled into down here rather than the wash itself.
      */
+    pageColor: Color = MaterialTheme.colorScheme.background,
+) {
+    // The gesture bar sits below the tab pill and wants covering too, so it is
+    // added on rather than being part of the fade's own run.
+    val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val height by animateDpAsState(
+        targetValue = inset + if (withMiniPlayer) FADE_HEIGHT_WITH_MINI_PLAYER else FADE_HEIGHT,
+        // Matches the beat the mini player takes to appear, so the floor grows
+        // with it instead of snapping ahead of it.
+        animationSpec = tween(220),
+        label = "bottomScrimHeight",
+    )
+
+    val brush = remember(pageColor) {
+        Brush.verticalGradient(
+            // A cubic ease-in rather than a straight ramp: the alpha then holds
+            // under a few percent for the first half of the strip, which is what
+            // stops the eye from finding the line where the layer starts. Its
+            // whole run is spent arriving — the same curve the blur it replaced
+            // ramped its radius along, so the strip reads at the same weight.
+            colorStops = Array(STOPS) { i ->
+                val t = i / (STOPS - 1f)
+                t to pageColor.copy(alpha = EaseInCubic.transform(t))
+            },
