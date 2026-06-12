@@ -124,3 +124,43 @@ fun ArtworkBackdrop(
  * the same on every API level and under "reduce dynamic blur".
  */
 @Composable
+fun ArtworkWash(
+    palette: ArtworkPalette,
+    modifier: Modifier = Modifier,
+    /**
+     * Where the artwork above stops, as a fraction of the surface's height —
+     * the point past which the wash is allowed to start letting go.
+     *
+     * Defaulted past where a detail header lands on a phone: both headers are
+     * very nearly square and run the full width, so the artwork's own aspect
+     * ratio and the band overhanging it reach a little under 60% of the way
+     * down. The wash has to still be at full strength where that band hands
+     * over to it, or the join it was drawn to hide reappears as a step in
+     * brightness.
+     */
+    washFraction: Float = 0.62f,
+) {
+    Canvas(modifier.fillMaxSize()) {
+        // Eased rather than run straight from [washFraction] to the bottom: a
+        // gradient that changes slope at a stop has a visible line at that
+        // stop, however close the two colours are either side of it. The eye
+        // finds the kink, not the colours. These stops round it off.
+        drawRect(
+            Brush.verticalGradient(
+                0f to palette.wash,
+                washFraction to palette.wash,
+                lerp(washFraction, 1f, 0.35f) to lerp(palette.wash, palette.background, 0.12f),
+                lerp(washFraction, 1f, 0.70f) to lerp(palette.wash, palette.background, 0.55f),
+                1f to palette.background,
+            ),
+        )
+        // Placed just under where the sleeve ends and off opposite edges, so
+        // the first thing below the artwork is the widest part of the mesh
+        // rather than a horizon line across it.
+        blob(palette.accent.copy(alpha = 0.13f), Offset(0.12f, washFraction + 0.08f), 0.80f)
+        blob(palette.elevated.copy(alpha = 0.30f), Offset(0.96f, washFraction + 0.30f), 0.95f)
+    }
+}
+
+/** One mesh lobe: a colour at its centre, gone by [radiusFraction] of the width. */
+private fun DrawScope.blob(color: Color, at: Offset, radiusFraction: Float) {
