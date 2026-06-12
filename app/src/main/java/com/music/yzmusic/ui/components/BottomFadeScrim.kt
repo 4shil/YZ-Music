@@ -36,3 +36,15 @@ private val FADE_HEIGHT_WITH_MINI_PLAYER = 254.dp
 /**
  * How many colour stops the ramp is cut into.
  *
+ * A two-stop gradient is interpolated linearly in the shader, which is both the
+ * wrong curve and — across a strip this tall in a near-flat colour — enough of
+ * a straight line through the low alphas to band visibly on an 8-bit display.
+ * Sampling the curve at intervals hands the shader short spans to interpolate
+ * across instead, and the banding goes with them.
+ */
+private const val STOPS = 16
+
+/**
+ * The floor the floating bars sit on: the page's own colour, faded in from
+ * nothing at the top to solid at the very bottom.
+ *
