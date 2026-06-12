@@ -74,3 +74,5 @@ fun AppLanguageDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val shape = RoundedCornerShape(ALERT_CORNER)
