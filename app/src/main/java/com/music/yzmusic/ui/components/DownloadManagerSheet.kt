@@ -158,3 +158,6 @@ fun TopBarDownloadButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
  */
 @Composable
 fun DownloadManagerSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val session by DownloadSession.state.collectAsStateWithLifecycle()
+    // Newest ask last, the order the queue will actually reach them in.
