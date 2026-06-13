@@ -270,3 +270,83 @@ fun SongRow(
         var armed = false
         snapshotFlow { try { swipeState.requireOffset() } catch (e: Exception) { 0f } }
             .collect { offset ->
+                val travelled = abs(offset)
+                when {
+                    !armed && travelled >= armAt -> {
+                        armed = true
+                        haptics.play(Haptic.Tick)
+                    }
+                    // Silent, and with hysteresis: dragging back under the line
+                    // re-arms, but so does the spring-back after a successful
+                    // queue, and that must not buzz the same gesture twice.
+                    armed && travelled < armAt * 0.8f -> armed = false
+                }
+            }
+    }
+
+    SwipeToDismissBox(
+        state = swipeState,
+        modifier = modifier.onSizeChanged { boxWidth = it.width.toFloat() },
+        backgroundContent = { QueueSwipeBackground(swipeState) },
+    ) {
+        SongRowContent(
+            song = song,
+            onClick = onClick,
+            onLongPress = onLongPress,
+            modifier = Modifier.background(rowBackground),
+            trackNumber = trackNumber,
+            subtitleColor = subtitleColor,
+            downloadedTint = downloadedTint,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QueueSwipeBackground(swipeState: SwipeToDismissBoxState) {
+    val playNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .drawWithContent {
+                val offset = try { swipeState.requireOffset() } catch (e: Exception) { 0f }
+                if (offset > 0f) {
+                    clipRect(left = 0f, top = 0f, right = offset, bottom = size.height) {
+                        this@drawWithContent.drawContent()
+                    }
+                } else if (offset < 0f) {
+                    clipRect(left = size.width + offset, top = 0f, right = size.width, bottom = size.height) {
+                        this@drawWithContent.drawContent()
+                    }
+                }
+            }
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+            .padding(horizontal = PAGE_GUTTER + 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        QueueSwipeLabel(playNext)
+        QueueSwipeLabel(playNext)
+    }
+}
+
+@Composable
+private fun QueueSwipeLabel(playNext: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            if (playNext) Icons.Rounded.PlaylistPlay else Icons.Rounded.PlaylistAdd,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = stringResource(if (playNext) R.string.play_next else R.string.queue),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
