@@ -87,3 +87,73 @@ fun TopBarDownloadButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         animationSpec = tween(300),
         label = "downloadRingProgress",
     )
+    val failed = session.failed > 0
+    val tint by animateColorAsState(
+        targetValue = when {
+            failed -> MaterialTheme.colorScheme.error
+            else -> MaterialTheme.colorScheme.primary
+        },
+        animationSpec = tween(220),
+        label = "downloadRingTint",
+    )
+
+    IconButton(
+        onClick = {
+            haptics.play(Haptic.Select)
+            onClick()
+        },
+        modifier = modifier,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (session.busy) {
+                CircularProgressIndicator(
+                    // Never quite zero: a ring pinned at nothing reads as
+                    // stalled where the first sliver reads as starting.
+                    progress = { progress.coerceAtLeast(0.02f) },
+                    modifier = Modifier.size(RING_SIZE),
+                    color = tint,
+                    trackColor = tint.copy(alpha = 0.22f),
+                    strokeWidth = 2.dp,
+                    strokeCap = StrokeCap.Round,
+                    gapSize = 0.dp,
+                )
+            }
+            Icon(
+                imageVector = when {
+                    failed -> Icons.Rounded.ErrorOutline
+                    session.busy -> Icons.Rounded.Downloading
+                    else -> Icons.Rounded.DownloadDone
+                },
+                contentDescription = when {
+                    session.busy -> "Downloads · ${(session.fraction * 100).toInt()}%"
+                    failed -> "Downloads · ${session.failed} failed"
+                    else -> "Downloads · finished"
+                },
+                tint = tint,
+                modifier = Modifier.size(if (session.busy) GLYPH_IN_RING else GLYPH_SIZE),
+            )
+        }
+    }
+}
+
+/**
+ * The list behind that indicator: every track asked for this session, what
+ * became of it, and a way out of the ones still going.
+ *
+ * A list rather than a single line because the thing being reported on is a
+ * batch. `SongActionsSheet`'s download row already answers "what about *this*
+ * song" perfectly well and is the right size for that question; the question
+ * here is the one it cannot answer — forty tracks were asked for, which of them
+ * arrived — and that has as many answers as there were tracks.
+ *
+ * Rows carry the cover, the title and the credit because a filename is not how
+ * anybody remembers a song, and because a batch download is precisely when a
+ * user cannot tell from a name whether the right thing is being fetched: the
+ * track that fails is one of forty and the only way to recognise it is to see it.
+ *
+ * @param onDismiss closes the sheet. Called by the header's own control rather
+ *   than left to the drag, so there is something obvious to press once the list
+ *   is read — and the host marks the batch seen on the way out, which is what
+ *   takes the indicator down.
+ */
+@Composable
