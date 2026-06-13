@@ -99,3 +99,55 @@ data class BrowseTarget(
      * `Downloads.recordIdOf` run on it first for a downloaded playlist. Both are
      * questions about the download record, not about what this sheet is.
      */
+    val downloadId: String? = null,
+)
+
+/**
+ * Long-press menu for an album or playlist — the collection-level counterpart
+ * to [SongActionsSheet].
+ *
+ * Every action is optional, and which ones a caller passes is how the same
+ * sheet serves a card on the home feed and the page that card opens. A card
+ * has no other way to play its album without navigating to it, so it gets Play
+ * and Shuffle; the page's own header already carries both, so there they are
+ * null and the sheet is the queue rows and the download.
+ *
+ * The queue rows are always offered. They are the reason this menu exists: a
+ * release is exactly the kind of thing someone wants *after* what is playing
+ * rather than instead of it, and until now the only way to queue one was to
+ * open it and long-press its tracks one at a time.
+ *
+ * Deleting asks a second time, in place. A playlist is the only thing in this
+ * app whose loss can't be undone by tapping the same row again, and a
+ * mis-tapped card in a shelf is exactly how it would happen.
+ */
+@Composable
+fun BrowseActionsSheet(
+    target: BrowseTarget,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    modifier: Modifier = Modifier,
+    onPlay: (() -> Unit)? = null,
+    onShuffle: (() -> Unit)? = null,
+    /** Null where the sheet was opened from the page it would navigate to. */
+    onOpen: (() -> Unit)? = null,
+    onDownloadAll: (() -> Unit)? = null,
+    /**
+     * Set whenever [target] is a playlist, regardless of who owns it — pinning
+     * doesn't touch the account, only what sits at the top of this device's
+     * Library tab. Null everywhere else (albums, artists), where "pin" has
+     * nothing to mean.
+     */
+    isPinned: Boolean = false,
+    onTogglePin: (() -> Unit)? = null,
+    onRename: ((String) -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+    /**
+     * Removes the files this release was downloaded as, when it was downloaded
+     * whole — see [BrowseTarget.downloadId]. Independent of [onDelete]: that one
+     * deletes the playlist from the account, this one only ever touches what's
+     * on the device, so both can be offered together for an owned playlist that
+     * also happens to be downloaded.
+     */
+    onDeleteDownload: (() -> Unit)? = null,
+) {
