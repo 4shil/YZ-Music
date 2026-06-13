@@ -157,3 +157,4 @@ fun TopBarDownloadButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
  *   takes the indicator down.
  */
 @Composable
+fun DownloadManagerSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
