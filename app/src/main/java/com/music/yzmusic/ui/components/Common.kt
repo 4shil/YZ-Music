@@ -242,3 +242,31 @@ fun SongRow(
     val swipeState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             if (value != SwipeToDismissBoxValue.Settled && onSwipeToQueue != null) {
+                val offset = try { swipeStateHolder.value?.requireOffset() ?: 0f } catch (e: Exception) { 0f }
+                // Only queue if the physical drag reached half the box width, ignoring short accidental flings.
+                if (abs(offset) >= boxWidth * 0.45f) {
+                    haptics.play(Haptic.Select)
+                    onSwipeToQueue()
+                }
+            }
+            false // never actually dismiss; snap back
+        },
+        positionalThreshold = { distance -> distance * 0.5f },
+    )
+    swipeStateHolder.value = swipeState
+
+    if (onSwipeToQueue == null) {
+        SongRowContent(song, onClick, onLongPress, modifier, trackNumber, subtitleColor, downloadedTint)
+        return
+    }
+
+    // The row reveals "Queue" from the first pixel of the drag, but it only
+    // *commits* past 45% of the width — so without this the label is a promise
+    // the finger can't check. One light tick at the crossing is the whole point:
+    // let go now and it queues.
+    LaunchedEffect(swipeState, boxWidth) {
+        if (boxWidth <= 0f) return@LaunchedEffect
+        val armAt = boxWidth * 0.45f
+        var armed = false
+        snapshotFlow { try { swipeState.requireOffset() } catch (e: Exception) { 0f } }
+            .collect { offset ->
