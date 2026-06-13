@@ -82,3 +82,8 @@ fun TopBarDownloadButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     // Animated, because the fraction lands in steps — one track at a time, plus
     // whatever the running one reports — and a ring that jumps in twenty-fifths
     // reads as a stutter rather than as progress.
+    val progress by animateFloatAsState(
+        targetValue = session.fraction,
+        animationSpec = tween(300),
+        label = "downloadRingProgress",
+    )
