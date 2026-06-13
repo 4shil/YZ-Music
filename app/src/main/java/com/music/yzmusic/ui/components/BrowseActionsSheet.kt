@@ -183,3 +183,18 @@ fun BrowseActionsSheet(
             // track that is saved, queued or running alone.
             val active by Downloads.active.collectAsStateWithLifecycle()
             val requested by Downloads.requested.collectAsStateWithLifecycle()
+            val saved by Downloads.saved.collectAsStateWithLifecycle()
+            // Only the tracks *this release* asked for — two releases can share
+            // a track, and reading the whole queue would show this release
+            // waiting on a download some other one started. Failed entries stay
+            // in [Downloads.active] until dismissed, and a failure is not a wait.
+            val waiting = target.browseId?.let { requested[it] }.orEmpty().any { id ->
+                when (active[id]) {
+                    is DownloadState.Queued, is DownloadState.Running -> true
+                    else -> false
+                }
+            }
+            // The same reading [DownloadedBadge] does per row: a release counts
+            // as downloaded once every one of its tracks is in the saved set,
+            // not from any record of the release itself. Empty for a card whose
+            // page was never opened, which is not an answer either way.
