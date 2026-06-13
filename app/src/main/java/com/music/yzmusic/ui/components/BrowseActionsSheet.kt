@@ -153,3 +153,31 @@ fun BrowseActionsSheet(
 ) {
     var renaming by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
+    var confirmingDeleteDownload by remember { mutableStateOf(false) }
+
+    val playlist = target.playlist
+    if (renaming && playlist != null && onRename != null) {
+        RenamePlaylistForm(
+            playlist = playlist,
+            onBack = { renaming = false },
+            onRename = onRename,
+            modifier = modifier,
+        )
+        return
+    }
+
+    Column(modifier.fillMaxWidth()) {
+        BrowseSheetHeader(target)
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+
+        onPlay?.let { ActionRow(Icons.Rounded.PlayArrow, "Play", onClick = it) }
+        onShuffle?.let { ActionRow(YZMusicIcons.Shuffle, "Shuffle", onClick = it) }
+        ActionRow(Icons.AutoMirrored.Rounded.PlaylistPlay, "Play next", onClick = onPlayNext)
+        ActionRow(Icons.AutoMirrored.Rounded.QueueMusic, "Add to queue", onClick = onAddToQueue)
+        onDownloadAll?.let { download ->
+            // Saying which of the three it is, rather than offering the same row
+            // whatever the state — this is where a release is asked for now that
+            // its page's header spends that spot on the search, and a menu that
+            // can't say "already on the device" leaves the question open. The
+            // tap is left live in every state: [Downloads.enqueue] leaves a
+            // track that is saved, queued or running alone.
