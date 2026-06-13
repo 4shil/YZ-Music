@@ -182,3 +182,63 @@ fun libraryGrid(available: Dp): LibraryGridSpec {
     val raw = ((available + LIBRARY_GRID_SPACING) / (LIBRARY_GRID_MIN_CARD_WIDTH + LIBRARY_GRID_SPACING))
         .toInt()
     val columns = raw.coerceIn(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS)
+    val cardWidth = (available - LIBRARY_GRID_SPACING * (columns - 1)) / columns
+    return LibraryGridSpec(columns, cardWidth)
+}
+
+/**
+ * One track row, used by search, library and detail pages.
+ *
+ * Swiping it either way queues the track or plays it next, per
+ * [AppSettings.swipeToPlayNext] — the row springs back rather than
+ * dismissing, since nothing is being removed. Long-press opens the actions
+ * menu.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun SongRow(
+    song: Song,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongPress: (() -> Unit)? = null,
+    onSwipeToQueue: (() -> Unit)? = null,
+    /**
+     * What the row paints over the swipe reveal as it slides back.
+     *
+     * It has to be the colour of the page the row is *on*, not the theme's
+     * background — an album page tinted from its sleeve would otherwise drag a
+     * black band across itself on every swipe.
+     */
+    rowBackground: Color = MaterialTheme.colorScheme.background,
+    /**
+     * Drawn in place of the artwork, for lists where every row would otherwise
+     * repeat the same cover — an album's own track listing.
+     */
+    trackNumber: Int? = null,
+    /**
+     * The artist line, and the track number when there is one.
+     *
+     * A page tinted from its artwork wants this brighter than the flat feeds
+     * do: the usual dim grey is pitched against black, and against a mid-toned
+     * wash it stops being legible as a second line and starts disappearing.
+     */
+    subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    /**
+     * What the badge on an already-downloaded row is tinted, or null to leave
+     * those rows unmarked.
+     *
+     * Null is for the Downloads page itself, where every row qualifies and the
+     * badge would say nothing. The colour is a parameter for the same reason
+     * [subtitleColor] is: a page tinted from its artwork draws its accent from
+     * the sleeve, and the theme's primary against that wash is exactly the
+     * kind of thing that reads as pasted on.
+     */
+    downloadedTint: Color? = MaterialTheme.colorScheme.primary,
+) {
+    val haptics = rememberHaptics()
+    val swipeStateHolder = remember { mutableStateOf<SwipeToDismissBoxState?>(null) }
+    var boxWidth by remember { mutableFloatStateOf(0f) }
+
+    val swipeState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value != SwipeToDismissBoxValue.Settled && onSwipeToQueue != null) {
