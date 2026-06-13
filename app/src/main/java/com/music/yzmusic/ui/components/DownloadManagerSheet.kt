@@ -75,3 +75,10 @@ import com.music.yzmusic.ui.haptics.rememberHaptics
  */
 @Composable
 fun TopBarDownloadButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val session by DownloadSession.state.collectAsStateWithLifecycle()
+    if (!session.visible) return
+
+    val haptics = rememberHaptics()
+    // Animated, because the fraction lands in steps — one track at a time, plus
+    // whatever the running one reports — and a ring that jumps in twenty-fifths
+    // reads as a stutter rather than as progress.
