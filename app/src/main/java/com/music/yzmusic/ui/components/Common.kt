@@ -473,3 +473,78 @@ fun DownloadedBadge(videoId: String, tint: Color, modifier: Modifier = Modifier)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+fun PullToRefresh(
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    state: PullToRefreshState,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = onRefresh,
+        state = state,
+        modifier = modifier.fillMaxSize(),
+        indicator = {},
+    ) {
+        content()
+    }
+}
+
+/** Slim dismissible-looking prompt shown atop Home while signed out. */
+@Composable
+fun SignInBanner(onSignIn: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = PAGE_GUTTER, vertical = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onSignIn)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.sign_in_youtube_music),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.personalized_recommendations),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Button(onClick = onSignIn) { Text(stringResource(R.string.sign_in)) }
+    }
+}
+
+@Composable
+fun MessageState(
+    message: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = PAGE_GUTTER + 12.dp, vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        if (actionLabel != null && onAction != null) {
+            Button(onClick = onAction) { Text(actionLabel) }
+        }
+    }
+}
