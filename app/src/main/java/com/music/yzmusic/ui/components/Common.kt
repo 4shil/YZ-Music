@@ -236,3 +236,9 @@ fun SongRow(
     downloadedTint: Color? = MaterialTheme.colorScheme.primary,
 ) {
     val haptics = rememberHaptics()
+    val swipeStateHolder = remember { mutableStateOf<SwipeToDismissBoxState?>(null) }
+    var boxWidth by remember { mutableFloatStateOf(0f) }
+
+    val swipeState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value != SwipeToDismissBoxValue.Settled && onSwipeToQueue != null) {
