@@ -63,3 +63,20 @@ data class BrowseTarget(
     val title: String,
     val subtitle: String,
     val thumbnailUrl: String? = null,
+    val type: BrowseType = BrowseType.OTHER,
+    /**
+     * The tracks already in hand. Empty for a card whose page was never
+     * opened — the queue actions then fetch the listing themselves, which is
+     * why they are offered either way.
+     */
+    val songs: List<Song> = emptyList(),
+    /**
+     * Set when this is one of the account's own playlists, which is the only
+     * case where renaming and deleting are things that can be done to it.
+     *
+     * Filled in where the sheet is raised rather than by whatever built the
+     * target: only the playlist's own page states who made it, so for a card
+     * this has to be sent for and arrives after the sheet is already up. Left
+     * null by every caller, and null is also the honest answer while the
+     * question is still out.
+     */
