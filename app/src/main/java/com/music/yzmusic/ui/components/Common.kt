@@ -350,3 +350,126 @@ private fun QueueSwipeLabel(playNext: Boolean) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+private fun SongRowContent(
+    song: Song,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    trackNumber: Int? = null,
+    subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    downloadedTint: Color? = MaterialTheme.colorScheme.primary,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (trackNumber != null) {
+            // Same 52dp the artwork would take, so a numbered list and an
+            // illustrated one share a left edge and a divider inset.
+            Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "$trackNumber",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = subtitleColor,
+                )
+            }
+        } else {
+            AsyncImage(
+                model = song.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .thumbnailBorder(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = song.artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = subtitleColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (downloadedTint != null) {
+            DownloadedBadge(song.videoId, downloadedTint)
+        }
+        song.durationText?.let {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelMedium,
+                color = subtitleColor,
+            )
+        }
+        // Same sheet the long-press opens, for anyone who doesn't think to hold.
+        if (onLongPress != null) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onLongPress),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.MoreVert,
+                    contentDescription = stringResource(R.string.more),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The mark on a row whose track is already on disk.
+ *
+ * Sized under the row's "more" glyph on purpose: this is a statement about the
+ * track, not something to press, and a status mark that matches an affordance
+ * in weight invites a tap that does nothing.
+ *
+ * Reads [Downloads.saved] rather than touching the filesystem — a list cannot
+ * afford a file check per row, and the map is kept honest by the disk check
+ * every real read of a download goes through. The cost of that trade is a row
+ * that can claim a file a file manager has since deleted, until something asks
+ * for it and the record is pruned.
+ */
+@Composable
+fun DownloadedBadge(videoId: String, tint: Color, modifier: Modifier = Modifier) {
+    val saved by Downloads.saved.collectAsStateWithLifecycle()
+    if (videoId !in saved) return
+    Spacer(Modifier.width(8.dp))
+    Icon(
+        Icons.Rounded.DownloadDone,
+        contentDescription = "Downloaded",
+        tint = tint,
+        modifier = modifier.size(16.dp),
+    )
+}
+
+/**
+ * Pull-to-refresh for the tab feeds, with the usual circular puck suppressed.
+ *
+ * The feeds sit under a frosted bar that already occupies the top 96dp, so a
+ * puck dropping into that space would be blurred out by the glass it lands
+ * behind. The drag feedback is the loader line along the bottom edge of the
+ * bar instead — which is why [state] is hoisted: the bar lives beside this
+ * content, not inside it, and has to follow the same drag.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
