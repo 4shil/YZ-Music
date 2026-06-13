@@ -151,3 +151,5 @@ fun BrowseActionsSheet(
      */
     onDeleteDownload: (() -> Unit)? = null,
 ) {
+    var renaming by remember { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf(false) }
