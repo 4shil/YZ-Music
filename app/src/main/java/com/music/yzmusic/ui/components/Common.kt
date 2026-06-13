@@ -179,3 +179,6 @@ private const val LIBRARY_GRID_MAX_COLUMNS = 5
  * whether the row it's in scrolls or not. See `LibraryGridShelf`.
  */
 fun libraryGrid(available: Dp): LibraryGridSpec {
+    val raw = ((available + LIBRARY_GRID_SPACING) / (LIBRARY_GRID_MIN_CARD_WIDTH + LIBRARY_GRID_SPACING))
+        .toInt()
+    val columns = raw.coerceIn(LIBRARY_GRID_MIN_COLUMNS, LIBRARY_GRID_MAX_COLUMNS)
