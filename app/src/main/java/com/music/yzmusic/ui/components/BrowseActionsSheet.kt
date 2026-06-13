@@ -198,3 +198,59 @@ fun BrowseActionsSheet(
             // as downloaded once every one of its tracks is in the saved set,
             // not from any record of the release itself. Empty for a card whose
             // page was never opened, which is not an answer either way.
+            val ids = remember(target.songs) { target.songs.mapTo(HashSet()) { it.videoId } }
+            val downloaded = !waiting && ids.isNotEmpty() && ids.all { it in saved }
+            ActionRow(
+                icon = when {
+                    waiting -> YZMusicIcons.Clock
+                    downloaded -> YZMusicIcons.Check
+                    else -> YZMusicIcons.Download
+                },
+                label = "Download all",
+                value = when {
+                    waiting -> "Downloading"
+                    downloaded -> "Downloaded"
+                    else -> null
+                },
+                onClick = download,
+            )
+        }
+        onOpen?.let {
+            ActionRow(YZMusicIcons.ChevronRight, "Open ${target.type.noun}".trim(), onClick = it)
+        }
+        onTogglePin?.let {
+            ActionRow(YZMusicIcons.Pin, if (isPinned) "Unpin" else "Pin", onClick = it)
+        }
+        if (onRename != null) {
+            ActionRow(Icons.Rounded.Edit, "Rename") { renaming = true }
+        }
+        if (onDelete != null) {
+            if (confirmingDelete) {
+                ActionRow(
+                    icon = Icons.Rounded.DeleteForever,
+                    label = "Delete \"${target.title}\" — tap to confirm",
+                    tint = MaterialTheme.colorScheme.error,
+                    onClick = onDelete,
+                )
+            } else {
+                ActionRow(Icons.Rounded.Delete, "Delete playlist") { confirmingDelete = true }
+            }
+        }
+        if (onDeleteDownload != null) {
+            if (confirmingDeleteDownload) {
+                ActionRow(
+                    icon = Icons.Rounded.DeleteForever,
+                    label = "Remove \"${target.title}\" from this device — tap to confirm",
+                    tint = MaterialTheme.colorScheme.error,
+                    onClick = onDeleteDownload,
+                )
+            } else {
+                ActionRow(Icons.Rounded.Delete, "Delete download") { confirmingDeleteDownload = true }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** Which release the sheet is about: the same row the shelf card was. */
+@Composable
