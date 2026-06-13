@@ -161,3 +161,91 @@ fun DownloadManagerSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val session by DownloadSession.state.collectAsStateWithLifecycle()
     // Newest ask last, the order the queue will actually reach them in.
+    val items = remember(session.items) { session.items.sortedBy { it.sequence } }
+
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.downloads),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    text = session.summary(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (session.failed > 0 && !session.busy) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            if (session.busy) {
+                TextButton(
+                    onClick = {
+                        // Only what is still going. Cancelling a finished row
+                        // would drop it from the list, which is the one thing
+                        // this sheet exists to still be showing.
+                        items.filterNot { it.progress.settled }
+                            .forEach { Downloads.cancel(it.videoId) }
+                    },
+                ) {
+                    Text(stringResource(R.string.cancel_all))
+                }
+            } else {
+                TextButton(
+                    onClick = {
+                        DownloadSession.clear()
+                        onDismiss()
+                    },
+                ) {
+                    Text(stringResource(R.string.clear))
+                }
+            }
+        }
+
+        // The batch's own bar, under the heading it belongs to. The per-row bars
+        // below are about one track each; this is the one that answers "how much
+        // longer", which is what someone opening this sheet mid-album wants.
+        if (session.busy) {
+            LinearProgressIndicator(
+                progress = { session.fraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .height(3.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                strokeCap = StrokeCap.Round,
+                gapSize = 0.dp,
+                drawStopIndicator = {},
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+
+        // Capped rather than left to grow: a hundred-track playlist would
+        // otherwise be a sheet that covers the screen and has to be scrolled
+        // back up before anything else can be reached.
+        LazyColumn(Modifier.heightIn(max = LIST_MAX_HEIGHT)) {
+            items(items, key = { it.videoId }) { item ->
+                DownloadManagerRow(
+                    item = item,
+                    onCancel = { Downloads.cancel(item.videoId) },
+                    onRetry = { Downloads.enqueue(context, item.song, item.from) },
+                )
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** One track: its cover, what it is, and where it has got to. */
+@Composable
