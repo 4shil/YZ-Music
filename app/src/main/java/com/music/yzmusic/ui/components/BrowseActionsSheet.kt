@@ -181,3 +181,5 @@ fun BrowseActionsSheet(
             // can't say "already on the device" leaves the question open. The
             // tap is left live in every state: [Downloads.enqueue] leaves a
             // track that is saved, queued or running alone.
+            val active by Downloads.active.collectAsStateWithLifecycle()
+            val requested by Downloads.requested.collectAsStateWithLifecycle()
