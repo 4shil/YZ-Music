@@ -254,3 +254,62 @@ fun BrowseActionsSheet(
 
 /** Which release the sheet is about: the same row the shelf card was. */
 @Composable
+private fun BrowseSheetHeader(target: BrowseTarget) {
+    val shape = if (target.type == BrowseType.ARTIST) CircleShape else RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = target.thumbnailUrl.artworkAt(ROW_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(shape)
+                .thumbnailBorder(shape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = target.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                // A card frequently has no subtitle at all, and the kind of
+                // thing it is beats a blank line under the title. A card of
+                // unknown kind has neither, and gets the track count instead —
+                // which by then is the one thing actually known about it.
+                text = target.subtitle.ifBlank {
+                    target.type.noun.replaceFirstChar { it.uppercase(Locale.ROOT) }.ifBlank {
+                        target.songs.size.takeIf { it > 0 }
+                            ?.let { "$it ${if (it == 1) "song" else "songs"}" }
+                            .orEmpty()
+                    }
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * What to call the thing the sheet is about, in a sentence. [BrowseType.OTHER]
+ * is a home card nobody has identified yet — "Open" without a noun is still a
+ * true label for it, and guessing "album" would not be.
+ */
+private val BrowseType.noun: String
+    get() = when (this) {
+        BrowseType.ALBUM -> "album"
+        BrowseType.PLAYLIST -> "playlist"
+        BrowseType.ARTIST -> "artist"
+        BrowseType.OTHER -> ""
+    }
