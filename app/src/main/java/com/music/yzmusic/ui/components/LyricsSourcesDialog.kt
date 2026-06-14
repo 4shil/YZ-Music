@@ -242,3 +242,28 @@ private fun SyllableSyncToggle(checked: Boolean, onToggle: () -> Unit) {
  * mark rather than on it.
  */
 @Composable
+private fun ReorderableSourceList(
+    order: List<LyricsSource>,
+    selected: Set<LyricsSource>,
+    onReorder: (List<LyricsSource>) -> Unit,
+    onToggle: (LyricsSource) -> Unit,
+) {
+    var liveOrder by remember(order) { mutableStateOf(order) }
+    var draggedSource by remember { mutableStateOf<LyricsSource?>(null) }
+
+    /** Distance the finger has covered since this gesture began, in pixels. */
+    var totalDrag by remember { mutableStateOf(0f) }
+
+    /** Which slot of [liveOrder] it began on. */
+    var startIndex by remember { mutableStateOf(0) }
+
+    // The distance from one row's top to the next one's — which is the row
+    // *plus* the hairline above it, not the row alone. Measured off a wrapper
+    // holding both, because measuring the row by itself left every swap
+    // short by the width of a rule and the error compounded down the list.
+    //
+    // All the rows are the same height by construction (one line of label,
+    // one of detail, both capped), so whichever reports last is as good as
+    // any other; [lockedPitchPx] then freezes it for the duration of a
+    // gesture, so a relayout mid-drag can't move the boundaries the drag is
+    // being measured against underneath it.
