@@ -267,3 +267,25 @@ private fun ReorderableSourceList(
     // any other; [lockedPitchPx] then freezes it for the duration of a
     // gesture, so a relayout mid-drag can't move the boundaries the drag is
     // being measured against underneath it.
+    var pitchPx by remember { mutableStateOf(0f) }
+    var lockedPitchPx by remember { mutableStateOf(0f) }
+
+    Column {
+        liveOrder.forEach { source ->
+            // Without this, Compose matches each row to its slot by position
+            // rather than by which source it is — so the instant a swap moved
+            // a different [LyricsSource] into the slot the finger was on,
+            // that slot's `pointerInput` saw its key change and restarted the
+            // coroutine mid-gesture, which is indistinguishable from letting
+            // go: the touch kept moving but nothing was listening anymore,
+            // and the drag stalled one swap after it started. Keying the
+            // whole row on the value it represents is what keeps *this
+            // composable*, gesture and all, following that value from slot to
+            // slot instead of being torn down and rebuilt in place.
+            key(source) {
+                val checked = source in selected
+                // The last one enabled can't be unticked — see the guard in
+                // [onToggle] — so it reads the same disabled way the toggle
+                // itself already treats it, rather than looking clickable and
+                // silently doing nothing.
+                val toggleable = !checked || selected.size > 1
