@@ -406,3 +406,31 @@ private fun RowAction(
  * bar, and what a percentage cannot say is that thirty-nine of forty arrived and
  * one did not, which is the only outcome anybody needs to act on.
  */
+private fun DownloadSession.State.summary(): String {
+    val parts = buildList {
+        if (waiting > 0) add("$waiting waiting")
+        if (finished > 0) add("$finished done")
+        if (failed > 0) add("$failed failed")
+    }
+    return when {
+        parts.isEmpty() -> "Nothing downloading"
+        busy -> parts.joinToString(" · ")
+        failed > 0 -> parts.joinToString(" · ")
+        else -> "All $finished ${if (finished == 1) "song" else "songs"} downloaded"
+    }
+}
+
+/** The progress ring in the bar, sized to the account photo beside it. */
+private val RING_SIZE = 26.dp
+
+/** The glyph inside that ring, small enough to leave the stroke clear. */
+private val GLYPH_IN_RING = 15.dp
+
+/** With no ring around it, the glyph is a normal bar icon. */
+private val GLYPH_SIZE = 22.dp
+
+/** A row's cover: under a track row's 52dp, since this is a status list. */
+private val ART_SIZE = 44.dp
+
+/** How much of the screen the list may take before it scrolls instead. */
+private val LIST_MAX_HEIGHT = 380.dp
