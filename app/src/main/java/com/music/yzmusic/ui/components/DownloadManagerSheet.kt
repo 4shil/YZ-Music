@@ -249,3 +249,9 @@ fun DownloadManagerSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
 
 /** One track: its cover, what it is, and where it has got to. */
 @Composable
+private fun DownloadManagerRow(
+    item: DownloadSession.Item,
+    onCancel: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val progress = item.progress
