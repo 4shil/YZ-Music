@@ -74,3 +74,73 @@ fun LyricsSourcesDialog(
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val selected by AppSettings.lyricsSources.collectAsStateWithLifecycle()
     val savedOrder by AppSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
+    val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
+    val shape = RoundedCornerShape(ALERT_CORNER)
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(SCRIM_COLOR)
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(ALERT_WIDTH)
+                .clip(shape)
+                .then(
+                    if (reduceDynamicBlur) {
+                        Modifier.background(MaterialTheme.colorScheme.surface)
+                    } else {
+                        Modifier.hazeEffect(
+                            state = hazeState,
+                            style = HazeMaterials.regular(MaterialTheme.colorScheme.surface),
+                        )
+                    },
+                )
+                // Swallows the tap before it reaches the scrim behind, so
+                // touching the card itself never dismisses it.
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = {},
+                ),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 19.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "Lyrics Sources",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.W600,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "Tried in this order — drag to reorder. The highest-priority " +
+                        "source to answer at all wins, unless Prioritize Syllable Lyrics says " +
+                        "to keep looking for a word-synced one.",
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
+            ReorderableSourceList(
+                order = savedOrder,
+                selected = selected,
+                onReorder = AppSettings::setLyricsSourceOrder,
+                onToggle = { source ->
