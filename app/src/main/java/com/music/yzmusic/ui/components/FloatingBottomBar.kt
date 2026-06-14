@@ -127,3 +127,12 @@ private const val SQUASH = 0.5f
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
+fun FloatingBottomBar(
+    tabs: List<BottomTab>,
+    selectedIndex: Int,
+    onTabSelected: (Int) -> Unit,
+    hazeState: HazeState,
+    modifier: Modifier = Modifier,
+) {
+    val pillShape = RoundedCornerShape(percent = 50)
+    val container = MaterialTheme.colorScheme.surface
