@@ -238,3 +238,18 @@ fun FloatingBottomBar(
                         onDragCancel = { dragOffset = 0f },
                         onDragEnd = {
                             if (tabStepPx > 0f) {
+                                val ratio = totalDrag / tabStepPx
+                                val shift = when {
+                                    ratio > 0.35f -> kotlin.math.max(1, ratio.roundToInt())
+                                    ratio < -0.35f -> kotlin.math.min(-1, ratio.roundToInt())
+                                    else -> 0
+                                }
+                                val newIndex = (currentSelectedIndex + shift).coerceIn(0, tabs.lastIndex)
+                                if (newIndex != currentSelectedIndex) {
+                                    onTabSelected(newIndex)
+                                }
+                            }
+                            dragOffset = 0f
+                        },
+                        onHorizontalDrag = { _, delta ->
+                            totalDrag += delta
