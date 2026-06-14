@@ -150,3 +150,30 @@ fun FloatingBottomBar(
 
     var rowSize by remember { mutableStateOf(IntSize.Zero) }
     val gapPx = with(density) { 6.dp.toPx() }
+    val n = tabs.size
+
+    // With weight(1f) + spacedBy(gap):
+    //   tabWidth = (rowWidth - gap*(n-1)) / n
+    //   tab i left edge = i * (tabWidth + gap) = i * (rowWidth + gap) / n
+    val tabWidthPx = if (rowSize.width > 0 && n > 0) {
+        (rowSize.width - gapPx * (n - 1)) / n
+    } else 0f
+    val tabStepPx = if (rowSize.width > 0 && n > 0) {
+        (rowSize.width + gapPx) / n
+    } else 0f
+
+    val pillTargetPx = if (tabStepPx > 0f) {
+        selectedIndex * tabStepPx + dragOffset
+    } else 0f
+
+    val animatedPillOffset by animateFloatAsState(
+        targetValue = pillTargetPx,
+        animationSpec = glassSpec,
+        label = "pillOffset",
+    )
+
+    // How much of a tab's stride is still ahead of the indicator: 0 at rest,
+    // toward 1 in the middle of a move or under a drag that has run away from
+    // it. The stretch below is a function of this and nothing else, which is
+    // what keeps it honest — the shape can only be deformed while it is
+    // actually behind where it is going.
