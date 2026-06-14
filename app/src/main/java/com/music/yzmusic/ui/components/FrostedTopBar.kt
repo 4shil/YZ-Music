@@ -126,3 +126,114 @@ fun FrostedTopBar(
     // Only the solid bar wants a hairline under it. A faded one has no edge for
     // the line to mark, and drawing it there would be inventing the very seam
     // the fade exists to remove.
+    val dividerColor by animateColorAsState(
+        targetValue = MaterialTheme.colorScheme.outline.copy(
+            alpha = if (scrolled && reduceDynamicBlur) 0.6f else 0f,
+        ),
+        animationSpec = tween(220),
+        label = "topBarDivider",
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (reduceDynamicBlur) Modifier.background(MaterialTheme.colorScheme.surface)
+                else Modifier,
+            ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(TopBarContentHeight),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    // Reserve room for the back button and the actions so a
+                    // long title truncates instead of running under them.
+                    .padding(horizontal = 96.dp)
+                    .fillMaxWidth()
+                    .graphicsLayer { alpha = titleAlpha },
+            )
+            // On a pushed page the back affordance is always visible, since
+            // there is no large in-list header to fall back on.
+            if (onBack != null) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = stringResource(R.string.back),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_logo),
+                        contentDescription = null,
+                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                        modifier = Modifier.height(18.dp),
+                    )
+                    // The dev flavor gets its own applicationId so it can sit
+                    // installed next to the prod build; this badge is the
+                    // in-app equivalent, so the two are never mixed up at a
+                    // glance once both are running.
+                    if (BuildConfig.FLAVOR == "dev") {
+                        Text(
+                            text = "Dev",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                actions()
+            }
+        }
+        // The divider and the loader line share the bar's bottom edge; the box
+        // only grows to the line's height while a refresh is actually showing.
+        Box(Modifier.fillMaxWidth()) {
+            HorizontalDivider(thickness = 0.5.dp, color = dividerColor)
+            RefreshLine(
+                refreshing = refreshing,
+                pullFraction = pullFraction,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }
+}
+
+/**
+ * The account affordance at the right end of the bar.
+ *
+ * It is the signed-in Google account's own photo — the same one YouTube Music
+ * shows there — and tapping it opens Settings, where the account lives. Signed
+ * out, or before the account menu has come back, it falls back to a person
+ * glyph on a filled circle so the tap target never disappears.
+ *
+ * The hairline ring is what keeps a photo with light edges from dissolving into
+ * the bar's glass; it is the same one thumbnails elsewhere carry.
+ */
+@Composable
