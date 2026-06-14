@@ -299,3 +299,53 @@ private fun BottomBarItem(
 ) {
     // The same spring the indicator rides, so the glyph arriving and the glass
     // arriving are one movement rather than two that nearly agree.
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.08f else 1f,
+        animationSpec = glassSpec,
+        label = "tabScale",
+    )
+    val haptics = rememberHaptics()
+    val tint by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(200),
+        label = "tabTint",
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                if (!selected) haptics.play(Haptic.Select)
+                onClick()
+            }
+            .padding(vertical = TAB_VERTICAL_PADDING),
+    ) {
+        Icon(
+            imageVector = tab.icon,
+            contentDescription = tab.label,
+            tint = tint,
+            modifier = Modifier
+                .size(25.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = tab.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
