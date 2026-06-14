@@ -72,3 +72,28 @@ private val SPINNER_SIZE = 22.dp
  * to be was only the margin each glyph keeps inside its own slot, and a thumb
  * lands on a target's edge far more often than it lands on a glyph's.
  *
+ * Taken from the title's width rather than the bar's height, so nothing above
+ * or below it moves.
+ */
+private val TRANSPORT_GAP = 8.dp
+
+/**
+ * Vertical padding, which with the 40dp artwork sets the bar's height at 56dp
+ * and so its pill radius at 28.
+ */
+private val ROW_PADDING_VERTICAL = 8.dp
+
+/**
+ * Horizontal padding, deliberately larger than the vertical.
+ *
+ * A pill's ends are semicircles, so the edge nearest the artwork is not the
+ * one beside it but the one curving away above and below it. At the artwork's
+ * top corner that edge has already come 8.4dp in from the left — level with
+ * where square corners would have put the whole side. Padding the ends by the
+ * vertical figure would leave the artwork touching the curve; 12 clears it
+ * with room, and reads as centred rather than jammed into the round.
+ */
+private val ROW_PADDING_HORIZONTAL = 12.dp
+
+/**
+ * The artwork's corner, on the 8dp every other thumbnail in the app carries.
