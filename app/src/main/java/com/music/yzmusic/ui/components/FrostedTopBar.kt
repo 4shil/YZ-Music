@@ -80,3 +80,10 @@ val TopBarContentGap = 12.dp
  * opens on a band of empty space.
  */
 @Composable
+fun topBarHeight(): Dp =
+    WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + TopBarContentHeight
+
+/**
+ * Where page content should start: clear of the bar, plus [TopBarContentGap].
+ */
+@Composable
