@@ -144,3 +144,41 @@ fun LyricsSourcesDialog(
                 selected = selected,
                 onReorder = AppSettings::setLyricsSourceOrder,
                 onToggle = { source ->
+                    val checked = source in selected
+                    // The last one standing can't be unchecked — an empty list
+                    // is indistinguishable from switching lyrics off, and there
+                    // is already a switch for that a row above this dialog.
+                    if (checked && selected.size <= 1) return@ReorderableSourceList
+                    AppSettings.setLyricsSources(
+                        if (checked) selected - source else selected + source,
+                    )
+                },
+            )
+
+            AlertRule()
+            SyllableSyncToggle(
+                checked = prioritizeSyllableSync,
+                onToggle = { AppSettings.setPrioritizeSyllableSync(!prioritizeSyllableSync) },
+            )
+
+            AlertRule()
+            AlertAction(
+                label = "Reset to Default",
+                emphasised = false,
+                onClick = AppSettings::resetLyricsSourceSettings,
+            )
+            AlertRule()
+            AlertAction(label = "Done", emphasised = true, onClick = onDismiss)
+        }
+    }
+}
+
+/**
+ * Whether a merely line-synced answer is good enough on its own, or worth
+ * holding out on for a word-synced one further down the priority order —
+ * see the note on [AppSettings.prioritizeSyllableSync]. A single row rather
+ * than one more entry in the checkable list above: this isn't a source to
+ * ask or not, it's a rule about what to do once one has answered.
+ */
+@Composable
+private fun SyllableSyncToggle(checked: Boolean, onToggle: () -> Unit) {
