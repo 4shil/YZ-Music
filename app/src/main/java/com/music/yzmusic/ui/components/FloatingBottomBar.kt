@@ -143,3 +143,10 @@ fun FloatingBottomBar(
     // their target leaves the tap itself instant rather than eased.
     val glassSpec: AnimationSpec<Float> = if (reduceAnimation) snap() else GlassSpring
 
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val haptics = rememberHaptics()
+    val density = LocalDensity.current
+    val currentSelectedIndex by rememberUpdatedState(selectedIndex)
+
+    var rowSize by remember { mutableStateOf(IntSize.Zero) }
+    val gapPx = with(density) { 6.dp.toPx() }
