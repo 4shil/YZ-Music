@@ -255,3 +255,115 @@ private fun DownloadManagerRow(
     onRetry: () -> Unit,
 ) {
     val progress = item.progress
+    val failed = progress as? DownloadProgress.Failed
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(ART_SIZE), contentAlignment = Alignment.Center) {
+            AsyncImage(
+                model = item.song.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(ART_SIZE)
+                    .clip(RoundedCornerShape(8.dp))
+                    .thumbnailBorder(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+            // A finished or failed track is stated over its own cover rather
+            // than in a fourth column: the list is scanned for the odd one out,
+            // and a mark on the artwork is what the eye actually lands on.
+            if (progress.settled) {
+                Box(
+                    modifier = Modifier
+                        .size(ART_SIZE)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (failed != null) {
+                            Icons.Rounded.ErrorOutline
+                        } else {
+                            Icons.Rounded.DownloadDone
+                        },
+                        contentDescription = null,
+                        tint = if (failed != null) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            Color.White
+                        },
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = item.song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                // The release is worth naming where there is one: in a list of
+                // forty rows off three albums, the credit alone does not say
+                // which batch a row belongs to.
+                text = listOfNotNull(
+                    item.song.artist.takeIf { it.isNotBlank() },
+                    item.from?.takeIf { it.isNotBlank() && it != item.song.artist },
+                ).joinToString(" · ").ifBlank { "Unknown artist" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            when (progress) {
+                is DownloadProgress.Queued -> RowStatus("Queued")
+                is DownloadProgress.Running -> {
+                    LinearProgressIndicator(
+                        // Indeterminate until the first response names a
+                        // length — a bar frozen at nothing reads as broken.
+                        progress = { progress.fraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                        strokeCap = StrokeCap.Round,
+                        gapSize = 0.dp,
+                        drawStopIndicator = {},
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    RowStatus(
+                        if (progress.fraction > 0f) {
+                            "Downloading · ${(progress.fraction * 100).toInt()}%"
+                        } else {
+                            "Starting"
+                        },
+                    )
+                }
+                is DownloadProgress.Done -> RowStatus("Saved to Music/YZ Music")
+                is DownloadProgress.Failed ->
+                    RowStatus(progress.reason, MaterialTheme.colorScheme.error)
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        // One control, and which one it is follows the row's state: a running
+        // track can be stopped, a failed one can be asked for again, and a
+        // finished one needs nothing at all.
+        when {
+            failed != null -> RowAction(Icons.Rounded.Refresh, "Retry", onRetry)
+            !progress.settled -> RowAction(Icons.Rounded.Close, "Cancel", onCancel)
+            else -> Spacer(Modifier.width(36.dp))
+        }
+    }
+}
+
+@Composable
