@@ -72,3 +72,5 @@ fun LyricsSourcesDialog(
     modifier: Modifier = Modifier,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val selected by AppSettings.lyricsSources.collectAsStateWithLifecycle()
+    val savedOrder by AppSettings.lyricsSourceOrder.collectAsStateWithLifecycle()
