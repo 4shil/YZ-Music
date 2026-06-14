@@ -118,3 +118,11 @@ fun FrostedTopBar(
     actions: @Composable () -> Unit = {},
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val titleAlpha by animateFloatAsState(
+        targetValue = if (scrolled) 1f else 0f,
+        animationSpec = tween(220),
+        label = "topBarTitleAlpha",
+    )
+    // Only the solid bar wants a hairline under it. A faded one has no edge for
+    // the line to mark, and drawing it there would be inventing the very seam
+    // the fade exists to remove.
