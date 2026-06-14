@@ -237,3 +237,50 @@ fun FrostedTopBar(
  * the bar's glass; it is the same one thumbnails elsewhere carry.
  */
 @Composable
+fun TopBarAccountButton(
+    account: Account?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Wrapped in an IconButton so it keeps the 48dp target, the ripple and the
+    // spacing every other action in this bar has.
+    IconButton(onClick = onClick, modifier = modifier) {
+        val photo = account?.thumbnailUrl
+        if (photo != null) {
+            AsyncImage(
+                model = photo,
+                contentDescription = stringResource(R.string.settings),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(AVATAR_SIZE)
+                    .clip(CircleShape)
+                    .thumbnailBorder(CircleShape),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(AVATAR_SIZE)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .thumbnailBorder(CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Person,
+                    contentDescription = stringResource(R.string.settings),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The refresh indicator: a line along the bottom of the bar, directly under the
+ * status bar. It tracks the drag on the way down — filling left to right as the
+ * pull approaches the threshold — then sweeps indefinitely once the refresh is
+ * away, so the two phases read as one continuous gesture.
+ */
+@Composable
+private fun RefreshLine(refreshing: Boolean, pullFraction: () -> Float, modifier: Modifier = Modifier) {
