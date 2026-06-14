@@ -367,3 +367,42 @@ private fun DownloadManagerRow(
 }
 
 @Composable
+private fun RowStatus(text: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = color,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun RowAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/**
+ * The one line under the heading — what state the batch as a whole is in.
+ *
+ * Counts rather than a percentage: the sheet already draws the percentage as a
+ * bar, and what a percentage cannot say is that thirty-nine of forty arrived and
+ * one did not, which is the only outcome anybody needs to act on.
+ */
