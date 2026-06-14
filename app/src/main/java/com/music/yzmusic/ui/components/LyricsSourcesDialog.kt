@@ -182,3 +182,63 @@ fun LyricsSourcesDialog(
  */
 @Composable
 private fun SyllableSyncToggle(checked: Boolean, onToggle: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ACTION_HEIGHT)
+            .background(
+                if (pressed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.09f) else Color.Transparent,
+            )
+            .clickable(
+                indication = null,
+                interactionSource = interactionSource,
+                onClick = onToggle,
+            )
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "Prioritize Syllable Lyrics",
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "Keep searching past a whole-line match for a word-by-word one, " +
+                    "wherever it falls in the order above",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 15.sp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        if (checked) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = "Enabled",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The checkable, drag-reorderable list of sources.
+ *
+ * Reordering is entirely local until a drag ends — [liveOrder] tracks the
+ * list as rows are dragged past each other, and only the finished order is
+ * written back through [onReorder]. Writing on every intermediate swap would
+ * mean [AppSettings] round-tripping the list back down through
+ * [savedOrder][AppSettings.lyricsSourceOrder] on every frame of a drag, fighting
+ * the gesture that produced it.
+ *
+ * The drag keeps exactly two numbers: how far the finger has come since it
+ * went down ([totalDrag]), and which slot it went down on ([startIndex]).
+ * Where to draw the row and which slot it belongs in are both *derived* from
+ * those, so neither can drift from the other however many swaps happen on the
+ * way. See [SWAP_THRESHOLD] for why the crossing point is past the halfway
+ * mark rather than on it.
+ */
+@Composable
