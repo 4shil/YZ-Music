@@ -177,3 +177,64 @@ fun FloatingBottomBar(
     // it. The stretch below is a function of this and nothing else, which is
     // what keeps it honest — the shape can only be deformed while it is
     // actually behind where it is going.
+    val lag = if (tabStepPx > 0f) {
+        (abs(pillTargetPx - animatedPillOffset) / tabStepPx).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    var lastHapticTab by remember { mutableIntStateOf(selectedIndex) }
+
+    LaunchedEffect(selectedIndex) { dragOffset = 0f }
+
+    Box(
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(horizontal = PAGE_GUTTER)
+            .padding(bottom = 2.dp)
+            .fillMaxWidth()
+            .clip(pillShape)
+            .then(
+                if (reduceDynamicBlur) {
+                    Modifier.background(container)
+                } else {
+                    Modifier.hazeEffect(
+                        state = hazeState,
+                        style = HazeMaterials.regular(container),
+                    )
+                },
+            )
+            .border(0.5.dp, Color.White.copy(alpha = 0.10f), pillShape)
+            .padding(horizontal = PILL_INSET, vertical = PILL_INSET),
+    ) {
+        if (tabWidthPx > 0f) {
+            Box(
+                modifier = Modifier
+                    .width(with(density) { tabWidthPx.toDp() })
+                    .height(with(density) { rowSize.height.toDp() })
+                    .graphicsLayer {
+                        translationX = animatedPillOffset
+                        // Around its own centre, so the indicator draws out
+                        // both ways rather than growing a tail off one edge —
+                        // a leading edge that ran ahead of the glyph it is
+                        // meant to be behind would read as two things moving,
+                        // not one thing stretching.
+                        scaleX = 1f + lag * STRETCH
+                        scaleY = 1f - lag * STRETCH * SQUASH
+                    }
+                    .clip(pillShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onSizeChanged { rowSize = it }
+                .pointerInput(Unit) {
+                    var totalDrag = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDrag = 0f },
+                        onDragCancel = { dragOffset = 0f },
+                        onDragEnd = {
+                            if (tabStepPx > 0f) {
