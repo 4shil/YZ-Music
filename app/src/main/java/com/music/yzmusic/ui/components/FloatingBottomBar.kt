@@ -253,3 +253,49 @@ fun FloatingBottomBar(
                         },
                         onHorizontalDrag = { _, delta ->
                             totalDrag += delta
+                            val rawPx = when {
+                                totalDrag > 0 && currentSelectedIndex == tabs.lastIndex ->
+                                    totalDrag * 0.25f
+                                totalDrag < 0 && currentSelectedIndex == 0 ->
+                                    totalDrag * 0.25f
+                                else -> totalDrag
+                            }
+                            dragOffset = rawPx
+
+                            val approxTab =
+                                (currentSelectedIndex + dragOffset / tabStepPx)
+                                    .coerceIn(0f, tabs.lastIndex.toFloat())
+                                    .roundToInt()
+                            if (approxTab != lastHapticTab) {
+                                haptics.play(Haptic.Tick)
+                                lastHapticTab = approxTab
+                            }
+                        },
+                    )
+                },
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                BottomBarItem(
+                    tab = tab,
+                    selected = index == selectedIndex,
+                    glassSpec = glassSpec,
+                    onClick = { onTabSelected(index) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomBarItem(
+    tab: BottomTab,
+    selected: Boolean,
+    glassSpec: AnimationSpec<Float>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // The same spring the indicator rides, so the glyph arriving and the glass
+    // arriving are one movement rather than two that nearly agree.
