@@ -80,3 +80,40 @@ val TopBarContentGap = 12.dp
  * opens on a band of empty space.
  */
 @Composable
+fun topBarHeight(): Dp =
+    WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + TopBarContentHeight
+
+/**
+ * Where page content should start: clear of the bar, plus [TopBarContentGap].
+ */
+@Composable
+fun topBarContentPadding(): Dp = topBarHeight() + TopBarContentGap
+
+/**
+ * The top bar's content — title, back affordance, actions — over no backdrop
+ * of its own.
+ *
+ * The glass behind it is [TopFadeBlur]'s, drawn underneath: a blur that starts
+ * full at the status bar and ramps to nothing below, so the bar has no bottom
+ * edge to draw a line across the page with. A uniform pane would put that line
+ * back, which is the one thing every surface here is built to avoid.
+ *
+ * The exception is Reduce dynamic blur, where there is no fade to sit on and
+ * the bar fills itself solid instead — title over raw scrolling content is
+ * unreadable, so something has to carry it.
+ *
+ * Apple Music behaviour: the big in-list header owns the title at rest;
+ * once the list scrolls, the small centered title fades in.
+ */
+@Composable
+fun FrostedTopBar(
+    title: String,
+    scrolled: Boolean,
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
+    refreshing: Boolean = false,
+    // A lambda, not a value: the drag changes every frame, and reading it in
+    // the caller would recompose the whole app on each one.
+    pullFraction: () -> Float = { 0f },
+    actions: @Composable () -> Unit = {},
+) {
