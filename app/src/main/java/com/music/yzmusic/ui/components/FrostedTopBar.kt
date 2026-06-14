@@ -284,3 +284,45 @@ fun TopBarAccountButton(
  */
 @Composable
 private fun RefreshLine(refreshing: Boolean, pullFraction: () -> Float, modifier: Modifier = Modifier) {
+    val fraction = pullFraction()
+    val pulling = fraction > 0.01f
+    AnimatedVisibility(
+        visible = refreshing || pulling,
+        enter = fadeIn(tween(120)),
+        exit = fadeOut(tween(220)),
+        modifier = modifier,
+    ) {
+        val lineModifier = Modifier
+            .fillMaxWidth()
+            .height(LINE_HEIGHT)
+        if (refreshing) {
+            LinearProgressIndicator(
+                modifier = lineModifier,
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = Color.Transparent,
+                strokeCap = StrokeCap.Butt,
+                gapSize = 0.dp,
+            )
+        } else {
+            LinearProgressIndicator(
+                progress = { fraction.coerceIn(0f, 1f) },
+                modifier = lineModifier,
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = Color.Transparent,
+                strokeCap = StrokeCap.Butt,
+                gapSize = 0.dp,
+                drawStopIndicator = {},
+            )
+        }
+    }
+}
+
+private val LINE_HEIGHT = 2.5.dp
+
+/**
+ * The account photo's diameter.
+ *
+ * Smaller than an icon's 24dp box: a filled circle carries more weight than a
+ * glyph does, and at 24 it sat heavier in the bar than the wordmark opposite it.
+ */
+private val AVATAR_SIZE = 28.dp
