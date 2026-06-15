@@ -209,3 +209,140 @@ private fun NewPlaylistForm(
     // up saves the tap that would otherwise always follow.
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
+    val submit: () -> Unit = {
+        if (name.isNotBlank()) {
+            focusManager.clearFocus()
+            onCreate(name, privacy)
+        }
+    }
+
+    // As above: the keyboard is up from the moment this opens, and "Create
+    // playlist" is below the fold without this.
+    Column(
+        modifier
+            .fillMaxWidth()
+            .imePadding(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = if (onBack != null) 8.dp else 22.dp, end = 22.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            onBack?.let {
+                IconButton(onClick = it) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "New playlist",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    text = "Saved to your YouTube Music account",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp, vertical = 16.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(11.dp))
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f)) {
+                if (name.isEmpty()) {
+                    Text(
+                        text = "Playlist name",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                BasicTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onBackground,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                )
+            }
+            if (name.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable { name = "" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = "Clear name",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+
+        SheetHeading("WHO CAN SEE IT")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PlaylistPrivacy.entries.forEach { option ->
+                PrivacyPill(
+                    icon = option.icon,
+                    label = option.label,
+                    selected = option == privacy,
+                    onClick = { privacy = option },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = submit,
+            enabled = name.isNotBlank(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp),
+        ) {
+            Text("Create playlist")
+        }
+        Spacer(Modifier.height(28.dp))
+    }
+}
+
+/**
+ * The rename panel of [BrowseActionsSheet], which swaps itself out for this
+ * rather than opening a dialog over itself — same reason the create form lives
+ * inside [PlaylistPickerSheet].
+ */
+@Composable
+internal fun RenamePlaylistForm(
+    playlist: UserPlaylist,
+    onBack: () -> Unit,
+    onRename: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var name by remember { mutableStateOf(playlist.title) }
