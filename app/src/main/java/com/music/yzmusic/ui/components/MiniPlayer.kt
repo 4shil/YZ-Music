@@ -122,3 +122,28 @@ fun MiniPlayer(
     val haptics = rememberHaptics()
     // percent rather than a dp figure, so the corner stays exactly half the
     // height if the row's contents ever change it — which is what keeps a pill
+    // a pill instead of a rounded rectangle. Same idiom as [FloatingBottomBar]
+    // directly below it, so the two shapes are the same family.
+    val shape = RoundedCornerShape(percent = 50)
+    Box(
+        modifier = modifier
+            .padding(horizontal = PAGE_GUTTER)
+            .clip(shape)
+            .then(
+                if (reduceDynamicBlur) {
+                    Modifier.background(MaterialTheme.colorScheme.surface)
+                } else {
+                    Modifier.hazeEffect(state = hazeState, style = HazeMaterials.thin(MaterialTheme.colorScheme.surface))
+                },
+            )
+            .border(0.5.dp, Color.White.copy(alpha = 0.10f), shape)
+            // Deliberately silent: the whole bar is the target, so it catches
+            // stray taps meant for the page behind it, and the sheet rising is
+            // its own confirmation. The glyphs on it still buzz.
+            .clickable(onClick = onExpand),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = ROW_PADDING_HORIZONTAL,
