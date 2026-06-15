@@ -289,3 +289,65 @@ private fun ReorderableSourceList(
                 // itself already treats it, rather than looking clickable and
                 // silently doing nothing.
                 val toggleable = !checked || selected.size > 1
+                val dragging = source == draggedSource
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .zIndex(if (dragging) 1f else 0f)
+                        .onSizeChanged { pitchPx = it.height.toFloat() }
+                        .graphicsLayer {
+                            // Read here rather than in composition: this runs
+                            // once a frame in the draw phase, so a drag moves
+                            // the row without recomposing the list at all.
+                            //
+                            // The row sits wherever the finger has carried it
+                            // from where it was picked up, less whatever the
+                            // swaps have already moved its slot — so a swap
+                            // relocates the slot and shortens this offset by
+                            // exactly as much, and the row does not budge.
+                            translationY = if (dragging) {
+                                totalDrag - (liveOrder.indexOf(source) - startIndex) * lockedPitchPx
+                            } else {
+                                0f
+                            }
+                        },
+                ) {
+                    AlertRule()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = ACTION_HEIGHT)
+                            .clickable(
+                                enabled = toggleable,
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() },
+                                onClick = { onToggle(source) },
+                            )
+                            .padding(start = 4.dp, end = 16.dp, top = 9.dp, bottom = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DragHandle,
+                            contentDescription = "Drag to reorder",
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                            modifier = Modifier
+                                .padding(horizontal = 6.dp)
+                                .size(18.dp)
+                                // A constant key on purpose — see the note above.
+                                // The row this coroutine belongs to is now pinned
+                                // by [key], so nothing about a reorder should ever
+                                // restart it; only the handle's own identity
+                                // (there is exactly one, for its whole lifetime)
+                                // needs to.
+                                .pointerInput(Unit) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            draggedSource = source
+                                            totalDrag = 0f
+                                            startIndex = liveOrder.indexOf(source)
+                                            lockedPitchPx = pitchPx
+                                        },
+                                        onDrag = { change, delta ->
+                                            change.consume()
+                                            val pitch = lockedPitchPx
+                                            if (pitch <= 0f) return@detectDragGestures
