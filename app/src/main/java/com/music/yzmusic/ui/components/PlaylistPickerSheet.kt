@@ -351,3 +351,128 @@ internal fun RenamePlaylistForm(
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
+    val submit: () -> Unit = {
+        if (name.isNotBlank()) {
+            focusManager.clearFocus()
+            onRename(name)
+        }
+    }
+
+    // The form opens with the keyboard already up, which on a bottom sheet
+    // would otherwise sit over the button the form exists to reach.
+    Column(
+        modifier
+            .fillMaxWidth()
+            .imePadding(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 22.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+            Text(
+                text = "Rename playlist",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp, vertical = 16.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(11.dp))
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onBackground,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester),
+            )
+        }
+        Button(
+            onClick = submit,
+            enabled = name.isNotBlank() && name != playlist.title,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp),
+        ) {
+            Text("Save name")
+        }
+        Spacer(Modifier.height(28.dp))
+    }
+}
+
+/**
+ * The glyph that says what a visibility actually means — a padlock, a shared
+ * link, a globe. Three words that all sound like degrees of the same thing
+ * read much faster as three different shapes.
+ */
+private val PlaylistPrivacy.icon: ImageVector
+    get() = when (this) {
+        PlaylistPrivacy.PRIVATE -> Icons.Rounded.Lock
+        PlaylistPrivacy.UNLISTED -> Icons.Rounded.Link
+        PlaylistPrivacy.PUBLIC -> Icons.Rounded.Public
+    }
+
+/** The search filters' pill, carrying an icon ahead of its label. */
+@Composable
+private fun PrivacyPill(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val content = if (selected) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+            )
+            .clickable(onClick = onClick)
+            .padding(start = 11.dp, end = 14.dp, top = 7.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = content,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = content,
+        )
+    }
+}
