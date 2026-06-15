@@ -90,3 +90,26 @@ fun ShimmerBox(modifier: Modifier = Modifier, shape: Shape = BlockShape) {
 
 /** A placeholder for one line of text, sized as a fraction of its parent. */
 @Composable
+private fun SkeletonLine(fraction: Float, height: Dp, modifier: Modifier = Modifier) {
+    ShimmerBox(
+        modifier = modifier.fillMaxWidth(fraction).height(height),
+        shape = LineShape,
+    )
+}
+
+/**
+ * Stands in for a section heading. Only the title line is drawn — most shelves
+ * come back without a subtitle, and guessing wrong shifts everything under it.
+ */
+@Composable
+private fun SectionHeaderSkeleton(index: Int = 0) {
+    Column(Modifier.padding(horizontal = PAGE_GUTTER, vertical = 10.dp)) {
+        SkeletonLine(fraction = TitleWidths[index % TitleWidths.size] * 0.7f, height = 18.dp)
+    }
+}
+
+/**
+ * Stands in for one `SongRow`, down to the 52dp of artwork and the 20dp gutter.
+ * [circular] matches the browse rows, where artists are drawn as circles.
+ */
+@Composable
