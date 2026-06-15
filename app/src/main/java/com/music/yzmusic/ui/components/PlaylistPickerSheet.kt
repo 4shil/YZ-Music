@@ -200,3 +200,4 @@ private fun NewPlaylistForm(
     onCreate: (String, PlaylistPrivacy) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var name by remember { mutableStateOf("") }
