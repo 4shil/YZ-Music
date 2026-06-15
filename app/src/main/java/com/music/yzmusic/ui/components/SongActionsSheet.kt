@@ -138,3 +138,8 @@ fun SongActionsSheet(
     // showing, not a larger copy of it: the tint is a blur and a handful of
     // swatches, neither of which a bigger image improves, and going back for
     // one is what had the sheet opening grey and colouring in afterwards.
+    val palette = rememberArtworkPalette(song.thumbnailUrl, artPx = ROW_ART_PX)
+    val liked = likeStatus == LikeStatus.LIKE
+    val disliked = likeStatus == LikeStatus.DISLIKE
+    // A local file or a finished download has no YouTube identity behind it to
+    // rate, save, queue into a playlist, fetch again, or share a link for.
