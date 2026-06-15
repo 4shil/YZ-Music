@@ -143,3 +143,164 @@ fun SongActionsSheet(
     val disliked = likeStatus == LikeStatus.DISLIKE
     // A local file or a finished download has no YouTube identity behind it to
     // rate, save, queue into a playlist, fetch again, or share a link for.
+    val isOffline = song.localUri != null
+
+    TintedSheet(palette = palette, imageUrl = song.thumbnailUrl, modifier = modifier) {
+        if (pickingSleepTimer) {
+            SleepTimerPicker(palette = palette, onBack = { pickingSleepTimer = false })
+            return@TintedSheet
+        }
+
+        SheetTrackHeader(song, subtitleColor = palette.onBackgroundVariant)
+        HorizontalDivider(thickness = 0.5.dp, color = palette.divider)
+
+        if (signedIn && !isOffline) {
+            ActionRow(
+                icon = if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                label = if (liked) "Remove from Liked Music" else "Like",
+                tint = if (liked) palette.accent else null,
+                accent = palette.accent,
+                onClick = onToggleLike,
+            )
+            ActionRow(
+                icon = if (disliked) Icons.Rounded.ThumbDown else Icons.Rounded.ThumbDownOffAlt,
+                label = if (disliked) "Undo dislike" else "Dislike",
+                tint = if (disliked) palette.accent else null,
+                accent = palette.accent,
+                onClick = onToggleDislike,
+            )
+            ActionRow(
+                icon = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                label = "Add to playlist",
+                accent = palette.accent,
+                onClick = onAddToPlaylist,
+            )
+            onRemoveFromPlaylist?.let {
+                ActionRow(
+                    icon = Icons.Rounded.PlaylistRemove,
+                    label = "Remove from this playlist",
+                    accent = palette.accent,
+                    onClick = it,
+                )
+            }
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 6.dp),
+                thickness = 0.5.dp,
+                color = palette.divider,
+            )
+        }
+
+        DownloadRow(song, palette, isOffline, onDownload)
+        ActionRow(
+            icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
+            label = "Play next",
+            accent = palette.accent,
+            onClick = onPlayNext,
+        )
+        ActionRow(
+            icon = Icons.AutoMirrored.Rounded.QueueMusic,
+            label = "Add to queue",
+            accent = palette.accent,
+            onClick = onAddToQueue,
+        )
+        when (val id = song.albumId) {
+            null -> if (resolvingLinks) LoadingActionRow(Icons.Rounded.Album, "Open album", palette)
+            else -> ActionRow(Icons.Rounded.Album, "Open album", accent = palette.accent) { onOpenAlbum(id) }
+        }
+        when (val id = song.artistId) {
+            null -> if (resolvingLinks) LoadingActionRow(Icons.Rounded.Person, "Open artist", palette)
+            else -> ActionRow(Icons.Rounded.Person, "Open artist", accent = palette.accent) { onOpenArtist(id) }
+        }
+        if (showSleepTimer) {
+            ActionRow(
+                icon = Icons.Rounded.Bedtime,
+                label = "Sleep timer",
+                value = sleepTimerStatus(),
+                accent = palette.accent,
+            ) { pickingSleepTimer = true }
+        }
+        if (!isOffline) {
+            onShare?.let {
+                ActionRow(Icons.Rounded.Share, "Share", accent = palette.accent, onClick = it)
+            }
+        }
+        // Last, and only from the player: it is about the track playing right
+        // now rather than about the song as a thing in a library, and it is
+        // the one row here nobody reaches for by accident.
+        onCopyLog?.let {
+            ActionRow(Icons.Rounded.BugReport, "Copy Log", accent = palette.accent, onClick = it)
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * A bottom sheet wearing the artwork's colours: the tint and its blurred wash
+ * behind, the rounded top corners and the drag handle drawn over it.
+ *
+ * The corners and the handle are this composable's job rather than
+ * `ModalBottomSheet`'s because the host has to pass a transparent container for
+ * the wash to be visible at all — and a transparent container has nothing left
+ * to clip or to hang a handle on.
+ */
+@Composable
+private fun TintedSheet(
+    palette: ArtworkPalette,
+    imageUrl: String?,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .clip(SHEET_SHAPE),
+    ) {
+        ArtworkBackdrop(
+            palette = palette,
+            imageUrl = imageUrl,
+            modifier = Modifier.matchParentSize(),
+            // A sheet is a fraction of the height of a page, so the wash has
+            // to resolve over a much shorter run to read the same way.
+            washFraction = 0.75f,
+            artPx = ROW_ART_PX,
+        )
+        Column(Modifier.fillMaxWidth()) {
+            // Drawn rather than taken from BottomSheetDefaults, whose handle
+            // carries 22dp of padding on each side — half a row's worth of
+            // nothing between the grip and the track it is about.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, bottom = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(width = 34.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(palette.onBackground.copy(alpha = 0.35f)),
+                )
+            }
+            content()
+        }
+    }
+}
+
+private val SHEET_SHAPE = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+
+/**
+ * One row carrying the whole life of a download: start it, watch it, cancel it,
+ * and delete what it produced.
+ *
+ * A row rather than a screen because that is the size of the decision. The
+ * files land in the device's own Music folder, which already has a manager
+ * — the Files app — and building a second one inside this app would be
+ * duplicating it in a worse place. What this app uniquely knows is which *song*
+ * a file belongs to, and that is exactly what this row says.
+ *
+ * The state comes straight from [Downloads] rather than through the caller: it
+ * changes while the sheet is open, and threading a flow through the sheet's
+ * signature would buy nothing over reading it where it's drawn — the same
+ * arrangement the sleep timer row already uses.
+ */
+@Composable
