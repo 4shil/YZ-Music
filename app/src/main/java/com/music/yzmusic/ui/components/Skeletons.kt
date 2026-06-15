@@ -63,3 +63,17 @@ fun ShimmerBox(modifier: Modifier = Modifier, shape: Shape = BlockShape) {
     val highlight = MaterialTheme.colorScheme.onSurfaceVariant
         .copy(alpha = 0.16f)
         .compositeOver(base)
+    val sweep = rememberInfiniteTransition(label = "skeleton").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(SHIMMER_PERIOD_MS, easing = LinearEasing)),
+        label = "sweep",
+    )
+    Box(
+        modifier
+            .clip(shape)
+            .drawWithCache {
+                // The band travels from fully off one edge to fully off the
+                // other, which leaves a beat of flat grey between passes rather
+                // than a highlight permanently parked somewhere on the block.
+                val band = size.width * 0.5f
