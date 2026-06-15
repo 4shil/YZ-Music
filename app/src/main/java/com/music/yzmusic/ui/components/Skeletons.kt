@@ -200,3 +200,16 @@ fun ShelfSkeleton(index: Int = 0, cardWidth: Dp = SHELF_CARD_WIDTH, cardCorner: 
 }
 
 /** Home and Explore while the first page of shelves is still loading. */
+fun LazyListScope.feedSkeleton(shelves: Int = 3) {
+    item(key = "skeleton:hero") { HeroShelfSkeleton() }
+    items(shelves - 1, key = { "skeleton:shelf:$it" }) { index ->
+        ShelfSkeleton(index = index + 1)
+    }
+}
+
+/** Appended to the feed while a further page of shelves is on its way. */
+fun LazyListScope.feedMoreSkeleton() {
+    item(key = "skeleton:more") { ShelfSkeleton() }
+}
+
+/** The signed-in library: saved collections, then the run of liked tracks. */
