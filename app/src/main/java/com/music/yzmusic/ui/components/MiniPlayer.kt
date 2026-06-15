@@ -97,3 +97,28 @@ private val ROW_PADDING_HORIZONTAL = 12.dp
 
 /**
  * The artwork's corner, on the 8dp every other thumbnail in the app carries.
+ *
+ * It used to be 7, picked so the bar's corner could sit concentric with it.
+ * A pill has no corner to be concentric with — its radius is whatever half the
+ * height happens to be — so that constraint is gone and the artwork can go
+ * back to matching [SongRow].
+ */
+private val ART_CORNER = 8.dp
+
+/** Frosted mini player that rides just above the floating tab bar. */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+fun MiniPlayer(
+    song: Song,
+    isPlaying: Boolean,
+    isLoading: Boolean,
+    hazeState: HazeState,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onExpand: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val haptics = rememberHaptics()
+    // percent rather than a dp figure, so the corner stays exactly half the
+    // height if the row's contents ever change it — which is what keeps a pill
