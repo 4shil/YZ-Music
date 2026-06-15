@@ -203,3 +203,9 @@ private fun NewPlaylistForm(
     var name by remember { mutableStateOf("") }
     var privacy by remember { mutableStateOf(PlaylistPrivacy.PRIVATE) }
     val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+
+    // The form exists to be typed into; opening it with the keyboard already
+    // up saves the tap that would otherwise always follow.
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
