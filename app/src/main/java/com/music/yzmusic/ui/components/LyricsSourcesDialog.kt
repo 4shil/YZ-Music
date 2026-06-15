@@ -351,3 +351,99 @@ private fun ReorderableSourceList(
                                             change.consume()
                                             val pitch = lockedPitchPx
                                             if (pitch <= 0f) return@detectDragGestures
+                                            var index = liveOrder.indexOf(source)
+                                            if (index < 0) return@detectDragGestures
+
+                                            // Held past either end the row stops
+                                            // there under the finger, rather than
+                                            // running off the list and having to
+                                            // be dragged all the way back before
+                                            // it answers again.
+                                            totalDrag = (totalDrag + delta.y).coerceIn(
+                                                -startIndex * pitch,
+                                                (liveOrder.lastIndex - startIndex) * pitch,
+                                            )
+
+                                            // A loop, not an `if`: one pointer
+                                            // event can cover several rows when
+                                            // the finger is quick, and settling
+                                            // one row per event would leave the
+                                            // list trailing the drag.
+                                            while (true) {
+                                                val travelled = totalDrag / pitch
+                                                val moved = (index - startIndex).toFloat()
+                                                if (travelled > moved + SWAP_THRESHOLD && index < liveOrder.lastIndex) {
+                                                    liveOrder = liveOrder.toMutableList().apply {
+                                                        add(index + 1, removeAt(index))
+                                                    }
+                                                    index++
+                                                } else if (travelled < moved - SWAP_THRESHOLD && index > 0) {
+                                                    liveOrder = liveOrder.toMutableList().apply {
+                                                        add(index - 1, removeAt(index))
+                                                    }
+                                                    index--
+                                                } else {
+                                                    break
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            draggedSource = null
+                                            totalDrag = 0f
+                                            onReorder(liveOrder)
+                                        },
+                                        onDragCancel = {
+                                            draggedSource = null
+                                            totalDrag = 0f
+                                            liveOrder = order
+                                        },
+                                    )
+                                },
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = source.label,
+                                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                                color = MaterialTheme.colorScheme.onSurface
+                                    .copy(alpha = if (toggleable) 1f else 0.5f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = source.detail,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        if (checked) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = "Enabled",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(19.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * How far past a neighbour the finger has to carry a row before the two trade
+ * places, as a share of one row's pitch.
+ *
+ * Deliberately more than half. At exactly half, a row that has just swapped
+ * lands with its offset sitting precisely on the boundary of swapping *back* —
+ * so a single pixel of the shake any real finger has flipped it, and the
+ * compensating shift put it straight back on the forward boundary again. The
+ * row juddered between two slots for as long as it was held near a crossing,
+ * which is the "loops up and down in the same position" this fixes. Anything
+ * over half opens a gap between the two boundaries; a tenth of a row is enough
+ * to swallow the shake without the swap feeling reluctant.
+ */
+private const val SWAP_THRESHOLD = 0.6f
