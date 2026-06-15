@@ -201,3 +201,5 @@ private fun NewPlaylistForm(
     modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf("") }
+    var privacy by remember { mutableStateOf(PlaylistPrivacy.PRIVATE) }
+    val focusRequester = remember { FocusRequester() }
