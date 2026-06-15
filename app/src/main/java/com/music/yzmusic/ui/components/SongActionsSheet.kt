@@ -304,3 +304,6 @@ private val SHEET_SHAPE = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
  * arrangement the sleep timer row already uses.
  */
 @Composable
+private fun DownloadRow(song: Song, palette: ArtworkPalette, isOffline: Boolean, onDownload: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
