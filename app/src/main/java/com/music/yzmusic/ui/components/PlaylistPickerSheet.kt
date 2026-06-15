@@ -346,3 +346,8 @@ internal fun RenamePlaylistForm(
     modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf(playlist.title) }
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
