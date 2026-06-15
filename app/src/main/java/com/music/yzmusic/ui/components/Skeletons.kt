@@ -213,3 +213,89 @@ fun LazyListScope.feedMoreSkeleton() {
 }
 
 /** The signed-in library: saved collections, then the run of liked tracks. */
+fun LazyListScope.librarySkeleton() {
+    item(key = "skeleton:library:shelf") { ShelfSkeleton() }
+    item(key = "skeleton:library:header") { SectionHeaderSkeleton(index = 1) }
+    songListSkeleton(count = 7, keyPrefix = "skeleton:library:song")
+}
+
+/** The Play / Shuffle pair, which only appears once there is something to play. */
+@Composable
+private fun DetailActionsSkeleton(isArtist: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            // Matches the real pair's inset, height and corner, so the header
+            // above them doesn't shift when the track list lands.
+            .padding(horizontal = PAGE_GUTTER + 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+    ) {
+        ShimmerBox(Modifier.size(50.dp), CircleShape)
+        ShimmerBox(Modifier.width(130.dp).height(50.dp), CircleShape)
+        if (!isArtist) {
+            ShimmerBox(Modifier.size(50.dp), CircleShape)
+        }
+    }
+}
+
+/**
+ * An album, playlist or artist page below its header — the header itself is
+ * drawn from what the row that was tapped already knew, so it never waits.
+ */
+fun LazyListScope.detailSkeleton(isArtist: Boolean) {
+    if (isArtist) {
+        item(key = "skeleton:detail:actions") {
+            Column(Modifier.graphicsLayer { alpha = 0.4f }) {
+                DetailActionsSkeleton(isArtist = true)
+                Spacer(Modifier.height(22.dp))
+            }
+        }
+        item(key = "skeleton:detail:top") {
+            Column(Modifier.graphicsLayer { alpha = 0.4f }) {
+                SectionHeaderSkeleton()
+                // Top songs page four at a time, in columns 88% of the width.
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    userScrollEnabled = false,
+                ) {
+                    item {
+                        Column(Modifier.fillParentMaxWidth(0.88f)) {
+                            repeat(4) { index -> CompactSongRowSkeleton(index) }
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "skeleton:detail:sections") {
+            Box(Modifier.graphicsLayer { alpha = 0.4f }) {
+                ShelfSkeleton(index = 2, cardCorner = 10.dp)
+            }
+        }
+        return
+    }
+    item(key = "skeleton:detail:actions") {
+        Column(Modifier.graphicsLayer { alpha = 0.4f }) {
+            DetailActionsSkeleton(isArtist = false)
+            Spacer(Modifier.height(20.dp))
+        }
+    }
+    songListSkeleton(count = 8, keyPrefix = "skeleton:detail:song", alpha = 0.4f)
+}
+
+/** The tighter row used inside the artist page's top-songs pager. */
+@Composable
+private fun CompactSongRowSkeleton(index: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ShimmerBox(Modifier.size(48.dp), RoundedCornerShape(7.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            SkeletonLine(fraction = TitleWidths[index % TitleWidths.size], height = 14.dp)
+            Spacer(Modifier.height(6.dp))
+            SkeletonLine(fraction = SubtitleWidths[index % SubtitleWidths.size], height = 11.dp)
+        }
+    }
+}
