@@ -113,3 +113,21 @@ private fun SectionHeaderSkeleton(index: Int = 0) {
  * [circular] matches the browse rows, where artists are drawn as circles.
  */
 @Composable
+fun SongRowSkeleton(index: Int = 0, circular: Boolean = false, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ShimmerBox(Modifier.size(52.dp), if (circular) CircleShape else RoundedCornerShape(8.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            SkeletonLine(fraction = TitleWidths[index % TitleWidths.size], height = 14.dp)
+            Spacer(Modifier.height(7.dp))
+            SkeletonLine(fraction = SubtitleWidths[index % SubtitleWidths.size], height = 11.dp)
+        }
+    }
+}
+
+/** A run of track-row placeholders, for search hits and release track lists. */
