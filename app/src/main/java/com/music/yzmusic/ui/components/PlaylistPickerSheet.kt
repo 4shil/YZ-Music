@@ -83,3 +83,120 @@ fun PlaylistPickerSheet(
     song: Song? = null,
     startCreating: Boolean = false,
 ) {
+    var creating by remember { mutableStateOf(startCreating) }
+
+    if (creating) {
+        NewPlaylistForm(
+            // Nowhere to go back to when the sheet opened straight onto the
+            // form; the sheet's own dismiss is the way out.
+            onBack = if (startCreating) null else ({ creating = false }),
+            onCreate = onCreate,
+            modifier = modifier,
+        )
+        return
+    }
+
+    Column(modifier.fillMaxWidth()) {
+        if (song != null) {
+            SheetTrackHeader(song)
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+        }
+        SheetHeading(if (song != null) "ADD TO PLAYLIST" else "YOUR PLAYLISTS")
+
+        ActionRow(
+            icon = YZMusicIcons.Plus,
+            label = "New playlist",
+            onClick = { creating = true },
+        )
+
+        when {
+            // Only while there is nothing to show: re-fetching under a list
+            // that is already up would replace it with a spinner for no gain.
+            loading && playlists.isEmpty() -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.5.dp,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+
+            playlists.isEmpty() -> Text(
+                text = "No playlists yet — the row above makes one.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
+            )
+
+            else -> {
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 6.dp),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                // Capped so a long list can't push the sheet past the screen;
+                // it scrolls inside the sheet instead.
+                LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                    items(playlists, key = { it.playlistId }) { playlist ->
+                        PlaylistRow(playlist = playlist, onClick = { onPick(playlist) })
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun PlaylistRow(playlist: UserPlaylist, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = playlist.thumbnailUrl.artworkAt(ROW_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .thumbnailBorder(RoundedCornerShape(7.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        )
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = playlist.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (playlist.subtitle.isNotBlank()) {
+                Text(
+                    text = playlist.subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Name and visibility, and nothing else. YouTube also takes a description,
+ * which nobody fills in from a phone at the moment of saving a song.
+ */
+@Composable
+private fun NewPlaylistForm(
+    onBack: (() -> Unit)?,
+    onCreate: (String, PlaylistPrivacy) -> Unit,
+    modifier: Modifier = Modifier,
+) {
