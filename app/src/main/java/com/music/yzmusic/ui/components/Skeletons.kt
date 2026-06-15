@@ -1,0 +1,61 @@
+﻿package com.music.yzmusic.ui.components
+
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/**
+ * Grey stand-ins for content still on the wire, laid out to the same metrics as
+ * the real rows and cards so nothing jumps when the data lands.
+ */
+
+/** How long one highlight sweep takes to cross a placeholder. */
+private const val SHIMMER_PERIOD_MS = 1400
+
+private val BlockShape = RoundedCornerShape(6.dp)
+private val LineShape = RoundedCornerShape(4.dp)
+
+// Ragged widths, so a run of rows reads as text rather than as a barcode.
+private val TitleWidths = listOf(0.68f, 0.46f, 0.58f, 0.74f, 0.52f)
+private val SubtitleWidths = listOf(0.34f, 0.44f, 0.27f, 0.38f, 0.31f)
+
+/**
+ * One placeholder block, with a highlight sweeping across it.
+ *
+ * The sweep is read inside the draw block rather than the composable body: a
+ * screenful of these would otherwise recompose on every animation frame, and
+ * all any of them needs per frame is a fresh gradient.
+ */
+@Composable
+fun ShimmerBox(modifier: Modifier = Modifier, shape: Shape = BlockShape) {
