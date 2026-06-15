@@ -307,3 +307,16 @@ private val SHEET_SHAPE = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 private fun DownloadRow(song: Song, palette: ArtworkPalette, isOffline: Boolean, onDownload: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val active by Downloads.active.collectAsStateWithLifecycle()
+    val saved by Downloads.saved.collectAsStateWithLifecycle()
+
+    // The record is a claim about a folder the user manages themselves, so it
+    // is checked against the disk rather than trusted — re-checked whenever the
+    // record for this track changes, which is what makes the row settle onto
+    // "Saved" the moment a download finishes.
+    //
+    // Seeded with the record rather than with null so that moment isn't a
+    // flicker: a finished download clears the running state and writes the
+    // record in the same breath, and starting pessimistic would show "Download"
+    // again for as long as the check off the main thread takes.
+    val recorded = saved[song.videoId]
