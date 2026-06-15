@@ -197,3 +197,25 @@ fun MiniPlayer(
                         imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = if (isPlaying) "Pause" else "Play",
                         tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(GLYPH_SIZE),
+                    )
+                }
+            }
+            Spacer(Modifier.width(TRANSPORT_GAP))
+            IconButton(
+                onClick = {
+                    haptics.play(Haptic.SkipNext)
+                    onNext()
+                },
+                modifier = Modifier.size(GLYPH_SLOT),
+            ) {
+                Icon(
+                    Icons.Rounded.SkipNext,
+                    contentDescription = "Next",
+                    tint = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.size(GLYPH_SIZE),
+                )
+            }
+        }
+    }
+}
