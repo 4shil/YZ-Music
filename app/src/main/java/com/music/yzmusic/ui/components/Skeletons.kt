@@ -156,3 +156,47 @@ private fun HeroShelfSkeleton() {
     Column(Modifier.padding(bottom = 26.dp)) {
         SectionHeaderSkeleton()
         BoxWithConstraints {
+            val cardWidth = heroCardWidth(maxWidth)
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                userScrollEnabled = false,
+            ) {
+                items(2) {
+                    ShimmerBox(
+                        modifier = Modifier.width(cardWidth).aspectRatio(HERO_CARD_RATIO),
+                        shape = RoundedCornerShape(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The compact carousel of square cards used by every shelf below the first. */
+@Composable
+fun ShelfSkeleton(index: Int = 0, cardWidth: Dp = SHELF_CARD_WIDTH, cardCorner: Dp = 12.dp) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeaderSkeleton(index = index)
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            userScrollEnabled = false,
+        ) {
+            items(3) { card ->
+                Column(Modifier.width(cardWidth)) {
+                    ShimmerBox(
+                        modifier = Modifier.width(cardWidth).aspectRatio(1f),
+                        shape = RoundedCornerShape(cardCorner),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    SkeletonLine(fraction = TitleWidths[card % TitleWidths.size], height = 13.dp)
+                    Spacer(Modifier.height(6.dp))
+                    SkeletonLine(fraction = SubtitleWidths[card % SubtitleWidths.size], height = 11.dp)
+                }
+            }
+        }
+    }
+}
+
+/** Home and Explore while the first page of shelves is still loading. */
