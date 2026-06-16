@@ -72,3 +72,22 @@ private const val SCRIM_STOPS = 12
  * Fading out instead leaves the title and back arrow something to be legible
  * against and the page nothing to be interrupted by.
  */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+fun TopFadeBlur(
+    hazeState: HazeState,
+    /**
+     * The colour of the page behind this: the theme's background on a feed, a
+     * detail page's artwork wash on one of those. See the effect below for why
+     * it cannot just be the theme's in both cases.
+     */
+    pageColor: Color,
+    modifier: Modifier = Modifier,
+    /**
+     * A wash laid over the blur to keep the bar's glyphs readable.
+     *
+     * Blur alone does not settle contrast — it makes a pale sleeve into a pale
+     * blur, and a row of bright artwork scrolling under a feed's title into a
+     * bright smear. The scrim gives the glyphs a floor to sit on whatever
+     * happens to pass beneath them.
+     *
