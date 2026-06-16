@@ -558,3 +558,91 @@ internal fun ActionRow(
  * it doesn't read as decided against until it actually is.
  */
 @Composable
+private fun LoadingActionRow(icon: ImageVector, label: String, palette: ArtworkPalette) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = palette.onBackground.copy(alpha = 0.4f),
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(18.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = palette.onBackground.copy(alpha = 0.4f),
+            modifier = Modifier.weight(1f),
+        )
+        CircularProgressIndicator(
+            color = palette.onBackgroundVariant,
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+/**
+ * The track a sheet is about, drawn at its head. Shared by the actions menu
+ * and the playlist picker, which is the same track two taps later.
+ *
+ * [subtitleColor] exists because the two sheets stand on different ground: the
+ * picker's is the flat theme background, where the usual dim grey is right,
+ * while the actions sheet is tinted from this very artwork and needs the
+ * credit brighter to stay off the wash.
+ */
+@Composable
+internal fun SheetTrackHeader(
+    song: Song,
+    modifier: Modifier = Modifier,
+    subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = song.artworkAt(ROW_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .thumbnailBorder(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = song.artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = subtitleColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** The heading over a sheet's second half — "Add to playlist". */
+@Composable
+internal fun SheetHeading(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 16.dp, bottom = 4.dp),
+    )
+}
