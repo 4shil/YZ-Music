@@ -76,3 +76,25 @@ class Haptics internal constructor(context: Context) {
 
 /** `val haptics = rememberHaptics()`, then `haptics.play(Haptic.Select)`. */
 @Composable
+fun rememberHaptics(): Haptics {
+    val context = LocalContext.current
+    return remember(context) { Haptics(context) }
+}
+
+// ── The rhythms ───────────────────────────────────────────────────────────────
+
+/**
+ * One beat of a pattern: which of the three short primitives to strike, how
+ * hard relative to that primitive's nominal strength, and how long to wait
+ * after the previous beat before striking it.
+ *
+ * Only the three genuinely *short* primitives are used. The platform also
+ * offers rises, falls, thuds and a spin, and all of them run 80–500ms — long
+ * enough that a two-beat pattern built from them would still be vibrating well
+ * after the screen had finished responding.
+ */
+private class Beat(val kind: Kind, val scale: Float, val gapMs: Long) {
+    enum class Kind(
+        /** Roughly how long the primitive itself lasts, for the waveform tiers. */
+        val pulseMs: Long,
+        /** Its nominal amplitude, before [Beat.scale]. */
