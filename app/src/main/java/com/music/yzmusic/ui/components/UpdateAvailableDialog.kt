@@ -169,3 +169,53 @@ fun UpdateAvailableDialog(
                 // hairline track — same weight as [AlertRule], so it reads as
                 // part of the card rather than a widget bolted onto it.
                 val downloading = state as? AppUpdateChecker.DownloadState.Downloading
+                if (downloading != null || state is AppUpdateChecker.DownloadState.Failed) {
+                    Box(
+                        Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth()
+                            .height(DOWNLOAD_ROW_HEIGHT)
+                            .clip(RoundedCornerShape(DOWNLOAD_ROW_HEIGHT / 2))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)),
+                    ) {
+                        if (downloading != null && downloading.fraction > 0f) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(downloading.fraction)
+                                    .height(DOWNLOAD_ROW_HEIGHT)
+                                    .clip(RoundedCornerShape(DOWNLOAD_ROW_HEIGHT / 2))
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                        }
+                    }
+                }
+                if (state is AppUpdateChecker.DownloadState.Failed) {
+                    Text(
+                        text = (state as AppUpdateChecker.DownloadState.Failed).message,
+                        modifier = Modifier.padding(top = 6.dp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+
+                // The release's own notes, rendered as Markdown rather than
+                // dumped as raw text — GitHub release bodies lean on headings,
+                // bullet lists and bold for the changelog, and those are the
+                // whole point of reading this before installing.
+                if (!notes.isNullOrBlank()) {
+                    AlertRule(modifier = Modifier.padding(top = 12.dp))
+                    Text(
+                        text = stringResource(R.string.whats_new),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.W600,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        textAlign = TextAlign.Start,
+                    )
+                    Box(
+                        modifier = Modifier
