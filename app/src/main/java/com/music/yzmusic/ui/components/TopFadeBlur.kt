@@ -110,3 +110,41 @@ fun TopFadeBlur(
             .fillMaxWidth()
             .height(height)
             .hazeEffect(
+                state = hazeState,
+                // Keyed to the colour of the page underneath, not the theme's.
+                //
+                // Both halves of this material are flat colour: the style's
+                // background is painted as an opaque rect under the sampled
+                // content, and its tint is a film over that. The progressive
+                // gradient reaches neither — it ramps only the blur radius and
+                // the tint's alpha — so wherever the blur has least to say,
+                // that flat colour is most of what is left. A blur has nothing
+                // to sample past the top
+                // of its own layer, so the first blur-radius of this strip is
+                // barely covered by blurred content and shows mostly the flat
+                // colour of the material instead. Given the theme's near-black
+                // background, that is a black bar spreading unevenly down into
+                // the artwork: the exact artefact this was added to remove.
+                style = HazeMaterials.ultraThin(pageColor),
+            ) {
+                // Cubic rather than haze's quadratic, and eased out rather than
+                // in: the ramp falls away quickly under the bar and then spends
+                // the rest of its run near nothing, which is what hides where
+                // the layer ends. The mirror of the bottom fade's arrival.
+                progressive = HazeProgressive.verticalGradient(
+                    easing = EaseOutCubic,
+                    startIntensity = PEAK,
+                    endIntensity = 0f,
+                )
+                // Uniform across the layer, so it would show as texture over
+                // the untouched foot of the ramp — the edge being hidden.
+                noiseFactor = 0f
+            },
+    )
+
+    val scrim = remember(scrimColor) {
+        Brush.verticalGradient(
+            // The same eased-out shape as the blur above it, so the two arrive
+            // at nothing together. A scrim that outlasted the blur would leave
+            // a tinted band hanging below a fade that had already finished —
+            // the one artefact this bar exists to avoid.
