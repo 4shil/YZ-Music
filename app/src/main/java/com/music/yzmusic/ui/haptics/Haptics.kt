@@ -295,3 +295,6 @@ private class HapticDevice private constructor(
          * belt-and-braces rather than the only thing honouring it.
          */
         @Suppress("DEPRECATION")
+        private fun systemHapticsWatcher(app: Context): () -> Boolean {
+            val resolver = app.contentResolver
+            val uri = Settings.System.getUriFor(Settings.System.HAPTIC_FEEDBACK_ENABLED)
