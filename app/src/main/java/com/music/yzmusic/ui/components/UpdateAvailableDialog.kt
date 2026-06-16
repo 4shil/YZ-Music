@@ -244,3 +244,53 @@ fun UpdateAvailableDialog(
                 }
                 is AppUpdateChecker.DownloadState.Ready -> {
                     AlertAction(label = stringResource(R.string.install_now), emphasised = true, onClick = onInstall)
+                    AlertRule()
+                    AlertAction(label = stringResource(R.string.later), emphasised = false, onClick = onDismiss)
+                }
+                is AppUpdateChecker.DownloadState.Failed -> {
+                    AlertAction(label = stringResource(R.string.try_again), emphasised = true, onClick = onDownload)
+                    AlertRule()
+                    AlertAction(label = stringResource(R.string.open_releases_page), emphasised = false, onClick = onOpenReleasePage)
+                }
+                else -> {
+                    AlertAction(label = stringResource(R.string.download_now), emphasised = true, onClick = onDownload)
+                    AlertRule()
+                    AlertAction(label = stringResource(R.string.remind_me_later), emphasised = false, onClick = onDismiss)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Full-bleed action row. Tinted rather than filled, so the two read as equals
+ * in weight and only the font differentiates the default action — the alert's
+ * whole point is that neither choice is a trap.
+ */
+@Composable
+internal fun AlertAction(
+    label: String,
+    emphasised: Boolean,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(ACTION_HEIGHT)
+            // iOS washes the whole row instead of drawing a ripple inside it.
+            .background(
+                if (pressed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.09f) else Color.Transparent,
+            )
+            .clickable(
+                enabled = enabled,
+                indication = null,
+                interactionSource = interactionSource,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
