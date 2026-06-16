@@ -169,3 +169,28 @@ fun UpdateAvailableDialog(
                 // hairline track — same weight as [AlertRule], so it reads as
                 // part of the card rather than a widget bolted onto it.
                 val downloading = state as? AppUpdateChecker.DownloadState.Downloading
+                if (downloading != null || state is AppUpdateChecker.DownloadState.Failed) {
+                    Box(
+                        Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth()
+                            .height(DOWNLOAD_ROW_HEIGHT)
+                            .clip(RoundedCornerShape(DOWNLOAD_ROW_HEIGHT / 2))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)),
+                    ) {
+                        if (downloading != null && downloading.fraction > 0f) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(downloading.fraction)
+                                    .height(DOWNLOAD_ROW_HEIGHT)
+                                    .clip(RoundedCornerShape(DOWNLOAD_ROW_HEIGHT / 2))
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                        }
+                    }
+                }
+                if (state is AppUpdateChecker.DownloadState.Failed) {
+                    Text(
+                        text = (state as AppUpdateChecker.DownloadState.Failed).message,
+                        modifier = Modifier.padding(top = 6.dp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
