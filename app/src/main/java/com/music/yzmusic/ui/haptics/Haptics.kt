@@ -232,3 +232,33 @@ private class HapticDevice private constructor(
 
     companion object {
         /** First and last beat, which for a mirrored pair keeps the mirror. */
+        private fun List<Beat>.outerTwo(): List<Beat> =
+            if (size > 2) listOf(first(), last()) else this
+
+        private val LEGACY_ATTRIBUTES by lazy {
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+        }
+
+        @Volatile
+        private var instance: HapticDevice? = null
+
+        @Volatile
+        private var probed = false
+
+        /**
+         * Null on a phone with no vibrator at all, which is a legitimate answer
+         * and not worth re-checking on every tap.
+         */
+        fun of(app: Context): HapticDevice? {
+            instance?.let { return it }
+            synchronized(this) {
+                if (probed) return instance
+                probed = true
+                instance = probe(app)
+                return instance
+            }
+        }
+
