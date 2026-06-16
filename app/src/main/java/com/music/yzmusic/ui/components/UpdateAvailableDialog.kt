@@ -194,3 +194,28 @@ fun UpdateAvailableDialog(
                         text = (state as AppUpdateChecker.DownloadState.Failed).message,
                         modifier = Modifier.padding(top = 6.dp),
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+
+                // The release's own notes, rendered as Markdown rather than
+                // dumped as raw text — GitHub release bodies lean on headings,
+                // bullet lists and bold for the changelog, and those are the
+                // whole point of reading this before installing.
+                if (!notes.isNullOrBlank()) {
+                    AlertRule(modifier = Modifier.padding(top = 12.dp))
+                    Text(
+                        text = stringResource(R.string.whats_new),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.W600,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        textAlign = TextAlign.Start,
+                    )
+                    Box(
+                        modifier = Modifier
