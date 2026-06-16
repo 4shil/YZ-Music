@@ -180,3 +180,29 @@ private class HapticDevice private constructor(
         // nothing else is checking it for us.
         if (!systemHapticsEnabled()) return
 
+        val effect = synchronized(compiled) {
+            compiled.getOrPut(haptic) { compile(rhythmOf(haptic)) }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            TouchVibration.send(vibrator, effect)
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(effect, LEGACY_ATTRIBUTES)
+        }
+    }
+
+    private fun compile(beats: List<Beat>): VibrationEffect = when {
+        // [canCompose] already implies API 30 — see the probe. The version check
+        // is repeated because it's the only form lint can follow, and a
+        // suppression here would hide a real mistake later.
+        canCompose && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+            Primitives.compose(beats)
+        canScaleAmplitude -> waveform(beats, coarse = false)
+        else -> waveform(beats.outerTwo(), coarse = true)
+    }
+
+    /**
+     * Timings and amplitudes alternate gap / pulse, so a beat contributes two
+     * entries and a leading gap of 0 is harmless.
+     */
+    private fun waveform(beats: List<Beat>, coarse: Boolean): VibrationEffect {
