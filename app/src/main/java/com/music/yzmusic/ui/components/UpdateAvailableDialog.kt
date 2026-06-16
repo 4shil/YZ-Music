@@ -94,3 +94,28 @@ fun UpdateAvailableDialog(
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val state by AppUpdateChecker.download.collectAsStateWithLifecycle()
+    val shape = RoundedCornerShape(ALERT_CORNER)
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(SCRIM_COLOR)
+            // Tapping the scrim reads the same as Remind Me Later — nothing
+            // about this update is mandatory, so backing out of it should be as
+            // easy as getting into it. Mid-download it only closes the sheet;
+            // the download keeps going and the top-bar icon reopens this.
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(ALERT_WIDTH)
+                .clip(shape)
+                .then(
+                    if (reduceDynamicBlur) {
+                        Modifier.background(MaterialTheme.colorScheme.surface)
+                    } else {
