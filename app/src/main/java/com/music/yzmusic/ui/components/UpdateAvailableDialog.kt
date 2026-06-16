@@ -294,3 +294,22 @@ internal fun AlertAction(
     ) {
         Text(
             text = label,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontSize = 17.sp,
+                fontWeight = if (emphasised) FontWeight.W600 else FontWeight.W400,
+            ),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.4f),
+        )
+    }
+}
+
+/** Hairline separator — [HorizontalDivider][androidx.compose.material3.HorizontalDivider]'s 1dp reads as a bar at this scale. */
+@Composable
+internal fun AlertRule(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(0.5.dp)
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)),
+    )
+}
