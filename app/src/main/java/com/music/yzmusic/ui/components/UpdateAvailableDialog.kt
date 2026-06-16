@@ -69,3 +69,28 @@ private val NOTES_MAX_HEIGHT = 220.dp
  * Shaped like an iOS system alert, which is the same lineage as the rest of the
  * app's Apple Music styling: frosted card, hairline rules, full-width actions
  * stacked under the message rather than a Material button pair in the corner.
+ *
+ * The update round trip happens here rather than in a browser: Download pulls
+ * the release's APK into the app cache (progress fills the hairline under the
+ * message), then Install hands it to the system installer. Where the release
+ * carries no APK at all, the actions fall back to opening the releases page.
+ *
+ * Sits over the whole app as an overlay rather than an Android [Dialog][androidx.compose.ui.window.Dialog]
+ * so its glass can sample the same [HazeState] the rest of the app's frosted
+ * surfaces use, the way [FrostedTopBar] and [MiniPlayer] already do.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+fun UpdateAvailableDialog(
+    version: String,
+    notes: String?,
+    hazeState: HazeState,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onOpenReleasePage: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val state by AppUpdateChecker.download.collectAsStateWithLifecycle()
