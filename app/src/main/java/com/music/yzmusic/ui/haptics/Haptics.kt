@@ -98,3 +98,85 @@ private class Beat(val kind: Kind, val scale: Float, val gapMs: Long) {
         /** Roughly how long the primitive itself lasts, for the waveform tiers. */
         val pulseMs: Long,
         /** Its nominal amplitude, before [Beat.scale]. */
+        val amplitude: Int,
+    ) {
+        Tick(8, 110),
+        LowTick(10, 95),
+        Click(14, 210),
+    }
+}
+
+private fun rhythmOf(haptic: Haptic): List<Beat> = when (haptic) {
+    Haptic.Tick -> listOf(Beat(Beat.Kind.Tick, 0.35f, 0))
+    Haptic.Tap -> listOf(Beat(Beat.Kind.Click, 0.5f, 0))
+    Haptic.Select -> listOf(
+        Beat(Beat.Kind.Tick, 0.4f, 0),
+        Beat(Beat.Kind.Click, 0.75f, 18),
+    )
+    Haptic.ToggleOn -> listOf(
+        Beat(Beat.Kind.Tick, 0.4f, 0),
+        Beat(Beat.Kind.Click, 0.9f, 14),
+    )
+    Haptic.ToggleOff -> listOf(
+        Beat(Beat.Kind.Click, 0.75f, 0),
+        Beat(Beat.Kind.Tick, 0.3f, 14),
+    )
+    Haptic.SkipNext -> listOf(
+        Beat(Beat.Kind.Tick, 0.4f, 0),
+        Beat(Beat.Kind.Tick, 0.55f, 16),
+        Beat(Beat.Kind.Click, 0.7f, 16),
+    )
+    Haptic.SkipPrevious -> listOf(
+        Beat(Beat.Kind.Click, 0.7f, 0),
+        Beat(Beat.Kind.Tick, 0.55f, 16),
+        Beat(Beat.Kind.Tick, 0.4f, 16),
+    )
+    Haptic.Resume -> listOf(
+        Beat(Beat.Kind.LowTick, 0.5f, 0),
+        Beat(Beat.Kind.Click, 0.85f, 22),
+    )
+    Haptic.Pause -> listOf(
+        Beat(Beat.Kind.Click, 0.85f, 0),
+        Beat(Beat.Kind.LowTick, 0.4f, 22),
+    )
+    Haptic.Expand -> listOf(
+        Beat(Beat.Kind.Tick, 0.3f, 0),
+        Beat(Beat.Kind.Tick, 0.45f, 12),
+        Beat(Beat.Kind.Click, 0.6f, 12),
+    )
+}
+
+// ── The motor ─────────────────────────────────────────────────────────────────
+
+/**
+ * Resolves what this particular phone can do once, then renders every [Haptic]
+ * into the best [VibrationEffect] available to it:
+ *
+ *  1. **Composition** (API 30+, primitives supported). Real rhythmic haptics —
+ *     the beats are handed to the vibrator as primitives and it reproduces
+ *     their character, not just their timing. This is the Pixel / recent
+ *     Samsung path and what the patterns above were written for.
+ *  2. **Waveform with amplitudes** (API 26+, `hasAmplitudeControl`). The same
+ *     rhythm as on-pulses of varying strength. Cruder, still clearly a pattern
+ *     rather than a buzz.
+ *  3. **Plain waveform**. An on/off pattern on a motor with one volume, so only
+ *     the timing survives — and the pulses have to be longer to be felt at all,
+ *     which is why this tier drops a three-beat pattern to its two outer beats
+ *     rather than letting the total run past ~80ms.
+ *
+ * Effects are immutable, so each one is compiled on first use and kept.
+ */
+private class HapticDevice private constructor(
+    private val vibrator: Vibrator,
+    private val canCompose: Boolean,
+    private val canScaleAmplitude: Boolean,
+    private val systemHapticsEnabled: () -> Boolean,
+) {
+    private val compiled = HashMap<Haptic, VibrationEffect>()
+
+    fun play(haptic: Haptic) {
+        // The system-wide touch-feedback switch is the user's answer to this
+        // whole feature, and going through Vibrator rather than the View means
+        // nothing else is checking it for us.
+        if (!systemHapticsEnabled()) return
+
