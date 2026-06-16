@@ -219,3 +219,28 @@ fun UpdateAvailableDialog(
                     )
                     Box(
                         modifier = Modifier
+                            .padding(top = 4.dp)
+                            .heightIn(max = NOTES_MAX_HEIGHT)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        // RichText's Material3 Text leans on LocalContentColor,
+                        // which nothing here provides — this card is a plain
+                        // Column.background(...), not a Surface, so without
+                        // this the notes render at LocalContentColor's black
+                        // default regardless of theme.
+                        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+                            RichText(style = RichTextStyle.Default) {
+                                Markdown(notes)
+                            }
+                        }
+                    }
+                }
+            }
+
+            AlertRule()
+            when (state) {
+                is AppUpdateChecker.DownloadState.Downloading -> {
+                    AlertAction(label = stringResource(R.string.cancel), emphasised = false, onClick = onCancelDownload)
+                }
+                is AppUpdateChecker.DownloadState.Ready -> {
+                    AlertAction(label = stringResource(R.string.install_now), emphasised = true, onClick = onInstall)
