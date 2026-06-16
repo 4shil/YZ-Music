@@ -445,3 +445,42 @@ private fun SleepTimerPicker(palette: ArtworkPalette, onBack: () -> Unit) {
 }
 
 @Composable
+private fun SleepOption(
+    label: String,
+    selected: Boolean,
+    accent: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Icon(
+                Icons.Rounded.Check,
+                contentDescription = "Running",
+                tint = accent,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+    }
+}
+
+/** What the sleep timer row shows on the right, or null when none is armed. */
+@Composable
+private fun sleepTimerStatus(): String? {
+    val afterTrack by SleepTimer.afterTrack.collectAsStateWithLifecycle()
+    return sleepTimerCountdown() ?: "After this song".takeIf { afterTrack }
+}
+
+/** Live "m:ss" until the sleep timer fires, or null when none is running. */
+@Composable
