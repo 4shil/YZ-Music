@@ -244,3 +244,28 @@ fun UpdateAvailableDialog(
                 }
                 is AppUpdateChecker.DownloadState.Ready -> {
                     AlertAction(label = stringResource(R.string.install_now), emphasised = true, onClick = onInstall)
+                    AlertRule()
+                    AlertAction(label = stringResource(R.string.later), emphasised = false, onClick = onDismiss)
+                }
+                is AppUpdateChecker.DownloadState.Failed -> {
+                    AlertAction(label = stringResource(R.string.try_again), emphasised = true, onClick = onDownload)
+                    AlertRule()
+                    AlertAction(label = stringResource(R.string.open_releases_page), emphasised = false, onClick = onOpenReleasePage)
+                }
+                else -> {
+                    AlertAction(label = stringResource(R.string.download_now), emphasised = true, onClick = onDownload)
+                    AlertRule()
+                    AlertAction(label = stringResource(R.string.remind_me_later), emphasised = false, onClick = onDismiss)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Full-bleed action row. Tinted rather than filled, so the two read as equals
+ * in weight and only the font differentiates the default action — the alert's
+ * whole point is that neither choice is a trap.
+ */
+@Composable
+internal fun AlertAction(
