@@ -148,3 +148,16 @@ fun TopFadeBlur(
             // at nothing together. A scrim that outlasted the blur would leave
             // a tinted band hanging below a fade that had already finished —
             // the one artefact this bar exists to avoid.
+            colorStops = Array(SCRIM_STOPS) { i ->
+                val t = i / (SCRIM_STOPS - 1f)
+                t to scrimColor.copy(alpha = SCRIM_PEAK * (1f - EaseOutCubic.transform(t)))
+            },
+        )
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .background(scrim),
+    )
+}
