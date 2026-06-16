@@ -381,3 +381,67 @@ private fun DownloadRow(song: Song, palette: ArtworkPalette, isOffline: Boolean,
 /** End of track or a duration, plus a way out once one is running. */
 @Composable
 private fun SleepTimerPicker(palette: ArtworkPalette, onBack: () -> Unit) {
+    val chosen by SleepTimer.minutes.collectAsStateWithLifecycle()
+    val afterTrack by SleepTimer.afterTrack.collectAsStateWithLifecycle()
+    val countdown = sleepTimerCountdown()
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 22.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Sleep timer",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    text = when {
+                        countdown != null -> "$countdown until playback pauses"
+                        afterTrack -> "Pausing when this song ends"
+                        else -> "Pause playback after a while"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = palette.divider)
+
+        // Finishing the song is the one people reach for at the end of a
+        // listen, so it leads rather than sitting under the durations.
+        SleepOption(label = "After this song", selected = afterTrack, accent = palette.accent) {
+            SleepTimer.startAfterTrack()
+            onBack()
+        }
+        SleepTimer.PRESETS.forEach { minutes ->
+            SleepOption(
+                label = if (minutes == 60) "1 hour" else "$minutes minutes",
+                selected = minutes == chosen,
+                accent = palette.accent,
+            ) {
+                SleepTimer.start(minutes)
+                onBack()
+            }
+        }
+        if (chosen != null || afterTrack) {
+            ActionRow(Icons.Rounded.Close, "Turn off timer", accent = palette.accent) {
+                SleepTimer.cancel()
+                onBack()
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
