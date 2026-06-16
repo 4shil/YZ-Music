@@ -91,3 +91,22 @@ fun TopFadeBlur(
      * bright smear. The scrim gives the glyphs a floor to sit on whatever
      * happens to pass beneath them.
      *
+     * Laid *over* the blur rather than under it, which is the only order that
+     * works: haze samples the content tagged as its source, not whatever
+     * sibling happens to sit between that content and itself, so a scrim
+     * underneath would be painted over by the blurred content and do nothing.
+     */
+    scrimColor: Color,
+) {
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    // The bar fills itself solid instead when blur is reduced, so this has
+    // nothing left to do.
+    if (reduceDynamicBlur) return
+
+    val height = topBarHeight() + FADE_RUN
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .hazeEffect(
