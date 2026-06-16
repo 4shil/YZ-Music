@@ -486,3 +486,75 @@ private fun sleepTimerStatus(): String? {
 @Composable
 private fun sleepTimerCountdown(): String? {
     val deadline by SleepTimer.deadline.collectAsStateWithLifecycle()
+    val remaining by produceState<Long?>(initialValue = SleepTimer.remainingMs(), deadline) {
+        while (deadline != null) {
+            value = SleepTimer.remainingMs()
+            delay(1_000)
+        }
+        value = null
+    }
+    return remaining?.let {
+        val seconds = it / 1000
+        "%d:%02d".format(Locale.ROOT, seconds / 60, seconds % 60)
+    }
+}
+
+/**
+ * One line of a bottom sheet's menu. Shared with the playlist picker so the
+ * two sheets read as the same control rather than as two lists that happen to
+ * look alike.
+ *
+ * [tint] is for rows whose icon carries state — a filled heart on a liked
+ * track — and is otherwise the ordinary foreground. [accent] colours the
+ * trailing [value], and defaults to the app's own red: a sheet tinted from
+ * artwork passes the artwork's accent instead, so the row belongs to the sheet
+ * it is drawn on.
+ */
+@Composable
+internal fun ActionRow(
+    icon: ImageVector,
+    label: String,
+    value: String? = null,
+    tint: Color? = null,
+    accent: Color = MaterialTheme.colorScheme.primary,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint ?: MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(18.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.weight(1f),
+        )
+        if (value != null) {
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyLarge,
+                color = accent,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * Stands in for [ActionRow] while whether it belongs on the sheet at all is
+ * still unknown — "Open album" or "Open artist" before the lookup for their
+ * ids has come back. A spinner rather than the row simply being missing, so
+ * it doesn't read as decided against until it actually is.
+ */
+@Composable
