@@ -320,3 +320,64 @@ private fun DownloadRow(song: Song, palette: ArtworkPalette, isOffline: Boolean,
     // record in the same breath, and starting pessimistic would show "Download"
     // again for as long as the check off the main thread takes.
     val recorded = saved[song.videoId]
+    val file by produceState(recorded?.let(Uri::parse), song.videoId, recorded) {
+        value = Downloads.savedUri(context, song.videoId)
+    }
+
+    // A failure is worth stating once. Leaving it set would have the row still
+    // reporting last week's dead connection the next time the sheet is opened.
+    DisposableEffect(song.videoId) {
+        onDispose { Downloads.dismissFailure(song.videoId) }
+    }
+
+    when (val state = active[song.videoId]) {
+        is DownloadState.Queued -> ActionRow(
+            icon = Icons.Rounded.Downloading,
+            label = "Queued",
+            value = "Cancel",
+            accent = palette.accent,
+        ) { Downloads.cancel(song.videoId) }
+
+        is DownloadState.Running -> ActionRow(
+            icon = Icons.Rounded.Downloading,
+            label = "Downloading",
+            // Indeterminate until the first response names a length; a
+            // stuck "0%" reads as broken where a bare label reads as starting.
+            value = if (state.fraction > 0f) "${(state.fraction * 100).toInt()}%" else null,
+            tint = palette.accent,
+            accent = palette.accent,
+        ) { Downloads.cancel(song.videoId) }
+
+        is DownloadState.Failed -> ActionRow(
+            icon = Icons.Rounded.ErrorOutline,
+            label = state.reason,
+            value = "Retry",
+            // Not the artwork's colour: a failure has to stay legible as a
+            // failure whatever the sleeve happens to be tinted.
+            tint = MaterialTheme.colorScheme.error,
+            accent = MaterialTheme.colorScheme.error,
+            onClick = onDownload,
+        )
+
+        null -> if (file != null) {
+            ActionRow(
+                icon = Icons.Rounded.DownloadDone,
+                label = "Saved to Downloads",
+                value = "Delete",
+                tint = palette.accent,
+                accent = palette.accent,
+            ) { scope.launch { Downloads.delete(context, song.videoId) } }
+        } else if (!isOffline) {
+            ActionRow(
+                icon = Icons.Rounded.Download,
+                label = "Download",
+                accent = palette.accent,
+                onClick = onDownload,
+            )
+        }
+    }
+}
+
+/** End of track or a duration, plus a way out once one is running. */
+@Composable
+private fun SleepTimerPicker(palette: ArtworkPalette, onBack: () -> Unit) {
