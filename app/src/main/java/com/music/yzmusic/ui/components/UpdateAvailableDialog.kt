@@ -119,3 +119,53 @@ fun UpdateAvailableDialog(
                     if (reduceDynamicBlur) {
                         Modifier.background(MaterialTheme.colorScheme.surface)
                     } else {
+                        Modifier.hazeEffect(state = hazeState, style = HazeMaterials.regular(MaterialTheme.colorScheme.surface))
+                    },
+                )
+                // Swallows the tap before it reaches the scrim behind, so
+                // touching the card itself never dismisses it.
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = {},
+                ),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 19.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = stringResource(R.string.software_update),
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.W600,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = when (state) {
+                        is AppUpdateChecker.DownloadState.Downloading ->
+                            stringResource(R.string.update_downloading_body, version)
+                        is AppUpdateChecker.DownloadState.Ready ->
+                            stringResource(R.string.update_ready_body, version)
+                        is AppUpdateChecker.DownloadState.Failed ->
+                            stringResource(R.string.update_failed_body, version)
+                        else ->
+                            stringResource(R.string.update_available_body, version)
+                    },
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+
+                // The download's progress, drawn as a thin fill across a
+                // hairline track — same weight as [AlertRule], so it reads as
+                // part of the card rather than a widget bolted onto it.
+                val downloading = state as? AppUpdateChecker.DownloadState.Downloading
