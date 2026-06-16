@@ -53,3 +53,22 @@ private const val PEAK = 0.75f
  * Modest on purpose: it is there to give white glyphs a floor on a pale sleeve,
  * not to grey out the artwork. Anything heavier and the bar stops being a fade
  * over a picture and starts being a header with a picture behind it.
+ */
+private const val SCRIM_PEAK = 0.42f
+
+/** Enough stops that the ramp does not band across a near-flat colour. */
+private const val SCRIM_STOPS = 12
+
+/**
+ * The glass behind every top bar: full blur along the top edge, ramping to
+ * nothing on the way down.
+ *
+ * A bar carrying a uniform pane is a rectangle sitting on the page, and its
+ * bottom edge is a line drawn across whatever scrolls under it. That reads
+ * worst on a detail page, whose artwork runs up under the status bar, but it
+ * is the same hard edge on a feed — so the fade is what every page gets, and
+ * [FrostedTopBar] paints no backdrop of its own anywhere.
+ *
+ * Fading out instead leaves the title and back arrow something to be legible
+ * against and the page nothing to be interrupted by.
+ */
