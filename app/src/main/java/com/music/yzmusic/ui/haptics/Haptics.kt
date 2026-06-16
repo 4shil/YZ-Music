@@ -180,3 +180,55 @@ private class HapticDevice private constructor(
         // nothing else is checking it for us.
         if (!systemHapticsEnabled()) return
 
+        val effect = synchronized(compiled) {
+            compiled.getOrPut(haptic) { compile(rhythmOf(haptic)) }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            TouchVibration.send(vibrator, effect)
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(effect, LEGACY_ATTRIBUTES)
+        }
+    }
+
+    private fun compile(beats: List<Beat>): VibrationEffect = when {
+        // [canCompose] already implies API 30 — see the probe. The version check
+        // is repeated because it's the only form lint can follow, and a
+        // suppression here would hide a real mistake later.
+        canCompose && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+            Primitives.compose(beats)
+        canScaleAmplitude -> waveform(beats, coarse = false)
+        else -> waveform(beats.outerTwo(), coarse = true)
+    }
+
+    /**
+     * Timings and amplitudes alternate gap / pulse, so a beat contributes two
+     * entries and a leading gap of 0 is harmless.
+     */
+    private fun waveform(beats: List<Beat>, coarse: Boolean): VibrationEffect {
+        val timings = LongArray(beats.size * 2)
+        val amplitudes = IntArray(beats.size * 2)
+        beats.forEachIndexed { i, beat ->
+            timings[i * 2] = if (coarse) beat.gapMs.coerceAtLeast(if (i == 0) 0 else 20) else beat.gapMs
+            timings[i * 2 + 1] = if (coarse) coarsePulseMs(beat) else beat.kind.pulseMs
+            amplitudes[i * 2] = 0
+            amplitudes[i * 2 + 1] = (beat.kind.amplitude * beat.scale).toInt().coerceIn(1, 255)
+        }
+        return if (coarse) {
+            // One volume only: the amplitude array would be a lie, and the
+            // two-argument form already means "off for this long, on for that".
+            VibrationEffect.createWaveform(timings, -1)
+        } else {
+            VibrationEffect.createWaveform(timings, amplitudes, -1)
+        }
+    }
+
+    /**
+     * An ERM motor needs ~20ms just to spin up, so the primitive-length pulses
+     * above would land as nothing. Stretched to something felt, floored at 18ms.
+     */
+    private fun coarsePulseMs(beat: Beat): Long =
+        (beat.kind.pulseMs * 2.5f * (0.6f + 0.4f * beat.scale)).toLong().coerceIn(18, 40)
+
+    companion object {
+        /** First and last beat, which for a mirrored pair keeps the mirror. */
