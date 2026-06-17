@@ -178,3 +178,53 @@ fun MeshGradientBackground(
 
         animatedColors.forEachIndexed { index, color ->
             val anchor = anchors[index]
+            val center = Offset(
+                x = (anchor.x + 0.16f * cos(drift * speeds[index] + index * 1.7f)) * size.width,
+                y = (anchor.y + 0.16f * sin(drift * speeds[index] * 0.9f + index * 2.3f)) * size.height,
+            )
+            val radius = size.maxDimension * 0.62f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(color.copy(alpha = 0.85f), color.copy(alpha = 0f)),
+                    center = center,
+                    radius = radius,
+                ),
+                radius = radius,
+                center = center,
+            )
+        }
+
+        // Gentle scrim so white text stays legible over bright art.
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color.Black.copy(alpha = 0.10f),
+                    Color.Black.copy(alpha = 0.38f),
+                ),
+            ),
+        )
+    }
+}
+
+/**
+ * Loads the artwork with Coil (software bitmap, thumbnail-sized) and pulls a
+ * 4-colour palette out of it. Recomputes when [imageUrl] changes.
+ *
+ * A track's motion artwork is frequently lit nothing like its still sleeve —
+ * a different shot, a different grade. [canvasFrame], a frame captured off
+ * the playing clip once one is available, is quantised the same way and
+ * takes over from there, crossfading in exactly like a track skip.
+ */
+@Composable
+fun rememberArtworkColors(imageUrl: String?, canvasFrame: Bitmap? = null): MeshPalette {
+    val context = LocalContext.current
+    var palette by remember(imageUrl) { mutableStateOf(MeshPalette(FallbackColors)) }
+
+    LaunchedEffect(imageUrl) {
+        if (imageUrl == null) return@LaunchedEffect
+        val request = ImageRequest.Builder(context)
+            .data(imageUrl)
+            .size(128) // palette quality is fine at thumbnail size, and it's fast
+            .allowHardware(false) // Palette needs pixel access
+            .build()
+        val result = SingletonImageLoader.get(context).execute(request)
