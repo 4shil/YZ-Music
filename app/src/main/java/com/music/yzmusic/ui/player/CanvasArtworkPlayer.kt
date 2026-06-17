@@ -1,0 +1,126 @@
+﻿package com.music.yzmusic.ui.player
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BlendMode
+import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.graphics.SurfaceTexture
+import android.os.Build
+import android.view.TextureView
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameMillis
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.annotation.RequiresApi
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import com.music.yzmusic.ui.rememberIsForeground
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.music.yzmusic.data.Http
+import com.music.yzmusic.data.canvas.CanvasArtwork
+import com.music.yzmusic.data.canvas.CanvasCache
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import java.util.Locale
+
+/**
+ * How long a clip gets to paint itself onto a surface it was just handed back
+ * before the still art is brought in behind it instead. Long enough to cover a
+ * decoder being re-created from cold, short enough that a clip which is never
+ * coming back does not sit there as a hole for the length of a glance.
+ */
+private const val REPAINT_TIMEOUT_MS = 700L
+
+/**
+ * The looping video that plays over a track's cover art, sized to fill and
+ * clipped by whatever laid it out.
+ *
+ * A second, deliberately unassuming ExoPlayer: silent, with its audio track
+ * switched off entirely so a clip's soundtrack is never even fetched, and no
+ * audio attributes — taking focus here would duck the music this is decorating.
+ * It follows the transport, so pausing the track stops the sleeve moving too.
+ *
+ * Nothing is drawn until the first frame arrives, and the fade in from there
+ * means a failed or slow clip simply leaves the still art showing rather than
+ * flashing a black square over it. [CanvasArtwork.fallbackUrl] gets one try if
+ * the first rendition won't decode.
+ */
+@OptIn(UnstableApi::class)
+@Composable
+fun CanvasArtworkPlayer(
+    canvas: CanvasArtwork,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    /** Fires once the clip has an actual frame on screen, and again if it drops back to none. */
+    onRenderedChanged: (Boolean) -> Unit = {},
+    /** A single frame off the playing clip, for callers that want to re-tint around it. */
+    onFrameCaptured: (Bitmap) -> Unit = {},
+    /**
+     * Keep calling [onFrameCaptured] every so many milliseconds instead of
+     * only once — for a caller re-tinting its backdrop off a
+     * [CanvasSource.SPOTIFY][com.music.yzmusic.data.canvas.CanvasSource.SPOTIFY]
+     * clip, which is worth following as it plays rather than settling on
+     * whatever colours its opening frame happened to have. Null everywhere
+     * else: re-reading a texture off the GPU costs a frame stall, and for the
+     * other three sources there is nothing about a clip's own colour that its
+     * first frame doesn't already say.
+     */
+    refreshFrameEveryMs: Long? = null,
+    /**
+     * How much of whatever is behind the clip it is currently hiding: 0 while
+     * nothing is drawn, ramping to 1 as the first frame fades in, and back down
+     * if it drops out again.
+     *
+     * A caller that stacks a still image under the clip needs this to take that
+     * image back out from under it, and cannot get there from
+     * [onRenderedChanged] alone — that fires when the fade *starts*. It matters
+     * most with [bottomFade]: one gradient over each of two stacked layers
+     * leaves the lower one showing through the upper one instead of the backdrop
+     * showing through both, so the still art stays half-visible over the clip
+     * for as long as it is left lit underneath.
+     */
+    onCoverChanged: (Float) -> Unit = {},
+    /**
+     * Share of the clip's height, measured up from its bottom edge, over which
+     * it dissolves to nothing — 0 for a hard edge. See [setBottomFade] for why
+     * this is a parameter here rather than a mask the caller could draw.
+     */
+    bottomFade: Float = 0f,
+) {
+    val context = LocalContext.current
+
+    var url by remember(canvas) { mutableStateOf(canvas.url) }
+    var rendered by remember(canvas) { mutableStateOf(false) }
+    // Aspect of the clip itself. Zero until the decoder reports it, which is
+    // also the signal that there is nothing sensible to crop to yet.
