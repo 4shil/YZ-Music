@@ -258,3 +258,70 @@ object YZMusicIcons {
      */
     val Heart: ImageVector by lazy { heart("bc_heart", filled = false) }
 
+    val HeartFilled: ImageVector by lazy { heart("bc_heart_filled", filled = true) }
+
+    private fun heart(name: String, filled: Boolean): ImageVector =
+        ImageVector.Builder(
+            name = name,
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                fill = if (filled) stroke else null,
+            ) {
+                // Two lobes meeting at the top notch, falling to a single point.
+                moveTo(12f, 20f)
+                curveTo(12f, 20f, 3.2f, 14.6f, 3.2f, 8.9f)
+                arcToRelative(4.5f, 4.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, 8.8f, -1.5f)
+                arcToRelative(4.5f, 4.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, 8.8f, 1.5f)
+                curveTo(20.8f, 14.6f, 12f, 20f, 12f, 20f)
+                close()
+            }
+        }.build()
+
+    /** Adding something — a new playlist, on the library shelf. */
+    val Plus: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_plus",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(12f, 5f); lineTo(12f, 19f)
+                moveTo(5f, 12f); lineTo(19f, 12f)
+            }
+        }.build()
+    }
+
+    /**
+     * A tick — the other half of [Plus]. Saving something to the library swaps
+     * one for the other in place, so the two are drawn on the same 14-unit span
+     * and at the same weight; a tick sized to its own bounding box would jump.
+     */
+    val Check: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_check",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(5f, 12.8f); lineTo(9.6f, 17.4f); lineTo(19f, 6.9f)
+            }
+        }.build()
+    }
+
+    /** Arrow pointing down into a tray — offline download. */
