@@ -349,3 +349,28 @@ fun CanvasArtworkPlayer(
             }
         },
         update = { frame ->
+            val view = frame.getChildAt(0) as TextureView
+            // Set on the view itself. A Compose alpha layer over a TextureView
+            // is not reliably composited, and this is the same fade either way.
+            view.alpha = alpha
+            view.centerCrop(bounds, clipAspect)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                view.setBottomFade(bottomFade, bounds)
+            } else {
+                frame.fadeFraction = bottomFade
+            }
+        },
+        modifier = modifier.onSizeChanged { bounds = it },
+    )
+}
+
+/**
+ * A TextureView stretches its content to whatever bounds it was given, which
+ * turns a 9:16 clip in a square sleeve into a smeared one. Undo that with a
+ * transform: scale the axis that came up short until the clip covers the view
+ * at its true aspect, and let the overflow fall outside the clip.
+ */
+private fun TextureView.centerCrop(bounds: IntSize, clipAspect: Float) {
+    if (bounds.width == 0 || bounds.height == 0 || clipAspect <= 0f) return
+    val viewAspect = bounds.width.toFloat() / bounds.height
+    val pivotX = bounds.width / 2f
