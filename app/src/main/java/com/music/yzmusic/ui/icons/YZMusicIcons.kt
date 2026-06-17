@@ -230,3 +230,31 @@ object YZMusicIcons {
     }
 
     /** Plain chevron — a disclosure hint, not a directional arrow. */
+    val ChevronRight: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_chevron_right",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(9.5f, 6.2f)
+                lineTo(15.3f, 12f)
+                lineTo(9.5f, 17.8f)
+            }
+        }.build()
+    }
+
+    /**
+     * The player's like control, in two weights.
+     *
+     * Filled rather than merely tinted when set: the player draws every glyph
+     * white on artwork, where a colour change alone is the one signal the
+     * backdrop can swallow. A shape change survives any album cover.
+     */
+    val Heart: ImageVector by lazy { heart("bc_heart", filled = false) }
+
