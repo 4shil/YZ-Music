@@ -308,3 +308,74 @@ private class HapticDevice private constructor(
             // happens on whichever thread just handled a tap.
             val enabled = AtomicBoolean(read())
             val observer = object : ContentObserver(null) {
+                override fun onChange(selfChange: Boolean) {
+                    enabled.set(read())
+                }
+            }
+            runCatching { resolver.registerContentObserver(uri, false, observer) }
+            return { enabled.get() }
+        }
+    }
+}
+
+/**
+ * Everything that touches [VibrationEffect.Composition], kept in a class of its
+ * own so that class — which does not exist below API 30 — is only ever *loaded*
+ * on a device that has it. Gating the call sites would very likely be enough on
+ * its own; keeping the references out of [HapticDevice] entirely means it can't
+ * come down to how eagerly a particular runtime resolves them.
+ */@RequiresApi(Build.VERSION_CODES.R)
+private object Primitives {
+    /**
+     * Only the two primitives that exist on API 30 are checked, because they're
+     * the only two ever asked for there — see [primitive].
+     */
+    fun supportedBy(vibrator: Vibrator): Boolean = vibrator.areAllPrimitivesSupported(
+        VibrationEffect.Composition.PRIMITIVE_TICK,
+        VibrationEffect.Composition.PRIMITIVE_CLICK,
+    )
+
+    fun compose(beats: List<Beat>): VibrationEffect {
+        var composition = VibrationEffect.startComposition()
+        beats.forEach { beat ->
+            composition = composition.addPrimitive(
+                beat.kind.primitive(),
+                beat.scale,
+                beat.gapMs.toInt(),
+            )
+        }
+        return composition.compose()
+    }
+
+    private fun Beat.Kind.primitive(): Int = when (this) {
+        Beat.Kind.Tick -> VibrationEffect.Composition.PRIMITIVE_TICK
+        Beat.Kind.Click -> VibrationEffect.Composition.PRIMITIVE_CLICK
+        // LOW_TICK only became public API in 31; below that a plain tick is the
+        // nearest thing, and the pattern still reads correctly without it.
+        Beat.Kind.LowTick -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            VibrationEffect.Composition.PRIMITIVE_LOW_TICK
+        } else {
+            VibrationEffect.Composition.PRIMITIVE_TICK
+        }
+    }
+}
+
+/**
+ * Tells the platform this buzz is touch feedback, which is what lets the system
+ * scale or mute it alongside every other tap in the OS.
+ *
+ * Held by an object for the same reason as [Primitives] — [VibrationAttributes]
+ * arrived in API 30, and the two-argument `vibrate` in 33 — so neither type is
+ * named anywhere that loads on an older phone. A Kotlin `object` initialises on
+ * first access, which makes this the cache as well.
+ */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private object TouchVibration {
+    private val attributes: VibrationAttributes = VibrationAttributes.Builder()
+        .setUsage(VibrationAttributes.USAGE_TOUCH)
+        .build()
+
+    fun send(vibrator: Vibrator, effect: VibrationEffect) {
+        vibrator.vibrate(effect, attributes)
+    }
+}
