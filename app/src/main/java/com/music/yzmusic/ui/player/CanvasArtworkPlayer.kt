@@ -306,3 +306,46 @@ fun CanvasArtworkPlayer(
                     /** Whether the next surface is a replacement for one taken away. */
                     private var replacing = false
 
+                    override fun onSurfaceTextureAvailable(
+                        surface: SurfaceTexture,
+                        width: Int,
+                        height: Int,
+                    ) {
+                        delegate?.onSurfaceTextureAvailable(surface, width, height)
+                        // The first surface needs nothing: prepare() paints it.
+                        if (!replacing) return
+                        replacing = false
+                        surfaceGeneration++
+                    }
+
+                    override fun onSurfaceTextureSizeChanged(
+                        surface: SurfaceTexture,
+                        width: Int,
+                        height: Int,
+                    ) {
+                        delegate?.onSurfaceTextureSizeChanged(surface, width, height)
+                    }
+
+                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                        replacing = true
+                        return delegate?.onSurfaceTextureDestroyed(surface) ?: true
+                    }
+
+                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+                        delegate?.onSurfaceTextureUpdated(surface)
+                    }
+                }
+            }
+            textureView = texture
+            // Wrapped on every API level so there is one view tree to reason
+            // about: below API 31 the frame is what draws [bottomFade], and
+            // above it the frame is just a box around the texture.
+            FadingBottomFrame(viewContext).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                addView(texture)
+            }
+        },
+        update = { frame ->
