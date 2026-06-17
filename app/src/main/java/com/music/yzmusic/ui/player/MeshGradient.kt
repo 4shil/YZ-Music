@@ -228,3 +228,33 @@ fun rememberArtworkColors(imageUrl: String?, canvasFrame: Bitmap? = null): MeshP
             .allowHardware(false) // Palette needs pixel access
             .build()
         val result = SingletonImageLoader.get(context).execute(request)
+        val bitmap = (result as? SuccessResult)?.image?.toBitmap() ?: return@LaunchedEffect
+        palette = MeshPalette(paletteOf(bitmap))
+    }
+
+    LaunchedEffect(canvasFrame) {
+        val frame = canvasFrame ?: return@LaunchedEffect
+        val colors = withContext(Dispatchers.Default) { paletteOf(frame) }
+        palette = MeshPalette(colors)
+    }
+    return palette
+}
+
+/**
+ * How far the blobs travel in one settle. A shade under half a turn: enough
+ * that the backdrop visibly reacts to a track change, short of a full orbit
+ * that would land the blobs back where they started.
+ */
+private const val DRIFT_RADIANS = (PI * 0.45f).toFloat()
+
+/**
+ * Four mesh colours drawn from the artwork.
+ *
+ * The named swatches — vibrant, muted and friends — are a convenience over the
+ * full set, and on dark or desaturated sleeves every vibrant slot comes back
+ * null: Karan Aujla's marble interior fills two of the five. Topping the rest
+ * up from [FallbackColors] is what left those covers sitting under the stock
+ * purple. So the whole swatch list is read instead, and any shortfall is
+ * derived from the art's own colours rather than borrowed.
+ */
+private fun paletteOf(bitmap: Bitmap): List<Color> {
