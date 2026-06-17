@@ -465,3 +465,40 @@ private class FadingBottomFrame(context: Context) : FrameLayout(context) {
     }
 
     override fun dispatchDraw(canvas: Canvas) {
+        val fade = fadeFraction
+        if (fade <= 0.001f || height == 0) {
+            super.dispatchDraw(canvas)
+            return
+        }
+        val shader = gradient?.takeIf { gradientHeight == height } ?: LinearGradient(
+            0f,
+            height * (1f - fade),
+            0f,
+            height.toFloat(),
+            android.graphics.Color.BLACK,
+            android.graphics.Color.TRANSPARENT,
+            Shader.TileMode.CLAMP,
+        ).also {
+            gradient = it
+            gradientHeight = height
+        }
+        maskPaint.shader = shader
+        val layer = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
+        super.dispatchDraw(canvas)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), maskPaint)
+        canvas.restoreToCount(layer)
+    }
+}
+
+/**
+ * Apple serves HLS, Tidal and the community index serve MP4. Naming the type
+ * saves ExoPlayer a sniff, and an unrecognised URL is left for it to work out.
+ */
+private fun mimeTypeOf(url: String): String? {
+    val path = url.substringBefore('?').lowercase(Locale.ROOT)
+    return when {
+        path.endsWith(".m3u8") -> MimeTypes.APPLICATION_M3U8
+        path.endsWith(".mp4") -> MimeTypes.VIDEO_MP4
+        else -> null
+    }
+}
