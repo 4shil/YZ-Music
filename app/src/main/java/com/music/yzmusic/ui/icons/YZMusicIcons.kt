@@ -384,3 +384,47 @@ object YZMusicIcons {
      * A teardrop reads as "location" the moment it's this small — the two
      * disjoint strokes here are what keep it read as "pinned" instead.
      */
+    val Pin: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_pin",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // Round head.
+                moveTo(9.6f, 8.4f)
+                arcToRelative(3.4f, 3.4f, 0f, isMoreThanHalf = true, isPositiveArc = true, 6.8f, 0f)
+                arcToRelative(3.4f, 3.4f, 0f, isMoreThanHalf = true, isPositiveArc = true, -6.8f, 0f)
+                // Needle, kicked out from the underside of the head to a point.
+                moveTo(10.8f, 10.8f)
+                lineTo(5.6f, 19.6f)
+            }
+        }.build()
+    }
+
+    val Library: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_library",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // Three upright spines + one leaning — Apple Music's library glyph, thickened
+                moveTo(4.6f, 4.8f); lineTo(4.6f, 19.2f)
+                moveTo(9.2f, 4.8f); lineTo(9.2f, 19.2f)
+                moveTo(13.8f, 4.8f); lineTo(13.8f, 19.2f)
+                moveTo(17.2f, 5.6f); lineTo(20.6f, 18.9f)
+            }
+        }.build()
+    }
+}
