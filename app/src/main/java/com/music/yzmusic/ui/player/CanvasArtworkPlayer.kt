@@ -259,3 +259,50 @@ fun CanvasArtworkPlayer(
         if (!rendered) return@LaunchedEffect
         while (isActive) {
             delay(interval)
+            val view = textureView ?: continue
+            runCatching { view.getBitmap() }.getOrNull()?.let(onFrameCaptured)
+        }
+    }
+
+    val alpha by animateFloatAsState(
+        targetValue = if (rendered) 1f else 0f,
+        animationSpec = tween(durationMillis = 320),
+        label = "canvasAlpha",
+    )
+
+    // Published rather than left for the caller to mirror with a second
+    // animation off [onRenderedChanged]: one fade, one account of how far along
+    // it is. Zeroed on the way out, or a caller would be left holding something
+    // hidden behind a clip that is no longer mounted.
+    val reportCover by rememberUpdatedState(onCoverChanged)
+    LaunchedEffect(Unit) { snapshotFlow { alpha }.collect { reportCover(it) } }
+    DisposableEffect(Unit) { onDispose { reportCover(0f) } }
+
+    AndroidView(
+        factory = { viewContext ->
+            val texture = TextureView(viewContext).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                // Blend rather than punch a hole: the still sleeve stays
+                // visible underneath for the length of the fade.
+                isOpaque = false
+                this.alpha = 0f
+                player.setVideoTextureView(this)
+                // setVideoTextureView installs ExoPlayer's own listener, and
+                // the player has to keep it — it is how the surface reaches
+                // the video renderer at all. So wrap it rather than replace
+                // it: everything is passed straight through, and the one
+                // callback that matters here is noted on the way past.
+                //
+                // Asking the lifecycle instead would be simpler and wrong. The
+                // surface comes back on the first traversal after the activity
+                // is visible, which is *after* ON_RESUME — a repaint fired
+                // there lands on the placeholder surface and the real one
+                // arrives blank a moment later.
+                val delegate = surfaceTextureListener
+                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    /** Whether the next surface is a replacement for one taken away. */
+                    private var replacing = false
+
