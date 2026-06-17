@@ -232,3 +232,66 @@ private class HapticDevice private constructor(
 
     companion object {
         /** First and last beat, which for a mirrored pair keeps the mirror. */
+        private fun List<Beat>.outerTwo(): List<Beat> =
+            if (size > 2) listOf(first(), last()) else this
+
+        private val LEGACY_ATTRIBUTES by lazy {
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+        }
+
+        @Volatile
+        private var instance: HapticDevice? = null
+
+        @Volatile
+        private var probed = false
+
+        /**
+         * Null on a phone with no vibrator at all, which is a legitimate answer
+         * and not worth re-checking on every tap.
+         */
+        fun of(app: Context): HapticDevice? {
+            instance?.let { return it }
+            synchronized(this) {
+                if (probed) return instance
+                probed = true
+                instance = probe(app)
+                return instance
+            }
+        }
+
+        private fun probe(app: Context): HapticDevice? {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                app.getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                app.getSystemService(Vibrator::class.java)
+            }
+            if (vibrator == null || !vibrator.hasVibrator()) return null
+
+            // Claiming API 30 isn't enough — plenty of phones on 30+ have an
+            // ERM motor that supports no primitives, and asking for a
+            // composition there produces silence rather than a fallback.
+            val canCompose = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                Primitives.supportedBy(vibrator)
+
+            return HapticDevice(
+                vibrator = vibrator,
+                canCompose = canCompose,
+                canScaleAmplitude = vibrator.hasAmplitudeControl(),
+                systemHapticsEnabled = systemHapticsWatcher(app),
+            )
+        }
+
+        /**
+         * Reads Settings.System once and then only when it changes, rather than
+         * making a binder call on every tap.
+         *
+         * The key is marked deprecated and has no public replacement: it is
+         * still what the Settings app writes for "Touch feedback" and still the
+         * only readable answer. From API 33 the USAGE_TOUCH attribute means the
+         * platform applies the same preference itself, so there this check is
+         * belt-and-braces rather than the only thing honouring it.
+         */
+        @Suppress("DEPRECATION")
