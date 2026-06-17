@@ -217,3 +217,14 @@ fun MeshGradientBackground(
  */
 @Composable
 fun rememberArtworkColors(imageUrl: String?, canvasFrame: Bitmap? = null): MeshPalette {
+    val context = LocalContext.current
+    var palette by remember(imageUrl) { mutableStateOf(MeshPalette(FallbackColors)) }
+
+    LaunchedEffect(imageUrl) {
+        if (imageUrl == null) return@LaunchedEffect
+        val request = ImageRequest.Builder(context)
+            .data(imageUrl)
+            .size(128) // palette quality is fine at thumbnail size, and it's fast
+            .allowHardware(false) // Palette needs pixel access
+            .build()
+        val result = SingletonImageLoader.get(context).execute(request)
