@@ -374,3 +374,94 @@ private fun TextureView.centerCrop(bounds: IntSize, clipAspect: Float) {
     if (bounds.width == 0 || bounds.height == 0 || clipAspect <= 0f) return
     val viewAspect = bounds.width.toFloat() / bounds.height
     val pivotX = bounds.width / 2f
+    val pivotY = bounds.height / 2f
+    val matrix = Matrix().apply {
+        if (clipAspect > viewAspect) {
+            setScale(clipAspect / viewAspect, 1f, pivotX, pivotY)
+        } else {
+            setScale(1f, viewAspect / clipAspect, pivotX, pivotY)
+        }
+    }
+    setTransform(matrix)
+}
+
+/**
+ * Dissolves the clip's bottom edge into whatever is behind it.
+ *
+ * Done here, on the view's own RenderNode, rather than with a DstIn mask in the
+ * caller's draw scope: a TextureView's frames are composited from its surface
+ * and a Compose blend drawn over the node simply doesn't reach them — the mask
+ * lands on the layer around the video and leaves the video's own hard edge
+ * exactly where it was.
+ *
+ * [RenderEffect] is API 31+; below that [FadingBottomFrame] does the same job
+ * the older way, with a saveLayer and a Porter-Duff mask.
+ */
+@RequiresApi(Build.VERSION_CODES.S)
+private fun TextureView.setBottomFade(fraction: Float, bounds: IntSize) {
+    val height = bounds.height
+    if (fraction <= 0.001f || height == 0) {
+        setRenderEffect(null)
+        return
+    }
+    val gradient = LinearGradient(
+        0f,
+        height * (1f - fraction.coerceAtMost(1f)),
+        0f,
+        height.toFloat(),
+        android.graphics.Color.BLACK,
+        android.graphics.Color.TRANSPARENT,
+        Shader.TileMode.CLAMP,
+    )
+    // createOffsetEffect(0, 0) is the identity effect over the node's own
+    // content, which is the only way to name "what this view drew" as the
+    // destination of a blend.
+    setRenderEffect(
+        RenderEffect.createBlendModeEffect(
+            RenderEffect.createOffsetEffect(0f, 0f),
+            RenderEffect.createShaderEffect(gradient),
+            BlendMode.DST_IN,
+        ),
+    )
+}
+
+/**
+ * The pre-[Build.VERSION_CODES.S] bottom fade: the same dissolve
+ * [setBottomFade] gets from a [RenderEffect], done the way it was done before
+ * there was one.
+ *
+ * Draw the child into an offscreen layer, paint a gradient over that layer with
+ * [PorterDuff.Mode.DST_IN], then compose the result down. Because the layer is
+ * this group's — not the TextureView's own node — the video frames are inside it
+ * by the time the mask lands, which is exactly what a Compose blend over the
+ * texture cannot achieve.
+ *
+ * It costs a full-screen offscreen buffer per frame, so it stays off entirely
+ * while [fadeFraction] is zero: with no fade asked for this is a plain
+ * FrameLayout and `dispatchDraw` takes the ordinary path.
+ */
+private class FadingBottomFrame(context: Context) : FrameLayout(context) {
+    /** Share of the height, from the bottom, over which the child dissolves. */
+    var fadeFraction: Float = 0f
+        set(value) {
+            val clamped = value.coerceIn(0f, 1f)
+            if (clamped == field) return
+            field = clamped
+            // A software layer would defeat the point — the texture has to stay
+            // hardware-composited — so this is only ever the invalidate.
+            gradient = null
+            invalidate()
+        }
+
+    private val maskPaint = Paint().apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+    }
+    private var gradient: LinearGradient? = null
+    private var gradientHeight = 0
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        gradient = null
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
