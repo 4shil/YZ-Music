@@ -113,3 +113,68 @@ fun MeshGradientBackground(
 
     // Each colour slot crossfades independently when the track (palette) changes,
     // unless "reduce animation" is on, in which case colours snap straight to target.
+    val colorSpec: AnimationSpec<Color> = if (reduceAnimation || !animated) snap() else tween(1400)
+    val animatedColors = tuned.mapIndexed { index, color ->
+        animateColorAsState(color, colorSpec, label = "meshColor$index").value
+    }
+    val baseColor by animateColorAsState(tuned.first().dimmed(), colorSpec, label = "meshBase")
+
+    // Read in the draw lambda, not here: an Animatable read during draw
+    // invalidates only the drawing, leaving composition out of the loop.
+    val phase = remember { Animatable(0f) }
+    LaunchedEffect(trackKey, reduceAnimation, continuous, animated) {
+        when {
+            !animated || reduceAnimation -> phase.snapTo(0f)
+            // A full turn at a time, restarted rather than looped with an
+            // infinite spec: the blobs' speeds are irrational multiples of each
+            // other, so the pattern never repeats, and a linear phase keeps the
+            // orbit even instead of easing to a halt each lap.
+            continuous -> while (isActive) {
+                phase.animateTo(
+                    targetValue = phase.value + (2 * PI).toFloat(),
+                    animationSpec = tween(driftMillis * 4, easing = LinearEasing),
+                )
+            }
+            else -> phase.animateTo(
+                targetValue = phase.value + DRIFT_RADIANS,
+                animationSpec = tween(driftMillis, easing = FastOutSlowInEasing),
+            )
+        }
+    }
+
+    // Scale up slightly so the blur's clamped edges never show, then blur the
+    // whole layer (RenderEffect, API 31+; a no-op below — the radial falloff
+    // already reads soft there).
+    //
+    // Clipped on the way out, and from a layer of its own rather than by setting
+    // `clip` on the one below: that one clips what is drawn *into* it, in its own
+    // coordinates, and the scale is applied after — so the overhang the scale
+    // creates survives it. This has to sit outside the scale to contain it.
+    //
+    // The overhang is a third of the backdrop's width and it is painted, not
+    // transparent: whatever this is standing in gets it. Off a full-window sheet
+    // that is the far side of the window and nobody ever saw it, which is how it
+    // went unnoticed; in a pane beside a page it was a hand's width of gradient
+    // laid over the feed.
+    Canvas(
+        modifier = modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .graphicsLayer {
+                scaleX = 1.3f
+                scaleY = 1.3f
+            }
+            .background(baseColor)
+            .blur(blurRadius),
+    ) {
+        val anchors = listOf(
+            Offset(0.20f, 0.25f),
+            Offset(0.80f, 0.20f),
+            Offset(0.75f, 0.80f),
+            Offset(0.25f, 0.75f),
+        )
+        val speeds = listOf(1f, -0.7f, 0.85f, -1.15f)
+        val drift = phase.value
+
+        animatedColors.forEachIndexed { index, color ->
+            val anchor = anchors[index]
