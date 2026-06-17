@@ -124,3 +124,14 @@ fun CanvasArtworkPlayer(
     var rendered by remember(canvas) { mutableStateOf(false) }
     // Aspect of the clip itself. Zero until the decoder reports it, which is
     // also the signal that there is nothing sensible to crop to yet.
+    var clipAspect by remember(canvas) { mutableFloatStateOf(0f) }
+    var bounds by remember { mutableStateOf(IntSize.Zero) }
+    var textureView by remember(canvas) { mutableStateOf<TextureView?>(null) }
+    // Frames are counted rather than flagged, because [rendered] cannot answer
+    // the question the repaint below has to ask: "did a frame land on *this*
+    // surface", not "has one ever landed".
+    var frameTick by remember(canvas) { mutableIntStateOf(0) }
+    // Bumped each time the view is handed a surface to replace one that was
+    // taken away — which, in practice, means each time the app comes back from
+    // off screen. Not bumped for the first surface of all, which arrives with
+    // nothing needing doing to it. See the repaint effect below.
