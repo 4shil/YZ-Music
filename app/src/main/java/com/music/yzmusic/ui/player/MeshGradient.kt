@@ -286,3 +286,30 @@ private fun List<Color>.distinctEnough(): List<Color> {
 
 private fun Color.isCloseTo(other: Color): Boolean {
     val a = hsl()
+    val b = other.hsl()
+    val hueGap = abs(a[0] - b[0]).let { min(it, 360f - it) }
+    return hueGap < 15f && abs(a[2] - b[2]) < 0.12f
+}
+
+/** Fill the empty slots off the art itself, fanning hue and lightness out. */
+private fun List<Color>.expandedToFour(): List<Color> {
+    val out = toMutableList()
+    var step = 1
+    while (out.size < 4) {
+        out += this[(out.size - size) % size].shifted(24f * step, 0.12f * step)
+        step++
+    }
+    return out
+}
+
+private fun Color.shifted(hue: Float, lightness: Float): Color {
+    val hsl = hsl()
+    hsl[0] = (hsl[0] + hue) % 360f
+    hsl[2] = (hsl[2] + lightness).coerceIn(0.2f, 0.7f)
+    return Color(ColorUtils.HSLToColor(hsl))
+}
+
+private fun Color.hsl(): FloatArray =
+    FloatArray(3).also { ColorUtils.colorToHSL(toArgb(), it) }
+
+/** Boost saturation and clamp lightness so any artwork yields a rich, non-muddy mesh. */
