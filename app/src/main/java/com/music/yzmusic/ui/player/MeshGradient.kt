@@ -313,3 +313,17 @@ private fun Color.hsl(): FloatArray =
     FloatArray(3).also { ColorUtils.colorToHSL(toArgb(), it) }
 
 /** Boost saturation and clamp lightness so any artwork yields a rich, non-muddy mesh. */
+private fun Color.tuned(): Color {
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(toArgb(), hsl)
+    hsl[1] = (hsl[1] * 1.35f).coerceAtMost(1f)
+    hsl[2] = hsl[2].coerceIn(0.28f, 0.58f)
+    return Color(ColorUtils.HSLToColor(hsl))
+}
+
+private fun Color.dimmed(): Color {
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(toArgb(), hsl)
+    hsl[2] = 0.12f
+    return Color(ColorUtils.HSLToColor(hsl))
+}
