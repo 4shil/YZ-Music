@@ -295,3 +295,16 @@ private class HapticDevice private constructor(
          * belt-and-braces rather than the only thing honouring it.
          */
         @Suppress("DEPRECATION")
+        private fun systemHapticsWatcher(app: Context): () -> Boolean {
+            val resolver = app.contentResolver
+            val uri = Settings.System.getUriFor(Settings.System.HAPTIC_FEEDBACK_ENABLED)
+            fun read() = Settings.System.getInt(
+                resolver,
+                Settings.System.HAPTIC_FEEDBACK_ENABLED,
+                1,
+            ) != 0
+
+            // Atomic because the observer fires on a binder thread and the read
+            // happens on whichever thread just handled a tap.
+            val enabled = AtomicBoolean(read())
+            val observer = object : ContentObserver(null) {
