@@ -135,3 +135,79 @@ fun CanvasArtworkPlayer(
     // taken away — which, in practice, means each time the app comes back from
     // off screen. Not bumped for the first surface of all, which arrives with
     // nothing needing doing to it. See the repaint effect below.
+    var surfaceGeneration by remember(canvas) { mutableIntStateOf(0) }
+
+    val player = remember {
+        ExoPlayer.Builder(context)
+            // Shares the app's one OkHttp client, as everything that fetches
+            // over the network here does — and wrapped in CanvasCache so a
+            // loop past the first is read off disk rather than re-fetched;
+            // see that object's doc for why this matters far more here than
+            // it would for a clip played once.
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(CanvasCache.dataSourceFactory(OkHttpDataSource.Factory(Http.client))),
+            )
+            .build()
+            .apply {
+                volume = 0f
+                repeatMode = Player.REPEAT_MODE_ONE
+                trackSelectionParameters = trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    .build()
+            }
+    }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                rendered = true
+                frameTick++
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                val width = videoSize.width * videoSize.pixelWidthHeightRatio
+                if (width > 0f && videoSize.height > 0) {
+                    clipAspect = width / videoSize.height
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                // One retry, at the other rendition. If that is the one that
+                // just failed there is nowhere left to go: leave the still
+                // art up rather than looping through a broken URL.
+                val alternate = canvas.fallbackUrl
+                if (alternate != null && alternate != url) {
+                    url = alternate
+                } else {
+                    rendered = false
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+
+    LaunchedEffect(url) {
+        rendered = false
+        clipAspect = 0f
+        val item = MediaItem.Builder().setUri(url)
+        mimeTypeOf(url)?.let { item.setMimeType(it) }
+        player.setMediaItem(item.build())
+        player.prepare()
+    }
+
+    // Gated on the app being on screen as well as on the caller's own state.
+    //
+    // This is a video decoder. Left to [isPlaying] alone it goes on decoding
+    // frames into a surface nobody can see for as long as the composition is
+    // alive — which, with the phone in a pocket and music playing, is the whole
+    // album. Worse on a detail page, whose caller passes a constant `true`
+    // because "the page is only up while it's being read": true of a page being
+    // looked at, not of one left open behind a locked screen.
+    //
+    // Held inside this component rather than asked of each caller, so no call
+    // site can forget it. Pausing keeps the last frame on the surface and the
+    // player prepared, so coming back resumes rather than reloads.
