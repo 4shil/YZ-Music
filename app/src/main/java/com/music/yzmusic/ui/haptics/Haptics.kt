@@ -308,3 +308,31 @@ private class HapticDevice private constructor(
             // happens on whichever thread just handled a tap.
             val enabled = AtomicBoolean(read())
             val observer = object : ContentObserver(null) {
+                override fun onChange(selfChange: Boolean) {
+                    enabled.set(read())
+                }
+            }
+            runCatching { resolver.registerContentObserver(uri, false, observer) }
+            return { enabled.get() }
+        }
+    }
+}
+
+/**
+ * Everything that touches [VibrationEffect.Composition], kept in a class of its
+ * own so that class — which does not exist below API 30 — is only ever *loaded*
+ * on a device that has it. Gating the call sites would very likely be enough on
+ * its own; keeping the references out of [HapticDevice] entirely means it can't
+ * come down to how eagerly a particular runtime resolves them.
+ */@RequiresApi(Build.VERSION_CODES.R)
+private object Primitives {
+    /**
+     * Only the two primitives that exist on API 30 are checked, because they're
+     * the only two ever asked for there — see [primitive].
+     */
+    fun supportedBy(vibrator: Vibrator): Boolean = vibrator.areAllPrimitivesSupported(
+        VibrationEffect.Composition.PRIMITIVE_TICK,
+        VibrationEffect.Composition.PRIMITIVE_CLICK,
+    )
+
+    fun compose(beats: List<Beat>): VibrationEffect {
