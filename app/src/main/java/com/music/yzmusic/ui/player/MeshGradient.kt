@@ -258,3 +258,31 @@ private const val DRIFT_RADIANS = (PI * 0.45f).toFloat()
  * derived from the art's own colours rather than borrowed.
  */
 private fun paletteOf(bitmap: Bitmap): List<Color> {
+    fun swatchesOf(builder: Palette.Builder): List<Color> =
+        builder.maximumColorCount(24).generate().swatches
+            .sortedByDescending { it.population }
+            .map { Color(it.rgb) }
+
+    val found = swatchesOf(Palette.from(bitmap)).ifEmpty {
+        // The default filter discards near-black and near-white, which on a
+        // monochrome sleeve can be everything there is.
+        swatchesOf(Palette.from(bitmap).clearFilters())
+    }
+
+    val distinct = found.distinctEnough()
+    return when {
+        distinct.isEmpty() -> FallbackColors
+        distinct.size >= 4 -> distinct.take(4)
+        else -> distinct.expandedToFour()
+    }
+}
+
+/** Drop near-duplicates, so the four blobs don't collapse into one wash. */
+private fun List<Color>.distinctEnough(): List<Color> {
+    val kept = mutableListOf<Color>()
+    forEach { color -> if (kept.none { it.isCloseTo(color) }) kept += color }
+    return kept
+}
+
+private fun Color.isCloseTo(other: Color): Boolean {
+    val a = hsl()
