@@ -306,3 +306,71 @@ fun CanvasArtworkPlayer(
                     /** Whether the next surface is a replacement for one taken away. */
                     private var replacing = false
 
+                    override fun onSurfaceTextureAvailable(
+                        surface: SurfaceTexture,
+                        width: Int,
+                        height: Int,
+                    ) {
+                        delegate?.onSurfaceTextureAvailable(surface, width, height)
+                        // The first surface needs nothing: prepare() paints it.
+                        if (!replacing) return
+                        replacing = false
+                        surfaceGeneration++
+                    }
+
+                    override fun onSurfaceTextureSizeChanged(
+                        surface: SurfaceTexture,
+                        width: Int,
+                        height: Int,
+                    ) {
+                        delegate?.onSurfaceTextureSizeChanged(surface, width, height)
+                    }
+
+                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                        replacing = true
+                        return delegate?.onSurfaceTextureDestroyed(surface) ?: true
+                    }
+
+                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+                        delegate?.onSurfaceTextureUpdated(surface)
+                    }
+                }
+            }
+            textureView = texture
+            // Wrapped on every API level so there is one view tree to reason
+            // about: below API 31 the frame is what draws [bottomFade], and
+            // above it the frame is just a box around the texture.
+            FadingBottomFrame(viewContext).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                addView(texture)
+            }
+        },
+        update = { frame ->
+            val view = frame.getChildAt(0) as TextureView
+            // Set on the view itself. A Compose alpha layer over a TextureView
+            // is not reliably composited, and this is the same fade either way.
+            view.alpha = alpha
+            view.centerCrop(bounds, clipAspect)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                view.setBottomFade(bottomFade, bounds)
+            } else {
+                frame.fadeFraction = bottomFade
+            }
+        },
+        modifier = modifier.onSizeChanged { bounds = it },
+    )
+}
+
+/**
+ * A TextureView stretches its content to whatever bounds it was given, which
+ * turns a 9:16 clip in a square sleeve into a smeared one. Undo that with a
+ * transform: scale the axis that came up short until the clip covers the view
+ * at its true aspect, and let the overflow fall outside the clip.
+ */
+private fun TextureView.centerCrop(bounds: IntSize, clipAspect: Float) {
+    if (bounds.width == 0 || bounds.height == 0 || clipAspect <= 0f) return
+    val viewAspect = bounds.width.toFloat() / bounds.height
+    val pivotX = bounds.width / 2f
