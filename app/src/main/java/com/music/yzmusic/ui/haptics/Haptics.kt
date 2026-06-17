@@ -336,3 +336,46 @@ private object Primitives {
     )
 
     fun compose(beats: List<Beat>): VibrationEffect {
+        var composition = VibrationEffect.startComposition()
+        beats.forEach { beat ->
+            composition = composition.addPrimitive(
+                beat.kind.primitive(),
+                beat.scale,
+                beat.gapMs.toInt(),
+            )
+        }
+        return composition.compose()
+    }
+
+    private fun Beat.Kind.primitive(): Int = when (this) {
+        Beat.Kind.Tick -> VibrationEffect.Composition.PRIMITIVE_TICK
+        Beat.Kind.Click -> VibrationEffect.Composition.PRIMITIVE_CLICK
+        // LOW_TICK only became public API in 31; below that a plain tick is the
+        // nearest thing, and the pattern still reads correctly without it.
+        Beat.Kind.LowTick -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            VibrationEffect.Composition.PRIMITIVE_LOW_TICK
+        } else {
+            VibrationEffect.Composition.PRIMITIVE_TICK
+        }
+    }
+}
+
+/**
+ * Tells the platform this buzz is touch feedback, which is what lets the system
+ * scale or mute it alongside every other tap in the OS.
+ *
+ * Held by an object for the same reason as [Primitives] — [VibrationAttributes]
+ * arrived in API 30, and the two-argument `vibrate` in 33 — so neither type is
+ * named anywhere that loads on an older phone. A Kotlin `object` initialises on
+ * first access, which makes this the cache as well.
+ */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private object TouchVibration {
+    private val attributes: VibrationAttributes = VibrationAttributes.Builder()
+        .setUsage(VibrationAttributes.USAGE_TOUCH)
+        .build()
+
+    fun send(vibrator: Vibrator, effect: VibrationEffect) {
+        vibrator.vibrate(effect, attributes)
+    }
+}
