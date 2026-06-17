@@ -143,3 +143,90 @@ object YZMusicIcons {
         }.build()
 
     /** AutoPlay's lemniscate. */
+    val Infinity: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_infinity",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(12f, 12f)
+                curveTo(10.1f, 9.1f, 8.7f, 8f, 7.1f, 8f)
+                arcToRelative(4f, 4f, 0f, isMoreThanHalf = false, isPositiveArc = false, 0f, 8f)
+                curveTo(8.7f, 16f, 10.1f, 14.9f, 12f, 12f)
+                curveTo(13.9f, 9.1f, 15.3f, 8f, 16.9f, 8f)
+                arcToRelative(4f, 4f, 0f, isMoreThanHalf = false, isPositiveArc = true, 0f, 8f)
+                curveTo(15.3f, 16f, 13.9f, 14.9f, 12f, 12f)
+            }
+        }.build()
+    }
+
+    /** Beamed pair of notes, for instrumental stretches in the lyrics. */
+    val MusicNote: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_music_note",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            // Heads are solid; stems and beam keep the family's stroke weight.
+            path(fill = stroke) {
+                moveTo(4.2f, 17.7f)
+                arcToRelative(2.9f, 2.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, 5.8f, 0f)
+                arcToRelative(2.9f, 2.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, -5.8f, 0f)
+                close()
+                moveTo(14.2f, 15.9f)
+                arcToRelative(2.9f, 2.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, 5.8f, 0f)
+                arcToRelative(2.9f, 2.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, -5.8f, 0f)
+                close()
+            }
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(10f, 17.7f); lineTo(10f, 6.7f)
+                moveTo(20f, 15.9f); lineTo(20f, 4.9f)
+                moveTo(10f, 6.7f); lineTo(20f, 4.9f)
+            }
+        }.build()
+    }
+
+    /** Speech bubble with two lines of words. */
+    val Lyrics: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_lyrics",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(6.2f, 4.6f)
+                lineTo(17.8f, 4.6f)
+                arcToRelative(2.8f, 2.8f, 0f, isMoreThanHalf = false, isPositiveArc = true, 2.8f, 2.8f)
+                lineTo(20.6f, 13.6f)
+                arcToRelative(2.8f, 2.8f, 0f, isMoreThanHalf = false, isPositiveArc = true, -2.8f, 2.8f)
+                lineTo(10.6f, 16.4f)
+                lineTo(6.8f, 19.6f)
+                lineTo(6.8f, 16.4f)
+                lineTo(6.2f, 16.4f)
+                arcToRelative(2.8f, 2.8f, 0f, isMoreThanHalf = false, isPositiveArc = true, -2.8f, -2.8f)
+                lineTo(3.4f, 7.4f)
+                arcToRelative(2.8f, 2.8f, 0f, isMoreThanHalf = false, isPositiveArc = true, 2.8f, -2.8f)
+                close()
+                moveTo(7.6f, 9f); lineTo(16.4f, 9f)
+                moveTo(7.6f, 12.1f); lineTo(13.2f, 12.1f)
+            }
+        }.build()
+    }
+
+    /** Plain chevron — a disclosure hint, not a directional arrow. */
