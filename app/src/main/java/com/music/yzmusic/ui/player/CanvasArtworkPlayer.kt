@@ -211,3 +211,51 @@ fun CanvasArtworkPlayer(
     // Held inside this component rather than asked of each caller, so no call
     // site can forget it. Pausing keeps the last frame on the surface and the
     // player prepared, so coming back resumes rather than reloads.
+    val foreground = rememberIsForeground()
+    LaunchedEffect(isPlaying, foreground) { player.playWhenReady = isPlaying && foreground }
+
+    // Repaint a paused clip onto a surface it has just been given back.
+    //
+    // A TextureView's SurfaceTexture does not survive the app going off screen:
+    // it is torn down with the activity's hardware layer and a brand new, empty
+    // one is handed over on the way back. A clip that is playing fills it on the
+    // next frame and nobody notices. A paused one has no next frame — the
+    // decoder is parked, `setOutputSurface` does not redraw what was already
+    // released to the old surface, and the view sits there transparent.
+    //
+    // Which reads as a hole rather than as a still sleeve, because by then the
+    // still art underneath has been faded out from under the clip (see
+    // [onCoverChanged]). So: seek to where we already are, which is the one
+    // thing that makes a paused player render, and if no frame arrives from it
+    // give up and drop back to the still art rather than leaving the hole.
+    LaunchedEffect(surfaceGeneration) {
+        if (surfaceGeneration == 0) return@LaunchedEffect
+        // Playback repaints on its own, and prepare() paints the first frame.
+        if (player.playWhenReady || player.playbackState == Player.STATE_IDLE) return@LaunchedEffect
+        val before = frameTick
+        player.seekTo(player.currentPosition)
+        delay(REPAINT_TIMEOUT_MS)
+        if (frameTick == before) rendered = false
+    }
+
+    LaunchedEffect(rendered) {
+        onRenderedChanged(rendered)
+        if (!rendered) return@LaunchedEffect
+        // Let the surface actually paint the frame that just triggered this
+        // before reading it back — grabbing it the instant the callback fires
+        // can still catch the previous, empty buffer.
+        withFrameMillis { }
+        val view = textureView ?: return@LaunchedEffect
+        runCatching { view.getBitmap() }.getOrNull()?.let(onFrameCaptured)
+    }
+
+    // The opt-in follow-up to the capture above, for a caller that asked for
+    // one — see [refreshFrameEveryMs]. A separate effect rather than a loop
+    // folded into the one above: that one is keyed on [rendered] so it fires
+    // again on every fade-in, and this one only needs to start once a fade-in
+    // has actually happened and then keep going for as long as it holds.
+    LaunchedEffect(rendered, refreshFrameEveryMs) {
+        val interval = refreshFrameEveryMs ?: return@LaunchedEffect
+        if (!rendered) return@LaunchedEffect
+        while (isActive) {
+            delay(interval)
