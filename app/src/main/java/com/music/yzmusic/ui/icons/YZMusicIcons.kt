@@ -258,3 +258,29 @@ object YZMusicIcons {
      */
     val Heart: ImageVector by lazy { heart("bc_heart", filled = false) }
 
+    val HeartFilled: ImageVector by lazy { heart("bc_heart_filled", filled = true) }
+
+    private fun heart(name: String, filled: Boolean): ImageVector =
+        ImageVector.Builder(
+            name = name,
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                fill = if (filled) stroke else null,
+            ) {
+                // Two lobes meeting at the top notch, falling to a single point.
+                moveTo(12f, 20f)
+                curveTo(12f, 20f, 3.2f, 14.6f, 3.2f, 8.9f)
+                arcToRelative(4.5f, 4.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, 8.8f, -1.5f)
+                arcToRelative(4.5f, 4.5f, 0f, isMoreThanHalf = false, isPositiveArc = true, 8.8f, 1.5f)
+                curveTo(20.8f, 14.6f, 12f, 20f, 12f, 20f)
+                close()
+            }
+        }.build()
+
+    /** Adding something — a new playlist, on the library shelf. */
