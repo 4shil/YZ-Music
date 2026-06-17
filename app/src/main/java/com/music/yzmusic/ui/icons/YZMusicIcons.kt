@@ -284,3 +284,103 @@ object YZMusicIcons {
         }.build()
 
     /** Adding something — a new playlist, on the library shelf. */
+    val Plus: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_plus",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(12f, 5f); lineTo(12f, 19f)
+                moveTo(5f, 12f); lineTo(19f, 12f)
+            }
+        }.build()
+    }
+
+    /**
+     * A tick — the other half of [Plus]. Saving something to the library swaps
+     * one for the other in place, so the two are drawn on the same 14-unit span
+     * and at the same weight; a tick sized to its own bounding box would jump.
+     */
+    val Check: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_check",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(5f, 12.8f); lineTo(9.6f, 17.4f); lineTo(19f, 6.9f)
+            }
+        }.build()
+    }
+
+    /** Arrow pointing down into a tray — offline download. */
+    val Download: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_download",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // Vertical stem
+                moveTo(12f, 4.5f); lineTo(12f, 15.5f)
+                // Arrow head
+                moveTo(7.5f, 11f); lineTo(12f, 15.5f); lineTo(16.5f, 11f)
+                // Tray base
+                moveTo(4.5f, 18f); lineTo(19.5f, 18f)
+            }
+        }.build()
+    }
+
+    /**
+     * Clock face with two hands — a download asked for but not yet on disk.
+     *
+     * The dial is the same 8.6 radius as [Explore]'s, so the two sit at the same
+     * optical weight when they appear in the same row of header buttons. The
+     * hands are one polyline through the centre rather than two strokes: the
+     * round join is then the pivot, which is what stops the middle reading as a
+     * pair of lines that happen to cross.
+     */
+    val Clock: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "bc_clock",
+            defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(
+                stroke = stroke,
+                strokeLineWidth = STROKE,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // Dial (full circle from two arcs)
+                moveTo(3.4f, 12f)
+                arcToRelative(8.6f, 8.6f, 0f, isMoreThanHalf = true, isPositiveArc = true, 17.2f, 0f)
+                arcToRelative(8.6f, 8.6f, 0f, isMoreThanHalf = true, isPositiveArc = true, -17.2f, 0f)
+                // Minute hand up, hour hand down to the right
+                moveTo(12f, 7.4f); lineTo(12f, 12f); lineTo(15.4f, 13.8f)
+            }
+        }.build()
+    }
+
+    /**
+     * A pushpin, not a map marker: a round head with a straight needle
+     * kicked out to one side, the way it sits once it's stuck into something.
+     * A teardrop reads as "location" the moment it's this small — the two
+     * disjoint strokes here are what keep it read as "pinned" instead.
+     */
