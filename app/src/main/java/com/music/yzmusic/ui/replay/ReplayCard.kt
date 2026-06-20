@@ -295,3 +295,17 @@ private val PolishedInk = Brush.verticalGradient(
     listOf(Color(0xFFFFFFFF), Color(0xFFF3F4F8), Color(0xFFC9CCD6)),
 )
 
+/** What makes the fill above read as raised rather than merely pale. */
+private val EmbossShadow = Shadow(
+    color = Color(0x99000000),
+    offset = Offset(0f, 2.5f),
+    blurRadius = 4f,
+)
+
+private val CardShape = RoundedCornerShape(20.dp)
+
+/** Whose card it is when there is no signed-in account to name. */
+const val DEFAULT_HOLDER = "BITCHORD LISTENER"
+
+/** 85.6mm × 54mm, which is what makes the shape read as a card. */
+private const val CARD_RATIO = 1.586f
