@@ -347,3 +347,138 @@ private fun paletteOf(bitmap: Bitmap?): List<Int> {
 /** [color] turned [degrees] around the wheel, tone untouched — see [storyHue]. */
 private fun rotated(color: Int, degrees: Float): Int {
     if (degrees == 0f) return color
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(color, hsl)
+    hsl[0] = (hsl[0] + degrees) % 360f
+    return ColorUtils.HSLToColor(hsl)
+}
+
+private fun tuned(color: Int): Int {
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(color, hsl)
+    hsl[1] = (hsl[1] * 1.35f).coerceAtMost(1f)
+    hsl[2] = hsl[2].coerceIn(0.28f, 0.58f)
+    return ColorUtils.HSLToColor(hsl)
+}
+
+private fun dimmed(color: Int): Int {
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(color, hsl)
+    hsl[2] = 0.10f
+    return ColorUtils.HSLToColor(hsl)
+}
+
+// ── Bands ───────────────────────────────────────────────────────────────────
+
+private fun drawHeader(
+    canvas: Canvas,
+    context: Context,
+    type: Fonts,
+    summary: ReplaySummary,
+    holder: String,
+    memberSince: String?,
+): Float {
+    val label = summary.label
+    val title = if (label.length == 4 && label.all { it.isDigit() }) {
+        "Replay'${label.takeLast(2)}"
+    } else {
+        "Replay · $label"
+    }
+    canvas.drawText(title, MARGIN, 132f, type.heading(46f, 0xFFFFFFFF.toInt()))
+    val brand = type.heading(46f, 0xE6FFFFFF.toInt()).apply {
+        textAlign = Paint.Align.RIGHT
+    }
+    canvas.drawText("YZ Music", POSTER_W - MARGIN, 132f, brand)
+    // The mark, to the left of the word, exactly as the story header and the
+    // card carry it. Without it the one artefact of this app that ends up in
+    // somebody else's chat was the only place the logo didn't appear.
+    val wordWidth = brand.measureText("YZ Music")
+    drawLogo(canvas, context, POSTER_W - MARGIN - wordWidth - LOGO_GAP, 132f)
+
+    val credit = listOfNotNull(
+        holder.ifBlank { DEFAULT_HOLDER },
+        memberSince?.let { "member since $it" },
+    ).joinToString(" · ")
+    canvas.drawText(credit.uppercase(Locale.ROOT), MARGIN, 182f, type.label(24f, 0x8CFFFFFF.toInt()))
+    return 300f
+}
+
+private fun drawTotals(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float): Float {
+    canvas.drawText(
+        formatMinutes(summary.totalMs),
+        MARGIN,
+        top + 120f,
+        type.heading(148f, Color.WHITE),
+    )
+    canvas.drawText(
+        "MINUTES LISTENED",
+        MARGIN,
+        top + 176f,
+        type.label(30f, 0xB3FFFFFF.toInt(), tracking = 0.14f),
+    )
+    canvas.drawText(
+        "${countOf(summary.totalPlays, "play")} · " +
+            "${countOf(summary.distinctSongs, "song")} · " +
+            countOf(summary.distinctArtists, "artist"),
+        MARGIN,
+        top + 232f,
+        type.body(30f, 0x99FFFFFF.toInt()),
+    )
+    return top + 320f
+}
+
+/**
+ * The two charts side by side.
+ *
+ * Songs on the left because that is what people go looking for first, and
+ * artists on the right as circles — the one distinction that needs no heading,
+ * since every music app on the device makes it.
+ */
+private fun drawColumns(
+    canvas: Canvas,
+    type: Fonts,
+    songs: List<ReplayRow>,
+    artists: List<ReplayRow>,
+    covers: Map<String, Bitmap?>,
+    top: Float,
+): Float {
+    val columnWidth = (POSTER_W - MARGIN * 2 - COLUMN_GAP) / 2f
+    val right = MARGIN + columnWidth + COLUMN_GAP
+
+    canvas.drawText("TOP SONGS", MARGIN, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
+    canvas.drawText("TOP ARTISTS", right, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
+
+    val rows = maxOf(songs.size, artists.size)
+    var y = top + 54f
+    repeat(rows) { index ->
+        songs.getOrNull(index)?.let { drawRow(canvas, type, it, covers, MARGIN, y, columnWidth, false) }
+        artists.getOrNull(index)?.let { drawRow(canvas, type, it, covers, right, y, columnWidth, true) }
+        y += ROW_HEIGHT
+    }
+    return y + 40f
+}
+
+private fun drawRow(
+    canvas: Canvas,
+    type: Fonts,
+    row: ReplayRow,
+    covers: Map<String, Bitmap?>,
+    x: Float,
+    y: Float,
+    width: Float,
+    circular: Boolean,
+) {
+    canvas.drawText(
+        row.rank.toString(),
+        x,
+        y + ART * 0.68f,
+        type.heading(34f, if (row.rank == 1) ACCENT else 0x73FFFFFF),
+    )
+    val artX = x + 44f
+    val art = row.artworkUrl?.let { covers[it] }
+    drawArtwork(canvas, art, row.title, artX, y, ART, circular)
+
+    val textX = artX + ART + 20f
+    val textWidth = width - (textX - x)
+    val title = type.body(30f, Color.WHITE, bold = true)
+    canvas.drawText(ellipsised(row.title, title, textWidth), textX, y + 36f, title)
