@@ -148,3 +148,24 @@ fun ReplayCreditCard(
                     painter = painterResource(R.drawable.ic_logo),
                     contentDescription = null,
                     tint = Color.White,
+                    modifier = Modifier.size(width = 34.dp, height = 22.dp),
+                )
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontSize = 27.sp,
+                    lineHeight = 30.sp,
+                    fontWeight = FontWeight.W800,
+                    brush = PolishedInk,
+                    shadow = EmbossShadow,
+                ),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = label.uppercase(Locale.ROOT),
+                style = MaterialTheme.typography.labelSmall,
