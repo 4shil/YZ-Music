@@ -169,3 +169,24 @@ fun ReplayCreditCard(
             Text(
                 text = label.uppercase(Locale.ROOT),
                 style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.W700,
+                letterSpacing = 1.8.sp,
+                color = Color.White.copy(alpha = 0.65f),
+            )
+
+            // Weighted either side rather than pinned to the foot, so the figure
+            // sits where a card's number sits — across the middle — instead of
+            // leaving the whole upper half of a full-width card empty.
+            Spacer(Modifier.weight(0.85f))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f)) {
+                    Embossed(
+                        text = holder.ifBlank { DEFAULT_HOLDER }.uppercase(Locale.ROOT),
+                        size = 13.sp,
+                    )
+                    if (detail != null) {
+                        Text(
+                            text = detail,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.6f),
+                            maxLines = 1,
