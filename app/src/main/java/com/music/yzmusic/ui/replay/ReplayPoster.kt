@@ -282,3 +282,68 @@ private fun drawCollage(
  * instead of derived from a layout.
  */
 private fun drawBackdrop(canvas: Canvas, lead: Bitmap?, hue: Float) {
+    val colors = paletteOf(lead).map { rotated(it, hue) }
+    canvas.drawColor(dimmed(colors.first()))
+
+    val anchors = listOf(
+        0.20f to 0.16f,
+        0.84f to 0.22f,
+        0.76f to 0.66f,
+        0.18f to 0.78f,
+    )
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    colors.forEachIndexed { index, color ->
+        val (fx, fy) = anchors[index]
+        val cx = POSTER_W * fx
+        val cy = POSTER_H * fy
+        val radius = POSTER_W * 0.95f
+        paint.shader = RadialGradient(
+            cx,
+            cy,
+            radius,
+            intArrayOf(
+                ColorUtils.setAlphaComponent(color, 210),
+                ColorUtils.setAlphaComponent(color, 0),
+            ),
+            floatArrayOf(0f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        canvas.drawCircle(cx, cy, radius, paint)
+    }
+    paint.shader = null
+
+    // Ink, weighted to the foot where the smaller type is.
+    paint.shader = android.graphics.LinearGradient(
+        0f,
+        0f,
+        0f,
+        POSTER_H.toFloat(),
+        intArrayOf(0x8C000000.toInt(), 0x59000000, 0xCC000000.toInt()),
+        floatArrayOf(0f, 0.42f, 1f),
+        Shader.TileMode.CLAMP,
+    )
+    canvas.drawRect(0f, 0f, POSTER_W.toFloat(), POSTER_H.toFloat(), paint)
+    paint.shader = null
+}
+
+/**
+ * Four colours off the sleeve, saturated and held to a mid lightness so any
+ * artwork yields a rich backdrop rather than a muddy or a blown-out one — the
+ * same treatment `MeshGradient` gives its own palette, restated here because
+ * this runs nowhere near a composition.
+ */
+private fun paletteOf(bitmap: Bitmap?): List<Int> {
+    val fallback = listOf(0xFF3A1C71.toInt(), 0xFFD76D77.toInt(), 0xFF2B5876.toInt(), 0xFFFFAF7B.toInt())
+    val source = bitmap ?: return fallback
+    val swatches = runCatching {
+        Palette.from(source).maximumColorCount(24).generate().swatches
+            .sortedByDescending { it.population }
+            .map { it.rgb }
+    }.getOrNull().orEmpty()
+    if (swatches.isEmpty()) return fallback
+    return (swatches + fallback).take(4).map(::tuned)
+}
+
+/** [color] turned [degrees] around the wheel, tone untouched — see [storyHue]. */
+private fun rotated(color: Int, degrees: Float): Int {
+    if (degrees == 0f) return color
