@@ -232,3 +232,24 @@ fun ReplayCreditCard(
 @Composable
 private fun Embossed(text: String, size: TextUnit) {
     Text(
+        text = text,
+        style = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.W600,
+            fontSize = size,
+            letterSpacing = 1.6.sp,
+            brush = PolishedInk,
+            shadow = EmbossShadow,
+        ),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/**
+ * A rank badge. Number one is the accent; the rest are quiet, because a chart
+ * where every position shouts has no first place.
+ */
+@Composable
+fun RankBadge(rank: Int, accent: Color, modifier: Modifier = Modifier) {
+    Text(
