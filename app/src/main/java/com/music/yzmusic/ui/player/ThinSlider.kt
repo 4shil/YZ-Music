@@ -67,3 +67,27 @@ fun ThinSlider(
     markerColor: Color = Color.White.copy(alpha = 0.5f),
 ) {
     var dragging by remember { mutableStateOf(false) }
+    val height by animateDpAsState(
+        targetValue = if (dragging) activeHeight else idleHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "sliderHeight",
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            // Generous invisible touch target — the visible bar is only ~7dp.
+            .height(activeHeight + 22.dp)
+            // One gesture loop for both taps and drags. Two separate detectors
+            // — a drag one plus a tap one — meant taps never landed: the drag
+            // detector took the pointer and a tap has no drag to report.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    dragging = true
+                    onValueChange((down.position.x / size.width).coerceIn(0f, 1f))
+
+                    while (true) {
