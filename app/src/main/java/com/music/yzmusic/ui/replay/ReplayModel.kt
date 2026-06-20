@@ -35,3 +35,26 @@ import java.util.Locale
 class ReplayState(
     val period: ReplayPeriod,
     val summary: ReplaySummary?,
+    val loading: Boolean,
+    /**
+     * `MM/YY` of the first month this device recorded anything, for the card.
+     *
+     * Deliberately all-time rather than the open period's own first month: a
+     * card that says "member since" has to mean since you started, and reading
+     * it off the period would have it announce a new membership every time the
+     * chips were switched to This month.
+     */
+    val memberSince: String?,
+)
+
+/**
+ * @param active whether the Replay is open in any of its three forms — the
+ *   page, the stories, the share sheet. The state is hoisted to the app so all
+ *   three read one set of numbers, and this is what stops that hoisting from
+ *   costing a file merge on every cold start for a page most launches never
+ *   open. It also means reopening Replay re-reads: whatever has been played
+ *   since is on it.
+ */
+@Composable
+fun rememberReplayState(active: Boolean): Pair<ReplayState, (ReplayPeriod) -> Unit> {
+    var period by rememberSaveable { mutableStateOf(ReplayPeriod.THIS_YEAR) }
