@@ -339,3 +339,61 @@ fun ReplaySummary.genreRows(limit: Int): List<ReplayRow> =
 data class ReplayHeroCard(
     val label: String,
     val value: String,
+    val detail: String?,
+    val artworkUrl: String?,
+    val page: ReplayStoryPage,
+)
+
+/**
+ * The four headline facts, in the order they are dealt.
+ *
+ * Minutes leads because it is the one figure that needs no context to mean
+ * something. A category with nothing in it is left out rather than shown empty:
+ * a Replay of loose singles has no album chart, and a card reading "—" is worse
+ * than three cards.
+ */
+fun ReplaySummary.cards(): List<ReplayHeroCard> = buildList {
+    add(
+        ReplayHeroCard(
+            label = "Minutes listened",
+            value = formatMinutes(totalMs),
+            detail = "${countOf(totalPlays, "play")} · $label",
+            artworkUrl = songs.firstOrNull()?.song?.thumbnailUrl,
+            page = ReplayStoryPage.MINUTES,
+        ),
+    )
+    artists.firstOrNull()?.let {
+        add(
+            ReplayHeroCard(
+                label = "Top artist",
+                value = it.title,
+                detail = "${formatListening(it.ms)} · ${countOf(it.plays, "play")}",
+                artworkUrl = it.artworkUrl,
+                page = ReplayStoryPage.ARTISTS,
+            ),
+        )
+    }
+    songs.firstOrNull()?.let {
+        add(
+            ReplayHeroCard(
+                label = "Top song",
+                value = it.song.title,
+                detail = "${it.song.artist} · ${countOf(it.plays, "play")}",
+                artworkUrl = it.song.thumbnailUrl,
+                page = ReplayStoryPage.SONGS,
+            ),
+        )
+    }
+    albums.firstOrNull()?.let {
+        add(
+            ReplayHeroCard(
+                label = "Top album",
+                value = it.title,
+                detail = listOfNotNull(it.subtitle, formatListening(it.ms)).joinToString(" · "),
+                artworkUrl = it.artworkUrl,
+                page = ReplayStoryPage.ALBUMS,
+            ),
+        )
+    }
+}
+
