@@ -272,3 +272,70 @@ data class ReplayRow(
     val title: String,
     val subtitle: String?,
     val artworkUrl: String?,
+    val ms: Long,
+    val plays: Int,
+)
+
+fun ReplaySummary.songRows(limit: Int): List<ReplayRow> =
+    songs.take(limit).mapIndexed { index, entry ->
+        ReplayRow(
+            key = entry.song.videoId,
+            rank = index + 1,
+            title = entry.song.title,
+            subtitle = entry.song.artist.takeIf { it.isNotBlank() },
+            artworkUrl = entry.song.thumbnailUrl,
+            ms = entry.ms,
+            plays = entry.plays,
+        )
+    }
+
+fun ReplaySummary.artistRows(limit: Int): List<ReplayRow> =
+    artists.take(limit).mapIndexed { index, entry ->
+        ReplayRow(
+            key = entry.title,
+            rank = index + 1,
+            title = entry.title,
+            subtitle = null,
+            artworkUrl = entry.artworkUrl,
+            ms = entry.ms,
+            plays = entry.plays,
+        )
+    }
+
+fun ReplaySummary.albumRows(limit: Int): List<ReplayRow> =
+    albums.take(limit).mapIndexed { index, entry ->
+        ReplayRow(
+            key = entry.title + "|" + entry.subtitle.orEmpty(),
+            rank = index + 1,
+            title = entry.title,
+            subtitle = entry.subtitle,
+            artworkUrl = entry.artworkUrl,
+            ms = entry.ms,
+            plays = entry.plays,
+        )
+    }
+
+/**
+ * Genres, with the artwork deliberately dropped.
+ *
+ * The cover of whichever artist happened to lead the genre is not a picture of
+ * the genre, and putting it there makes a row of five look like five artists
+ * mislabelled. [com.music.yzmusic.ui.replay.InitialTile] stands in instead.
+ */
+fun ReplaySummary.genreRows(limit: Int): List<ReplayRow> =
+    genres.take(limit).mapIndexed { index, entry ->
+        ReplayRow(
+            key = entry.title,
+            rank = index + 1,
+            title = entry.title,
+            subtitle = null,
+            artworkUrl = null,
+            ms = entry.ms,
+            plays = entry.plays,
+        )
+    }
+
+/** One of the cards along the top of the page. */
+data class ReplayHeroCard(
+    val label: String,
+    val value: String,
