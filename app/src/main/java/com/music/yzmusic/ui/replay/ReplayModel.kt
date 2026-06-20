@@ -115,3 +115,57 @@ private fun runs(vararg parts: Pair<String, Boolean>): List<HeadlineRun> =
     parts.map { HeadlineRun(it.first, it.second) }
 
 /** The sentence at the top of [page]. */
+fun ReplaySummary.storyHeadline(page: ReplayStoryPage): List<HeadlineRun> = when (page) {
+    ReplayStoryPage.INTRO -> runs(
+        "This is your " to false,
+        "Replay" to true,
+        " — the year in music you actually played." to false,
+    )
+    ReplayStoryPage.MINUTES -> runs(
+        "You listened to " to false,
+        "${formatMinutes(totalMs)} minutes" to true,
+        " of music." to false,
+    )
+    ReplayStoryPage.SONGS -> runs(
+        "You played " to false,
+        countOf(totalPlays, "song") to true,
+        ", one was your anthem." to false,
+    )
+    ReplayStoryPage.ARTISTS -> runs(
+        "There was one " to false,
+        "artist" to true,
+        " you never got tired of." to false,
+    )
+    ReplayStoryPage.ALBUMS -> runs(
+        "One " to false,
+        "album" to true,
+        " you kept coming back to." to false,
+    )
+    ReplayStoryPage.GENRES -> runs(
+        "There was one " to false,
+        "genre" to true,
+        " you came back to again and again." to false,
+    )
+    ReplayStoryPage.HABITS -> runs(
+        "You got through " to false,
+        countOf(distinctSongs, "song") to true,
+        " by " to false,
+        countOf(distinctArtists, "artist") to true,
+        "." to false,
+    )
+    ReplayStoryPage.SUMMARY -> runs("That was " to false, label to true, "." to false)
+}
+
+/**
+ * Which cover a card is washed in.
+ *
+ * The three cards that are *about* something take that thing's artwork. The rest
+ * walk a pool of everything on the Replay, so a run of eight cards is lit by
+ * eight different records rather than by the top song eight times.
+ */
+fun ReplaySummary.storyArtwork(page: ReplayStoryPage): String? {
+    val pool = (
+        songs.map { it.song.thumbnailUrl } +
+            artists.map { it.artworkUrl } +
+            albums.map { it.artworkUrl }
+        ).filterNotNull().distinct()
