@@ -184,3 +184,101 @@ private fun drawLeaderboard(
         drawArtwork(canvas, row.artworkUrl?.let { covers[it] }, row.title, artX, rowY, 108f, circular)
         val name = type.body(48f, Color.WHITE, bold = true)
         val nameX = artX + 108f + 28f
+        val stat = type.body(38f, 0x80FFFFFF.toInt())
+        val statWidth = stat.measureText(formatListening(row.ms))
+        canvas.drawText(
+            ellipsised(row.title, name, POSTER_W - MARGIN - nameX - statWidth - 32f),
+            nameX,
+            rowY + 72f,
+            name,
+        )
+        stat.textAlign = Paint.Align.RIGHT
+        canvas.drawText(formatListening(row.ms), POSTER_W - MARGIN, rowY + 72f, stat)
+        rowY += 148f
+    }
+}
+
+/** The genre card: one word, big, then the rest as a ranked list. */
+private fun drawBigList(canvas: Canvas, type: Fonts, rows: List<ReplayRow>, top: Float) {
+    val lead = rows.firstOrNull() ?: return
+    val word = type.heading(150f, Color.WHITE)
+    canvas.drawText(ellipsised(lead.title, word, CONTENT_W), MARGIN, top + 120f, word)
+    canvas.drawText(formatListening(lead.ms), MARGIN, top + 186f, type.body(46f, 0x99FFFFFF.toInt()))
+
+    var y = top + 300f
+    rows.drop(1).forEach { row ->
+        canvas.drawText(row.rank.toString(), MARGIN, y, type.heading(48f, 0x73FFFFFF))
+        val name = type.body(52f, Color.WHITE, bold = true)
+        canvas.drawText(row.title, MARGIN + 80f, y, name)
+        val stat = type.body(38f, 0x80FFFFFF.toInt()).apply { textAlign = Paint.Align.RIGHT }
+        canvas.drawText(formatListening(row.ms), POSTER_W - MARGIN, y, stat)
+        y += 106f
+    }
+}
+
+private fun drawHabits(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float) {
+    var y = top + 40f
+    fun stat(value: String, label: String) {
+        canvas.drawText(value, MARGIN, y, type.heading(84f, Color.WHITE))
+        canvas.drawText(label, MARGIN, y + 56f, type.body(42f, 0x99FFFFFF.toInt()))
+        y += 176f
+    }
+    if (summary.distinctAlbums > 0) {
+        stat(grouped(summary.distinctAlbums.toLong()), "different albums")
+    }
+    summary.busiestDay?.let {
+        stat(formatDay(it), "your biggest day — ${formatListening(summary.busiestDayMs)}")
+    }
+    summary.peakHour?.let { stat(formatHour(it), "when you listen most") }
+}
+
+private fun drawRecap(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float) {
+    var y = top + 40f
+    fun line(label: String, value: String) {
+        canvas.drawText(label, MARGIN, y, type.body(42f, 0x80FFFFFF.toInt()))
+        val v = type.body(52f, Color.WHITE, bold = true)
+        canvas.drawText(ellipsised(value, v, CONTENT_W - 320f), MARGIN + 320f, y, v)
+        y += 96f
+    }
+    line("Minutes", formatMinutes(summary.totalMs))
+    summary.songs.firstOrNull()?.let { line("Top song", it.song.title) }
+    summary.artists.firstOrNull()?.let { line("Top artist", it.title) }
+    summary.albums.firstOrNull()?.let { line("Top album", it.title) }
+    summary.genres.firstOrNull()?.let { line("Top genre", it.title) }
+}
+
+/** The scatter of covers the opening cards are built around. */
+private fun drawCollage(
+    canvas: Canvas,
+    summary: ReplaySummary,
+    covers: Map<String, Bitmap?>,
+    top: Float,
+) {
+    val squares = summary.songs.mapNotNull { it.song.thumbnailUrl }.distinct().take(3)
+    val faces = summary.artists.mapNotNull { it.artworkUrl }.distinct()
+        .filterNot { it in squares }.take(3)
+    // Fractions of the content box, so the pile keeps its shape at any size.
+    val squareAt = listOf(Triple(0.22f, 0.30f, 500f), Triple(0.02f, 0.06f, 260f), Triple(0.66f, 0.00f, 215f))
+    val faceAt = listOf(Triple(0.00f, 0.62f, 185f), Triple(0.72f, 0.32f, 225f), Triple(0.46f, 0.76f, 200f))
+    val height = 900f
+    squares.forEachIndexed { index, url ->
+        val (fx, fy, size) = squareAt[index]
+        drawArtwork(canvas, covers[url], "", MARGIN + CONTENT_W * fx, top + height * fy, size, false)
+    }
+    faces.forEachIndexed { index, url ->
+        val (fx, fy, size) = faceAt[index]
+        drawArtwork(canvas, covers[url], "", MARGIN + CONTENT_W * fx, top + height * fy, size, true)
+    }
+}
+
+// ── Background ──────────────────────────────────────────────────────────────
+
+/**
+ * The mesh, by hand.
+ *
+ * Four wide radial gradients off the leading sleeve's own colours, laid over a
+ * dark base and then flattened under a vertical scrim — the same recipe the
+ * player's backdrop uses, at a size where the radii can simply be written down
+ * instead of derived from a layout.
+ */
+private fun drawBackdrop(canvas: Canvas, lead: Bitmap?, hue: Float) {
