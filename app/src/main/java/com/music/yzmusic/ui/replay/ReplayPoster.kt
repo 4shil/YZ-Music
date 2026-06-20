@@ -150,3 +150,86 @@ private fun drawLeaderboard(
     top: Float,
     circular: Boolean,
 ) {
+    val lead = rows.firstOrNull() ?: return
+    val hero = 348f
+    drawArtwork(canvas, lead.artworkUrl?.let { covers[it] }, lead.title, MARGIN, top, hero, circular)
+
+    val textX = MARGIN + hero + 48f
+    val textWidth = POSTER_W - MARGIN - textX
+    val title = type.heading(78f, Color.WHITE)
+    canvas.drawText(ellipsised(lead.title, title, textWidth), textX, top + 86f, title)
+    var y = top + 86f
+    lead.subtitle?.let {
+        val sub = type.body(50f, 0xB3FFFFFF.toInt())
+        y += 62f
+        canvas.drawText(ellipsised(it, sub, textWidth), textX, y, sub)
+    }
+    val stats = type.body(44f, 0x8CFFFFFF.toInt())
+    canvas.drawText(
+        "${formatListening(lead.ms)} · ${countOf(lead.plays, "play")}",
+        textX,
+        y + 62f,
+        stats,
+    )
+
+    var rowY = top + hero + 90f
+    rows.drop(1).forEach { row ->
+        canvas.drawText(
+            row.rank.toString(),
+            MARGIN,
+            rowY + 72f,
+            type.heading(44f, 0x73FFFFFF),
+        )
+        val artX = MARGIN + 62f
+        drawArtwork(canvas, row.artworkUrl?.let { covers[it] }, row.title, artX, rowY, 108f, circular)
+        val name = type.body(48f, Color.WHITE, bold = true)
+        val nameX = artX + 108f + 28f
+        val stat = type.body(38f, 0x80FFFFFF.toInt())
+        val statWidth = stat.measureText(formatListening(row.ms))
+        canvas.drawText(
+            ellipsised(row.title, name, POSTER_W - MARGIN - nameX - statWidth - 32f),
+            nameX,
+            rowY + 72f,
+            name,
+        )
+        stat.textAlign = Paint.Align.RIGHT
+        canvas.drawText(formatListening(row.ms), POSTER_W - MARGIN, rowY + 72f, stat)
+        rowY += 148f
+    }
+}
+
+/** The genre card: one word, big, then the rest as a ranked list. */
+private fun drawBigList(canvas: Canvas, type: Fonts, rows: List<ReplayRow>, top: Float) {
+    val lead = rows.firstOrNull() ?: return
+    val word = type.heading(150f, Color.WHITE)
+    canvas.drawText(ellipsised(lead.title, word, CONTENT_W), MARGIN, top + 120f, word)
+    canvas.drawText(formatListening(lead.ms), MARGIN, top + 186f, type.body(46f, 0x99FFFFFF.toInt()))
+
+    var y = top + 300f
+    rows.drop(1).forEach { row ->
+        canvas.drawText(row.rank.toString(), MARGIN, y, type.heading(48f, 0x73FFFFFF))
+        val name = type.body(52f, Color.WHITE, bold = true)
+        canvas.drawText(row.title, MARGIN + 80f, y, name)
+        val stat = type.body(38f, 0x80FFFFFF.toInt()).apply { textAlign = Paint.Align.RIGHT }
+        canvas.drawText(formatListening(row.ms), POSTER_W - MARGIN, y, stat)
+        y += 106f
+    }
+}
+
+private fun drawHabits(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float) {
+    var y = top + 40f
+    fun stat(value: String, label: String) {
+        canvas.drawText(value, MARGIN, y, type.heading(84f, Color.WHITE))
+        canvas.drawText(label, MARGIN, y + 56f, type.body(42f, 0x99FFFFFF.toInt()))
+        y += 176f
+    }
+    if (summary.distinctAlbums > 0) {
+        stat(grouped(summary.distinctAlbums.toLong()), "different albums")
+    }
+    summary.busiestDay?.let {
+        stat(formatDay(it), "your biggest day — ${formatListening(summary.busiestDayMs)}")
+    }
+    summary.peakHour?.let { stat(formatHour(it), "when you listen most") }
+}
+
+private fun drawRecap(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float) {
