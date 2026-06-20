@@ -114,3 +114,11 @@ fun ThinSlider(
                 .fillMaxWidth()
                 .height(height),
         ) {
+            val radius = CornerRadius(size.height / 2f)
+            drawRoundRect(color = inactiveColor, cornerRadius = radius)
+            // Between the two track colours, and drawn *under* the played fill:
+            // once the playhead reaches the window the transition is no longer
+            // upcoming, and the ordinary progress colour taking it over is what
+            // says so.
+            transitionWindow?.let { window ->
+                val from = size.width * window.start.coerceIn(0f, 1f)
