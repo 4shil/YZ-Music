@@ -246,3 +246,29 @@ fun formatHour(hour: Int): String = when (hour) {
 }
 
 /** `2026-08-14` as "14 August". */
+fun formatDay(iso: String): String = runCatching {
+    LocalDate.parse(iso).format(DateTimeFormatter.ofPattern("d MMMM", Locale.getDefault()))
+}.getOrDefault(iso)
+
+/** The plural of [noun] for [count], and the count with it. */
+fun countOf(count: Int, noun: String): String =
+    "${grouped(count.toLong())} $noun" + if (count == 1) "" else "s"
+
+// ── Rows and cards ──────────────────────────────────────────────────────────
+
+/**
+ * One line of one chart, with the four categories flattened onto a common
+ * shape.
+ *
+ * Songs, artists, albums and genres are unlike enough in the data layer to be
+ * kept apart there and alike enough on screen to be drawn once. [rank] is
+ * carried on the row rather than derived from its index because the same row is
+ * drawn in three places — the page, a story, the shared poster — and only one of
+ * them has an index to hand.
+ */
+data class ReplayRow(
+    val key: String,
+    val rank: Int,
+    val title: String,
+    val subtitle: String?,
+    val artworkUrl: String?,
