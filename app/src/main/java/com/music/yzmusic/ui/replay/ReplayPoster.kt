@@ -482,3 +482,41 @@ private fun drawRow(
     val textWidth = width - (textX - x)
     val title = type.body(30f, Color.WHITE, bold = true)
     canvas.drawText(ellipsised(row.title, title, textWidth), textX, y + 36f, title)
+    val sub = type.body(25f, 0x99FFFFFF.toInt())
+    val detail = listOfNotNull(row.subtitle, formatListening(row.ms)).joinToString(" · ")
+    canvas.drawText(ellipsised(detail, sub, textWidth), textX, y + 72f, sub)
+}
+
+private fun drawAlbums(
+    canvas: Canvas,
+    type: Fonts,
+    albums: List<ReplayRow>,
+    covers: Map<String, Bitmap?>,
+    top: Float,
+): Float {
+    if (albums.isEmpty()) return top
+    canvas.drawText("TOP ALBUMS", MARGIN, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
+    val size = 200f
+    val gap = (POSTER_W - MARGIN * 2 - size * POSTER_ALBUMS) / (POSTER_ALBUMS - 1)
+    val y = top + 40f
+    albums.take(POSTER_ALBUMS).forEachIndexed { index, album ->
+        val x = MARGIN + index * (size + gap)
+        drawArtwork(canvas, album.artworkUrl?.let { covers[it] }, album.title, x, y, size, false)
+        val name = type.body(25f, Color.WHITE, bold = true)
+        canvas.drawText(ellipsised(album.title, name, size), x, y + size + 38f, name)
+        val sub = type.body(22f, 0x8CFFFFFF.toInt())
+        canvas.drawText(
+            ellipsised(album.subtitle ?: formatListening(album.ms), sub, size),
+            x,
+            y + size + 70f,
+            sub,
+        )
+    }
+    return y + size + 130f
+}
+
+private fun drawGenres(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float) {
+    val genres = summary.genreRows(POSTER_GENRES)
+    if (genres.isEmpty()) return
+    canvas.drawText("TOP GENRES", MARGIN, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
+    val paint = type.body(32f, Color.WHITE, bold = true)
