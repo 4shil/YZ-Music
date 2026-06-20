@@ -232,3 +232,45 @@ fun ReplayCreditCard(
 @Composable
 private fun Embossed(text: String, size: TextUnit) {
     Text(
+        text = text,
+        style = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.W600,
+            fontSize = size,
+            letterSpacing = 1.6.sp,
+            brush = PolishedInk,
+            shadow = EmbossShadow,
+        ),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/**
+ * A rank badge. Number one is the accent; the rest are quiet, because a chart
+ * where every position shouts has no first place.
+ */
+@Composable
+fun RankBadge(rank: Int, accent: Color, modifier: Modifier = Modifier) {
+    Text(
+        text = rank.toString(),
+        style = if (rank == 1) {
+            MaterialTheme.typography.titleLarge
+        } else {
+            MaterialTheme.typography.titleMedium
+        },
+        fontWeight = FontWeight.W800,
+        color = if (rank == 1) accent else Color.White.copy(alpha = 0.45f),
+        modifier = modifier.width(28.dp),
+    )
+}
+
+/**
+ * A stand-in cover for a row that has no artwork — a genre, which is a word
+ * rather than a release. Its initial on a colour derived from the word itself,
+ * so the same genre is the same colour every time the page is opened.
+ */
+@Composable
+fun InitialTile(text: String, size: Dp, shape: Shape) {
+    val hue = (text.hashCode().toFloat() % 360f + 360f) % 360f
+    val color = Color.hsl(hue, 0.55f, 0.45f)
