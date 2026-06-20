@@ -274,3 +274,38 @@ fun RankBadge(rank: Int, accent: Color, modifier: Modifier = Modifier) {
 fun InitialTile(text: String, size: Dp, shape: Shape) {
     val hue = (text.hashCode().toFloat() % 360f + 360f) % 360f
     val color = Color.hsl(hue, 0.55f, 0.45f)
+    Box(
+        Modifier
+            .size(size)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(color, color.copy(alpha = 0.55f)))),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text.take(1).uppercase(Locale.ROOT),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.W800,
+            color = Color.White,
+        )
+    }
+}
+
+/** The fill on every raised line: bright along the top edge, cooler below. */
+private val PolishedInk = Brush.verticalGradient(
+    listOf(Color(0xFFFFFFFF), Color(0xFFF3F4F8), Color(0xFFC9CCD6)),
+)
+
+/** What makes the fill above read as raised rather than merely pale. */
+private val EmbossShadow = Shadow(
+    color = Color(0x99000000),
+    offset = Offset(0f, 2.5f),
+    blurRadius = 4f,
+)
+
+private val CardShape = RoundedCornerShape(20.dp)
+
+/** Whose card it is when there is no signed-in account to name. */
+const val DEFAULT_HOLDER = "BITCHORD LISTENER"
+
+/** 85.6mm × 54mm, which is what makes the shape read as a card. */
+private const val CARD_RATIO = 1.586f
