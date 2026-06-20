@@ -150,3 +150,37 @@ private fun drawLeaderboard(
     top: Float,
     circular: Boolean,
 ) {
+    val lead = rows.firstOrNull() ?: return
+    val hero = 348f
+    drawArtwork(canvas, lead.artworkUrl?.let { covers[it] }, lead.title, MARGIN, top, hero, circular)
+
+    val textX = MARGIN + hero + 48f
+    val textWidth = POSTER_W - MARGIN - textX
+    val title = type.heading(78f, Color.WHITE)
+    canvas.drawText(ellipsised(lead.title, title, textWidth), textX, top + 86f, title)
+    var y = top + 86f
+    lead.subtitle?.let {
+        val sub = type.body(50f, 0xB3FFFFFF.toInt())
+        y += 62f
+        canvas.drawText(ellipsised(it, sub, textWidth), textX, y, sub)
+    }
+    val stats = type.body(44f, 0x8CFFFFFF.toInt())
+    canvas.drawText(
+        "${formatListening(lead.ms)} · ${countOf(lead.plays, "play")}",
+        textX,
+        y + 62f,
+        stats,
+    )
+
+    var rowY = top + hero + 90f
+    rows.drop(1).forEach { row ->
+        canvas.drawText(
+            row.rank.toString(),
+            MARGIN,
+            rowY + 72f,
+            type.heading(44f, 0x73FFFFFF),
+        )
+        val artX = MARGIN + 62f
+        drawArtwork(canvas, row.artworkUrl?.let { covers[it] }, row.title, artX, rowY, 108f, circular)
+        val name = type.body(48f, Color.WHITE, bold = true)
+        val nameX = artX + 108f + 28f
