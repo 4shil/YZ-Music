@@ -127,3 +127,24 @@ fun ReplayCreditCard(
                 ),
         )
 
+        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp)) {
+            // The two things a card says about itself, at the two corners a card
+            // says them from: what it is on the left, whose it is on the right.
+            // The wordmark that used to sit here is gone — the logo says it, and
+            // saying it twice on an object this small is the difference between
+            // a card and an advert.
+            Row(verticalAlignment = Alignment.Top) {
+                Text(
+                    text = "YOUR LISTENING\nEXPERIENCE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.W700,
+                    letterSpacing = 1.4.sp,
+                    lineHeight = 13.sp,
+                    color = Color.White.copy(alpha = 0.72f),
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(10.dp))
+                Icon(
+                    painter = painterResource(R.drawable.ic_logo),
+                    contentDescription = null,
+                    tint = Color.White,
