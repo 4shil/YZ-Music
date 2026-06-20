@@ -190,3 +190,45 @@ fun ReplayCreditCard(
                             style = MaterialTheme.typography.labelSmall,
                             color = Color.White.copy(alpha = 0.6f),
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (memberSince != null) {
+                    Spacer(Modifier.width(10.dp))
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "MEMBER\nSINCE",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 7.sp,
+                            lineHeight = 8.sp,
+                            letterSpacing = 0.8.sp,
+                            color = Color.White.copy(alpha = 0.55f),
+                            // Both lines to the right edge, not just the block.
+                            // Column alignment places the text *box*; inside it
+                            // the two lines still set from the left, which left
+                            // "MEMBER / SINCE" hanging a few pixels off the date
+                            // under it — the one misalignment on the card that
+                            // catches the eye every time.
+                            textAlign = TextAlign.End,
+                        )
+                        Embossed(text = memberSince, size = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A line pressed into the card rather than printed on it.
+ *
+ * Monospaced and widely tracked because that is what a card embosser produces —
+ * fixed-pitch dies on a fixed-pitch wheel — and it is more of the recognition
+ * than the shadow is. The shadow supplies the rest: dark, offset down, under a
+ * fill that is brightest at the top edge, which is a raised surface lit from
+ * above.
+ */
+@Composable
+private fun Embossed(text: String, size: TextUnit) {
+    Text(
