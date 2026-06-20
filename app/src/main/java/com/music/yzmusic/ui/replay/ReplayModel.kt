@@ -169,3 +169,80 @@ fun ReplaySummary.storyArtwork(page: ReplayStoryPage): String? {
             artists.map { it.artworkUrl } +
             albums.map { it.artworkUrl }
         ).filterNotNull().distinct()
+    val pinned = when (page) {
+        ReplayStoryPage.SONGS -> songs.firstOrNull()?.song?.thumbnailUrl
+        ReplayStoryPage.ARTISTS -> artists.firstOrNull()?.artworkUrl
+        ReplayStoryPage.ALBUMS -> albums.firstOrNull()?.artworkUrl
+        else -> null
+    }
+    if (pinned != null) return pinned
+    if (pool.isEmpty()) return null
+    return pool[page.ordinal % pool.size]
+}
+
+/**
+ * How far a card's palette is turned around the colour wheel.
+ *
+ * The mesh is sampled from artwork, and a Replay is frequently four covers by
+ * two artists with the same art direction — which is a run of eight cards in one
+ * shade of blue. Rotating the hue per card is what makes the story *look* like a
+ * story: every one arrives a different colour, and because only the hue moves,
+ * the saturation and lightness the mesh was tuned for are untouched, so no card
+ * comes out muddy or blown out.
+ *
+ * The steps are irregular rather than an even eighth of the wheel: an even walk
+ * reads as a colour-picker demo, and the gaps here keep neighbours far enough
+ * apart to be obviously different without the run looking mechanical.
+ */
+fun storyHue(page: ReplayStoryPage): Float = when (page) {
+    ReplayStoryPage.INTRO -> 0f
+    ReplayStoryPage.MINUTES -> 40f
+    ReplayStoryPage.SONGS -> 95f
+    ReplayStoryPage.ARTISTS -> 145f
+    ReplayStoryPage.ALBUMS -> 195f
+    ReplayStoryPage.GENRES -> 240f
+    ReplayStoryPage.HABITS -> 285f
+    ReplayStoryPage.SUMMARY -> 325f
+}
+
+/** Which page of the story view something opens onto. */
+enum class ReplayStoryPage {
+    INTRO, MINUTES, ARTISTS, SONGS, ALBUMS, GENRES, HABITS, SUMMARY;
+
+    companion object {
+        val ordered: List<ReplayStoryPage> = entries
+    }
+}
+
+// ── Formatting ──────────────────────────────────────────────────────────────
+
+/**
+ * Listening time, in the largest unit that still says something.
+ *
+ * Minutes up to a day's worth, then hours: "1,284 minutes" is a number people
+ * read as a number, and "21 hours" is one they read as an amount. Past a
+ * thousand hours neither works and it becomes days.
+ */
+fun formatListening(ms: Long): String {
+    val minutes = ms / 60_000
+    return when {
+        minutes < 60 -> "$minutes min"
+        minutes < 1_440 -> "${minutes / 60} hr ${minutes % 60} min"
+        else -> "${grouped(minutes)} min"
+    }
+}
+
+/** The headline figure on the minutes card: always minutes, always grouped. */
+fun formatMinutes(ms: Long): String = grouped(ms / 60_000)
+
+fun grouped(value: Long): String = String.format(Locale.US, "%,d", value)
+
+/** "3 pm", "midnight" — an hour of the day said the way anyone would say it. */
+fun formatHour(hour: Int): String = when (hour) {
+    0 -> "midnight"
+    12 -> "midday"
+    in 1..11 -> "$hour am"
+    else -> "${hour - 12} pm"
+}
+
+/** `2026-08-14` as "14 August". */
