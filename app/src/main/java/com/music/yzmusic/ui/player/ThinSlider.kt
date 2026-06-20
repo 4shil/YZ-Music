@@ -91,3 +91,26 @@ fun ThinSlider(
                     onValueChange((down.position.x / size.width).coerceIn(0f, 1f))
 
                     while (true) {
+                        val event = awaitPointerEvent()
+                        val pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!pointer.pressed) {
+                            pointer.consume()
+                            break
+                        }
+                        if (pointer.positionChanged()) {
+                            onValueChange((pointer.position.x / size.width).coerceIn(0f, 1f))
+                            pointer.consume()
+                        }
+                    }
+
+                    dragging = false
+                    onValueChangeFinished?.invoke()
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(height),
+        ) {
