@@ -58,3 +58,60 @@ class ReplayState(
 @Composable
 fun rememberReplayState(active: Boolean): Pair<ReplayState, (ReplayPeriod) -> Unit> {
     var period by rememberSaveable { mutableStateOf(ReplayPeriod.THIS_YEAR) }
+    var summary by remember { mutableStateOf<ReplaySummary?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var memberSince by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(active) {
+        if (!active) return@LaunchedEffect
+        // A directory listing, so off the composition's thread.
+        memberSince = withContext(Dispatchers.IO) {
+            ListeningStats.months().firstOrNull()?.let {
+                "%02d/%02d".format(Locale.ROOT, it.monthValue, it.year % 100)
+            }
+        }
+    }
+    LaunchedEffect(period, active) {
+        if (!active) return@LaunchedEffect
+        // Only the first read shows a spinner. Switching period must not blank
+        // the charts for the beat it takes to merge the files — that reads as
+        // the page breaking rather than as it answering a different question.
+        loading = summary == null
+        summary = ListeningStats.summary(period)
+        loading = false
+
+        // Artist pictures and pages arrive after the page has been built — see
+        // [ArtistFacts.revision] — so the charts are rebuilt when they do.
+        //
+        // Collected inside the effect rather than as composed state on purpose:
+        // this function is called from the app's root, so a revision held as
+        // state would recompose the whole tree every time a lookup landed, even
+        // with the Replay closed. `collectLatest` gives the debounce for free —
+        // a burst of lookups cancels each pending delay and only the last one
+        // gets as far as a rebuild.
+        ArtistFacts.revision.drop(1).collectLatest {
+            delay(SETTLE_MILLIS)
+            summary = ListeningStats.summary(period)
+        }
+    }
+    return ReplayState(period, summary, loading, memberSince) to
+        { next: ReplayPeriod -> period = next }
+}
+
+/** How long a burst of artist lookups is allowed to settle before a rebuild. */
+private const val SETTLE_MILLIS = 1_200L
+
+/**
+ * One run of a card's headline, and whether it is the emphasised part.
+ *
+ * The sentence lives here rather than in the story that draws it because it is
+ * drawn twice — once on screen and once into the picture the share button
+ * produces — and a card that says something different in the version people
+ * send is worse than no picture at all.
+ */
+data class HeadlineRun(val text: String, val bold: Boolean)
+
+private fun runs(vararg parts: Pair<String, Boolean>): List<HeadlineRun> =
+    parts.map { HeadlineRun(it.first, it.second) }
+
+/** The sentence at the top of [page]. */
