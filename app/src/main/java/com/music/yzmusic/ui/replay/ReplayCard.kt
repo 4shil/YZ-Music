@@ -106,3 +106,24 @@ fun ReplayCreditCard(
             .clip(CardShape)
             .clickable(onClick = onClick),
     ) {
+        MeshGradientBackground(
+            palette = palette,
+            trackKey = artworkUrl ?: label,
+            blurRadius = 34.dp,
+            animated = false,
+        )
+        // Deepened towards the foot, where the embossed lines are: the mesh is
+        // built to be bright and those lines are pale, and without this the
+        // cardholder name lands on whichever blob happened to drift under it.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Black.copy(alpha = 0.18f),
+                        0.55f to Color.Black.copy(alpha = 0.30f),
+                        1.0f to Color.Black.copy(alpha = 0.55f),
+                    ),
+                ),
+        )
+
