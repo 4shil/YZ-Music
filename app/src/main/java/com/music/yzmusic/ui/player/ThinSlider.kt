@@ -175,3 +175,42 @@ fun ThinSlider(
  * unplayed track sits at 0.26, and that is where a white band actually reads.
  */
 @Composable
+private fun MixSheen(height: Dp) {
+    val transition = rememberInfiniteTransition(label = "mixSheen")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            // Long enough to read as a sweep rather than a flicker, and slow
+            // enough not to compete with the music for attention.
+            animation = tween(durationMillis = 500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "mixSheenPhase",
+    )
+    Canvas(
+        Modifier
+            .fillMaxWidth()
+            .height(height),
+    ) {
+        val band = size.width * BAND_FRACTION
+        // Travels from fully off the left edge to fully off the right, so the
+        // highlight enters and leaves rather than materialising mid-bar.
+        val centre = -band + (size.width + band * 2f) * phase
+        drawRoundRect(
+            brush = Brush.linearGradient(
+                colorStops = arrayOf(
+                    0f to Color.Transparent,
+                    0.5f to Color.White.copy(alpha = 0.95f),
+                    1f to Color.Transparent,
+                ),
+                start = Offset(centre - band / 2f, 0f),
+                end = Offset(centre + band / 2f, 0f),
+            ),
+            cornerRadius = CornerRadius(size.height / 2f),
+        )
+    }
+}
+
+/** Width of the travelling highlight, as a fraction of the whole bar. */
+private const val BAND_FRACTION = 0.7f
