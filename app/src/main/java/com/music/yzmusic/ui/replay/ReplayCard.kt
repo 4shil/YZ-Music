@@ -253,3 +253,45 @@ private fun Embossed(text: String, size: TextUnit) {
 @Composable
 fun RankBadge(rank: Int, accent: Color, modifier: Modifier = Modifier) {
     Text(
+        text = rank.toString(),
+        style = if (rank == 1) {
+            MaterialTheme.typography.titleLarge
+        } else {
+            MaterialTheme.typography.titleMedium
+        },
+        fontWeight = FontWeight.W800,
+        color = if (rank == 1) accent else Color.White.copy(alpha = 0.45f),
+        modifier = modifier.width(28.dp),
+    )
+}
+
+/**
+ * A stand-in cover for a row that has no artwork — a genre, which is a word
+ * rather than a release. Its initial on a colour derived from the word itself,
+ * so the same genre is the same colour every time the page is opened.
+ */
+@Composable
+fun InitialTile(text: String, size: Dp, shape: Shape) {
+    val hue = (text.hashCode().toFloat() % 360f + 360f) % 360f
+    val color = Color.hsl(hue, 0.55f, 0.45f)
+    Box(
+        Modifier
+            .size(size)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(color, color.copy(alpha = 0.55f)))),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text.take(1).uppercase(Locale.ROOT),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.W800,
+            color = Color.White,
+        )
+    }
+}
+
+/** The fill on every raised line: bright along the top edge, cooler below. */
+private val PolishedInk = Brush.verticalGradient(
+    listOf(Color(0xFFFFFFFF), Color(0xFFF3F4F8), Color(0xFFC9CCD6)),
+)
+
