@@ -224,3 +224,25 @@ enum class ReplayStoryPage {
  * thousand hours neither works and it becomes days.
  */
 fun formatListening(ms: Long): String {
+    val minutes = ms / 60_000
+    return when {
+        minutes < 60 -> "$minutes min"
+        minutes < 1_440 -> "${minutes / 60} hr ${minutes % 60} min"
+        else -> "${grouped(minutes)} min"
+    }
+}
+
+/** The headline figure on the minutes card: always minutes, always grouped. */
+fun formatMinutes(ms: Long): String = grouped(ms / 60_000)
+
+fun grouped(value: Long): String = String.format(Locale.US, "%,d", value)
+
+/** "3 pm", "midnight" — an hour of the day said the way anyone would say it. */
+fun formatHour(hour: Int): String = when (hour) {
+    0 -> "midnight"
+    12 -> "midday"
+    in 1..11 -> "$hour am"
+    else -> "${hour - 12} pm"
+}
+
+/** `2026-08-14` as "14 August". */
