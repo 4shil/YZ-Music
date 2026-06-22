@@ -161,3 +161,22 @@ fun ReplayShareSheet(
         // Disabled rather than hidden while the poster renders: buttons that
         // appear a second after the sheet does are buttons that get tapped at
         // exactly the moment they move.
+        val ready = poster != null
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ShareAction(
+                label = if (saved) "Saved" else "Save",
+                icon = Icons.Rounded.Download,
+                accent = false,
+                enabled = ready && !saved,
+                modifier = Modifier.weight(1f),
+            ) {
+                val image = poster ?: return@ShareAction
+                scope.launch { saved = saveToGallery(context, image, summary.label) }
+            }
+            ShareAction(
+                label = "Share",
+                icon = Icons.Rounded.IosShare,
+                accent = true,
+                enabled = ready,
+                modifier = Modifier.weight(1f),
+            ) {
