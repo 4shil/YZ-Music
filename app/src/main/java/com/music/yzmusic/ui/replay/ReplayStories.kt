@@ -500,3 +500,77 @@ private fun StoryPage(
  * emphasised one.
  */
 @Composable
+private fun Headline(parts: List<HeadlineRun>) {
+    Text(
+        text = buildAnnotatedString {
+            parts.forEach { run ->
+                withStyle(
+                    SpanStyle(
+                        fontWeight = if (run.bold) FontWeight.W800 else FontWeight.W600,
+                        color = if (run.bold) Color.White else Color.White.copy(alpha = 0.62f),
+                    ),
+                ) { append(run.text) }
+            }
+        },
+        style = MaterialTheme.typography.displayLarge,
+        fontSize = 30.sp,
+        lineHeight = 37.sp,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+// ── The cards ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun ColumnScope.Intro(summary: ReplaySummary, headline: List<HeadlineRun>) {
+    Headline(headline)
+    Spacer(Modifier.weight(1f))
+    ArtworkCollage(summary)
+    Spacer(Modifier.weight(1f))
+    Text(
+        text = "Counted here on your phone. Nothing was sent anywhere to work it out.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = Color.White.copy(alpha = 0.5f),
+    )
+}
+
+@Composable
+private fun ColumnScope.Minutes(summary: ReplaySummary, headline: List<HeadlineRun>) {
+    Headline(headline)
+    Spacer(Modifier.weight(1f))
+    ArtworkCollage(summary)
+    Spacer(Modifier.weight(1f))
+    Text(
+        // "That's 0 hours" is what an unconditional hours line says for the
+        // first afternoon of listening, and it reads as the page failing to
+        // count rather than as a small number. Under an hour, the plays are the
+        // only figure worth restating.
+        text = buildString {
+            if (summary.hours >= 1) {
+                append("That's ${grouped(summary.hours)} hours across ")
+            } else {
+                append("Across ")
+            }
+            append(countOf(summary.totalPlays, "play"))
+            append(".")
+            summary.peakHour?.let { append(" Mostly around ${formatHour(it)}.") }
+        },
+        style = MaterialTheme.typography.bodyLarge,
+        color = Color.White.copy(alpha = 0.62f),
+    )
+}
+
+/**
+ * A number one with its runners-up.
+ *
+ * The same card for songs, artists and albums, because the shape of the fact is
+ * identical in all three and only the noun changes. The ranked four underneath
+ * are the part Apple's version leaves out and the reason this is worth opening
+ * twice: the hero is the answer, the list is the evidence.
+ */
+@Composable
+private fun ColumnScope.Leaderboard(
+    headline: List<HeadlineRun>,
+    rows: List<ReplayRow>,
+    circular: Boolean,
+) {
