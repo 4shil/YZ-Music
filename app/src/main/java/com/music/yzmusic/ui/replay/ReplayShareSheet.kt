@@ -83,3 +83,81 @@ fun ReplayShareSheet(
     val scope = rememberCoroutineScope()
     var poster by remember { mutableStateOf<Bitmap?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(false) }
+
+    LaunchedEffect(summary, page) {
+        poster = runCatching { renderReplayPoster(context, summary, holder, memberSince, page) }
+            .onFailure { failed = true }
+            .getOrNull()
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 20.dp),
+    ) {
+        Text(
+            text = "Share my Replay",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.W800,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+        Text(
+            text = if (page == null) {
+                "One picture with the whole year on it."
+            } else {
+                "The card you were looking at, as a picture."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        // Small enough that the row of apps under it is on screen with it. A
+        // preview that pushes the share targets below the fold is a preview
+        // nobody scrolls past, and the targets are the point of the sheet.
+        Box(
+            Modifier
+                .fillMaxWidth(0.42f)
+                .align(Alignment.CenterHorizontally)
+                .aspectRatio(9f / 16f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            val image = poster
+            when {
+                image != null -> Image(
+                    bitmap = image.asImageBitmap(),
+                    contentDescription = "Your Replay",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                failed -> Text(
+                    text = "Couldn't draw the picture",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                else -> CircularProgressIndicator()
+            }
+        }
+
+        Spacer(Modifier.height(22.dp))
+
+        // Two buttons, not a row of app icons.
+        //
+        // Resolving the apps that accept an image and drawing their launcher
+        // icons was the first version. It looked like a share sheet because it
+        // was imitating one — and the system already has a share sheet, kept up
+        // to date, ordered by what this user actually shares to, and reachable
+        // in one tap. Reimplementing it meant asking the package manager for
+        // every app on the device, loading five icons out of other APKs, and
+        // still showing a worse list than the one Android would have shown.
+        //
+        // Disabled rather than hidden while the poster renders: buttons that
+        // appear a second after the sheet does are buttons that get tapped at
+        // exactly the moment they move.
