@@ -402,3 +402,90 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
+private fun ReplayChartRow(row: ReplayRow, circular: Boolean, onClick: () -> Unit) {
+    val shape = if (circular) CircleShape else RoundedCornerShape(6.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = PAGE_GUTTER + 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RankBadge(row.rank, AccentRed)
+        if (row.artworkUrl != null) {
+            AsyncImage(
+                model = row.artworkUrl.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(48.dp).clip(shape),
+            )
+        } else {
+            InitialTile(row.title, 48.dp, shape)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = row.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.W600,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = listOfNotNull(row.subtitle, formatListening(row.ms))
+                    .joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (row.plays > 0) {
+            Text(
+                text = row.plays.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.45f),
+            )
+        }
+    }
+}
+
+// ── Tail ────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun Habits(summary: ReplaySummary) {
+    Column(Modifier.padding(horizontal = PAGE_GUTTER + 10.dp)) {
+        SectionTitleInline("The shape of it")
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StatTile("Songs", summary.distinctSongs.toString(), Modifier.weight(1f))
+            StatTile("Artists", summary.distinctArtists.toString(), Modifier.weight(1f))
+            StatTile("Albums", summary.distinctAlbums.toString(), Modifier.weight(1f))
+        }
+        summary.peakHour?.let {
+            Spacer(Modifier.height(10.dp))
+            Note("You listen most around ${formatHour(it)}.")
+        }
+        summary.busiestDay?.let {
+            Spacer(Modifier.height(6.dp))
+            Note(
+                "Your biggest day was ${formatDay(it)} — " +
+                    "${formatListening(summary.busiestDayMs)} of it.",
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionTitleInline(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.headlineMedium,
+        fontWeight = FontWeight.W800,
+        color = Color.White,
+        modifier = Modifier.padding(top = 8.dp, bottom = 10.dp),
+    )
+}
+
+@Composable
