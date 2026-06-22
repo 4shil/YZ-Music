@@ -112,3 +112,150 @@ fun ReplayScreen(
     val palette = rememberArtworkColors(leadArtwork)
     val topSongs = stringResource(R.string.top_songs)
     val topArtists = stringResource(R.string.top_artists)
+    val topAlbums = stringResource(R.string.top_albums)
+    val topGenres = stringResource(R.string.top_genres)
+
+    Box(modifier.fillMaxSize()) {
+        MeshGradientBackground(palette = palette, trackKey = leadArtwork, animated = false)
+        // The mesh is built to sit behind a player, where the only thing over it
+        // is a handful of large controls. A page of ranked lists needs a good
+        // deal more separation than that, so most of it is put back under ink.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.Black.copy(alpha = 0.30f),
+                            Color.Black.copy(alpha = 0.72f),
+                            Color.Black.copy(alpha = 0.88f),
+                        ),
+                    ),
+                ),
+        )
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            item("heading") { Heading(state, onPeriodChange) }
+
+            when {
+                state.loading && summary == null -> item("loading") {
+                    Box(Modifier.fillMaxWidth().padding(64.dp), Alignment.Center) {
+                        CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
+                    }
+                }
+                summary == null || summary.isEmpty -> item("empty") { EmptyReplay(state.period) }
+                else -> {
+                    item("cards") {
+                        ReplayCardRow(
+                            cards = summary.cards(),
+                            holder = holder,
+                            memberSince = state.memberSince,
+                            onOpenStory = onOpenStory,
+                        )
+                    }
+                    item("open") {
+                        ReplayActionRow(YZMusicIcons.Play, "Play your Replay") {
+                            onOpenStory(ReplayStoryPage.INTRO)
+                        }
+                    }
+
+                    chart(
+                        key = "songs",
+                        title = topSongs,
+                        rows = summary.songRows(CHART_LENGTH),
+                        onClick = { index ->
+                            summary.songs.getOrNull(index)?.let { onPlaySong(it.song) }
+                        },
+                    )
+                    chart(
+                        key = "artists",
+                        title = topArtists,
+                        rows = summary.artistRows(CHART_LENGTH),
+                        circular = true,
+                        onClick = { index ->
+                            val artist = summary.artists.getOrNull(index) ?: return@chart
+                            onOpenArtist(artist.browseId, artist.title)
+                        },
+                    )
+                    chart(
+                        key = "albums",
+                        title = topAlbums,
+                        rows = summary.albumRows(CHART_LENGTH),
+                        onClick = { index ->
+                            val album = summary.albums.getOrNull(index) ?: return@chart
+                            onOpenAlbum(album.browseId, album.title, album.subtitle, album.artworkUrl)
+                        },
+                    )
+                    if (summary.genres.isNotEmpty()) {
+                        chart(
+                            key = "genres",
+                            title = topGenres,
+                            rows = summary.genreRows(CHART_LENGTH),
+                            onClick = {},
+                        )
+                    } else if (ArtistFacts.genresAvailable) {
+                        item("genres-pending") {
+                            Note(
+                                text = "Genres are still being worked out. They fill in " +
+                                    "as you listen, and the chart appears once there is " +
+                                    "enough to rank.",
+                                modifier = Modifier.padding(horizontal = PAGE_GUTTER + 10.dp),
+                            )
+                        }
+                    }
+
+                    item("habits") { Habits(summary) }
+                    item("share") {
+                        ReplayActionRow(Icons.Rounded.IosShare, "Share my Replay", onShare)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Heading ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun Heading(state: ReplayState, onPeriodChange: (ReplayPeriod) -> Unit) {
+    Column(Modifier.padding(horizontal = PAGE_GUTTER + 10.dp)) {
+        // Clear of the fade under the top bar, which runs a good way past the
+        // bar itself — see [TopFadeBlur]. A release page has its sleeve up here
+        // and is meant to be blurred; this page leads with type, and type read
+        // through a blur reads as a rendering fault.
+        //
+        // Only far enough to reach the weak tail of that fade, not past the
+        // whole of it: the ramp eases out, so almost all of the blur is in its
+        // first third and clearing that is enough to keep the title crisp. The
+        // rest was a screen's worth of nothing above the heading.
+        Spacer(Modifier.height(48.dp))
+        Text(
+            text = "Replay",
+            style = MaterialTheme.typography.displayLarge,
+            fontWeight = FontWeight.W800,
+            color = Color.White,
+        )
+        Text(
+            text = state.summary?.label ?: state.period.chip,
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White.copy(alpha = 0.6f),
+        )
+        Spacer(Modifier.height(14.dp))
+        PeriodPicker(state.period, onPeriodChange)
+        Spacer(Modifier.height(18.dp))
+    }
+}
+
+/**
+ * The three stretches a Replay can cover.
+ *
+ * Months and years rather than a date range, because that is the granularity the
+ * listening is actually kept at — see [com.music.yzmusic.data.stats.ListeningStats].
+ * A "last 30 days" chip would have to be answered from monthly totals, which
+ * would make it a lie for the first thirty days of every month.
+ */
+@Composable
