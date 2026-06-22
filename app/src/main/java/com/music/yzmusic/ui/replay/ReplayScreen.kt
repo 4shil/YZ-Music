@@ -108,3 +108,7 @@ fun ReplayScreen(
     listState: LazyListState = rememberLazyListState(),
 ) {
     val summary = state.summary
+    val leadArtwork = summary?.songs?.firstOrNull()?.song?.thumbnailUrl
+    val palette = rememberArtworkColors(leadArtwork)
+    val topSongs = stringResource(R.string.top_songs)
+    val topArtists = stringResource(R.string.top_artists)
