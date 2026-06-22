@@ -110,3 +110,79 @@ fun ReplayScreen(
     val summary = state.summary
     val leadArtwork = summary?.songs?.firstOrNull()?.song?.thumbnailUrl
     val palette = rememberArtworkColors(leadArtwork)
+    val topSongs = stringResource(R.string.top_songs)
+    val topArtists = stringResource(R.string.top_artists)
+    val topAlbums = stringResource(R.string.top_albums)
+    val topGenres = stringResource(R.string.top_genres)
+
+    Box(modifier.fillMaxSize()) {
+        MeshGradientBackground(palette = palette, trackKey = leadArtwork, animated = false)
+        // The mesh is built to sit behind a player, where the only thing over it
+        // is a handful of large controls. A page of ranked lists needs a good
+        // deal more separation than that, so most of it is put back under ink.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.Black.copy(alpha = 0.30f),
+                            Color.Black.copy(alpha = 0.72f),
+                            Color.Black.copy(alpha = 0.88f),
+                        ),
+                    ),
+                ),
+        )
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            item("heading") { Heading(state, onPeriodChange) }
+
+            when {
+                state.loading && summary == null -> item("loading") {
+                    Box(Modifier.fillMaxWidth().padding(64.dp), Alignment.Center) {
+                        CircularProgressIndicator(color = Color.White.copy(alpha = 0.6f))
+                    }
+                }
+                summary == null || summary.isEmpty -> item("empty") { EmptyReplay(state.period) }
+                else -> {
+                    item("cards") {
+                        ReplayCardRow(
+                            cards = summary.cards(),
+                            holder = holder,
+                            memberSince = state.memberSince,
+                            onOpenStory = onOpenStory,
+                        )
+                    }
+                    item("open") {
+                        ReplayActionRow(YZMusicIcons.Play, "Play your Replay") {
+                            onOpenStory(ReplayStoryPage.INTRO)
+                        }
+                    }
+
+                    chart(
+                        key = "songs",
+                        title = topSongs,
+                        rows = summary.songRows(CHART_LENGTH),
+                        onClick = { index ->
+                            summary.songs.getOrNull(index)?.let { onPlaySong(it.song) }
+                        },
+                    )
+                    chart(
+                        key = "artists",
+                        title = topArtists,
+                        rows = summary.artistRows(CHART_LENGTH),
+                        circular = true,
+                        onClick = { index ->
+                            val artist = summary.artists.getOrNull(index) ?: return@chart
+                            onOpenArtist(artist.browseId, artist.title)
+                        },
+                    )
+                    chart(
+                        key = "albums",
+                        title = topAlbums,
+                        rows = summary.albumRows(CHART_LENGTH),
+                        onClick = { index ->
