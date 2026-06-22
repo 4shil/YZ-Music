@@ -520,3 +520,72 @@ private fun drawGenres(canvas: Canvas, type: Fonts, summary: ReplaySummary, top:
     if (genres.isEmpty()) return
     canvas.drawText("TOP GENRES", MARGIN, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
     val paint = type.body(32f, Color.WHITE, bold = true)
+    val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x26FFFFFF }
+    var x = MARGIN
+    val y = top + 44f
+    genres.forEach { genre ->
+        val width = paint.measureText(genre.title) + 44f
+        if (x + width > POSTER_W - MARGIN) return
+        canvas.drawRoundRect(RectF(x, y, x + width, y + 62f), 31f, 31f, chip)
+        canvas.drawText(genre.title, x + 22f, y + 42f, paint)
+        x += width + 14f
+    }
+}
+
+private fun drawFooter(canvas: Canvas, type: Fonts) {
+    canvas.drawText(
+        "Counted on device with YZ Music",
+        MARGIN,
+        POSTER_H - 64f,
+        type.label(24f, 0x73FFFFFF, tracking = 0.08f),
+    )
+}
+
+// ── Pieces ──────────────────────────────────────────────────────────────────
+
+/**
+ * A cover, cropped square and rounded — or, where one never loaded, the same
+ * lettered stand-in the lists use, so a missing sleeve is a deliberate-looking
+ * tile rather than a hole.
+ */
+private fun drawArtwork(
+    canvas: Canvas,
+    bitmap: Bitmap?,
+    fallback: String,
+    x: Float,
+    y: Float,
+    size: Float,
+    circular: Boolean,
+) {
+    val bounds = RectF(x, y, x + size, y + size)
+    val radius = if (circular) size / 2f else size * 0.10f
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    if (bitmap != null) {
+        val scale = size / minOf(bitmap.width, bitmap.height).toFloat()
+        val matrix = Matrix().apply {
+            setScale(scale, scale)
+            postTranslate(
+                x - (bitmap.width * scale - size) / 2f,
+                y - (bitmap.height * scale - size) / 2f,
+            )
+        }
+        paint.shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            .apply { setLocalMatrix(matrix) }
+        canvas.drawRoundRect(bounds, radius, radius, paint)
+        paint.shader = null
+    } else {
+        val hue = (fallback.hashCode().toFloat() % 360f + 360f) % 360f
+        paint.color = ColorUtils.HSLToColor(floatArrayOf(hue, 0.55f, 0.45f))
+        canvas.drawRoundRect(bounds, radius, radius, paint)
+    }
+}
+
+/**
+ * A card's sentence, wrapped, with the emphasised runs in the heavier face.
+ *
+ * Laid out by hand because a canvas has no notion of a paragraph made of two
+ * typefaces: the runs are broken into words, each word keeps the weight of the
+ * run it came from, and they are placed greedily until the next one would not
+ * fit. Measuring per word rather than per run is what lets a line break in the
+ * middle of the bold part — which every one of these sentences does.
+ */
