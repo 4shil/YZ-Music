@@ -164,3 +164,33 @@ fun ReplayStories(
      *    starting a transition.
      */
     fun goTo(target: Int, animate: Boolean) {
+        val next = target.coerceIn(0, pages.lastIndex)
+        scope.launch {
+            progress.snapTo(0f)
+            if (animate) pagerState.animateScrollToPage(next) else pagerState.scrollToPage(next)
+        }
+    }
+
+    fun step(forward: Boolean) =
+        goTo(pagerState.settledPage + if (forward) 1 else -1, animate = false)
+
+    LaunchedEffect(current) { progress.snapTo(0f) }
+    LaunchedEffect(current, held, paused) {
+        if (held || paused) return@LaunchedEffect
+        if (current >= pages.lastIndex) return@LaunchedEffect
+        // Resumed from where the hold left it rather than restarted, so letting
+        // go doesn't hand back a card that was nearly finished.
+        val remaining = ((1f - progress.value) * PAGE_MILLIS).toInt().coerceAtLeast(0)
+        progress.animateTo(1f, tween(remaining, easing = LinearEasing))
+        // Handed to [goTo] rather than scrolled from here, and that is the whole
+        // fix for a card that stopped three-quarters of the way across on its
+        // own but slid cleanly when tapped. This effect is keyed on the current
+        // page; `animateScrollToPage` flips that key at the halfway mark, which
+        // cancels the effect — and with it the very animation that flipped it.
+        // The pager was left wherever the cancellation caught it. [goTo] runs on
+        // the composition's scope, which the page change has no bearing on.
+        goTo(current + 1, animate = true)
+    }
+
+
+    val page = pages.getOrElse(current) { ReplayStoryPage.INTRO }
