@@ -186,3 +186,86 @@ fun ReplayScreen(
                         title = topAlbums,
                         rows = summary.albumRows(CHART_LENGTH),
                         onClick = { index ->
+                            val album = summary.albums.getOrNull(index) ?: return@chart
+                            onOpenAlbum(album.browseId, album.title, album.subtitle, album.artworkUrl)
+                        },
+                    )
+                    if (summary.genres.isNotEmpty()) {
+                        chart(
+                            key = "genres",
+                            title = topGenres,
+                            rows = summary.genreRows(CHART_LENGTH),
+                            onClick = {},
+                        )
+                    } else if (ArtistFacts.genresAvailable) {
+                        item("genres-pending") {
+                            Note(
+                                text = "Genres are still being worked out. They fill in " +
+                                    "as you listen, and the chart appears once there is " +
+                                    "enough to rank.",
+                                modifier = Modifier.padding(horizontal = PAGE_GUTTER + 10.dp),
+                            )
+                        }
+                    }
+
+                    item("habits") { Habits(summary) }
+                    item("share") {
+                        ReplayActionRow(Icons.Rounded.IosShare, "Share my Replay", onShare)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Heading ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun Heading(state: ReplayState, onPeriodChange: (ReplayPeriod) -> Unit) {
+    Column(Modifier.padding(horizontal = PAGE_GUTTER + 10.dp)) {
+        // Clear of the fade under the top bar, which runs a good way past the
+        // bar itself — see [TopFadeBlur]. A release page has its sleeve up here
+        // and is meant to be blurred; this page leads with type, and type read
+        // through a blur reads as a rendering fault.
+        //
+        // Only far enough to reach the weak tail of that fade, not past the
+        // whole of it: the ramp eases out, so almost all of the blur is in its
+        // first third and clearing that is enough to keep the title crisp. The
+        // rest was a screen's worth of nothing above the heading.
+        Spacer(Modifier.height(48.dp))
+        Text(
+            text = "Replay",
+            style = MaterialTheme.typography.displayLarge,
+            fontWeight = FontWeight.W800,
+            color = Color.White,
+        )
+        Text(
+            text = state.summary?.label ?: state.period.chip,
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White.copy(alpha = 0.6f),
+        )
+        Spacer(Modifier.height(14.dp))
+        PeriodPicker(state.period, onPeriodChange)
+        Spacer(Modifier.height(18.dp))
+    }
+}
+
+/**
+ * The three stretches a Replay can cover.
+ *
+ * Months and years rather than a date range, because that is the granularity the
+ * listening is actually kept at — see [com.music.yzmusic.data.stats.ListeningStats].
+ * A "last 30 days" chip would have to be answered from monthly totals, which
+ * would make it a lie for the first thirty days of every month.
+ */
+@Composable
+private fun PeriodPicker(selected: ReplayPeriod, onSelect: (ReplayPeriod) -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.10f))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        ReplayPeriod.entries.forEach { period ->
+            val active = period == selected
