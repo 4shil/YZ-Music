@@ -335,3 +335,70 @@ private fun ReplayCardRow(
  * it was the loudest thing there and read like one.
  */
 @Composable
+private fun ReplayActionRow(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .padding(horizontal = PAGE_GUTTER + 10.dp, vertical = 18.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.12f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = YZMusicIcons.ChevronRight,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.5f),
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+// ── Charts ──────────────────────────────────────────────────────────────────
+
+private fun LazyListScope.chart(
+    key: String,
+    title: String,
+    rows: List<ReplayRow>,
+    onClick: (Int) -> Unit,
+    circular: Boolean = false,
+) {
+    if (rows.isEmpty()) return
+    item("$key-title") { SectionTitle(title) }
+    items(rows, key = { "$key-${it.key}" }) { row ->
+        ReplayChartRow(row, circular) { onClick(row.rank - 1) }
+    }
+    item("$key-gap") { Spacer(Modifier.height(20.dp)) }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.headlineMedium,
+        fontWeight = FontWeight.W800,
+        color = Color.White,
+        modifier = Modifier.padding(
+            start = PAGE_GUTTER + 10.dp,
+            end = PAGE_GUTTER + 10.dp,
+            top = 8.dp,
+            bottom = 10.dp,
+        ),
+    )
+}
+
+@Composable
