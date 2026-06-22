@@ -489,3 +489,78 @@ private fun SectionTitleInline(text: String) {
 }
 
 @Composable
+private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.09f))
+            .padding(vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.W800,
+            color = Color.White,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.55f),
+            letterSpacing = 1.sp,
+        )
+    }
+}
+
+@Composable
+private fun Note(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = Color.White.copy(alpha = 0.6f),
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun EmptyReplay(period: ReplayPeriod) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 36.dp, vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = YZMusicIcons.Clock,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.4f),
+            modifier = Modifier.size(44.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = "Not enough listening yet",
+            style = MaterialTheme.typography.titleLarge,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = when (period) {
+                ReplayPeriod.THIS_MONTH -> "There isn't much from this month yet. " +
+                    "Try All time, or come back after a few more sessions."
+                else -> "Play some music and your Replay builds itself — every " +
+                    "minute is counted here on the device, and nothing is sent anywhere."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.6f),
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * How far down each chart the page goes.
+ *
+ * Five. Ten was the first guess and it made the page a scroll of forty rows
+ * whose second half nobody has an opinion about — a top five is a result, and a
+ * top ten is a list.
+ */
+private const val CHART_LENGTH = 5
