@@ -349,3 +349,154 @@ private fun Stage(
  * headers rather than one.
  */
 @Composable
+private fun StoryChrome(
+    label: String,
+    count: Int,
+    current: Int,
+    progress: Float,
+    onClose: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.End) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Close Replay",
+                tint = Color.White,
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onClose)
+                    .padding(4.dp),
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            repeat(count) { index ->
+                Segment(
+                    fraction = when {
+                        index < current -> 1f
+                        index > current -> 0f
+                        else -> progress
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                // "Replay'26" for a year, which is the shape everyone knows this
+                // by. A month or "All time" has no two-digit form and is spelt
+                // out rather than truncated into nonsense.
+                text = if (label.length == 4 && label.all { it.isDigit() }) {
+                    "Replay'${label.takeLast(2)}"
+                } else {
+                    "Replay · $label"
+                },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.W700,
+                color = Color.White,
+                modifier = Modifier.weight(1f),
+            )
+            // The mark and the word together, the way the card carries it.
+            Icon(
+                painter = painterResource(R.drawable.ic_logo),
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.9f),
+                modifier = Modifier.size(width = 26.dp, height = 17.dp),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = "YZ Music",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.W700,
+                color = Color.White.copy(alpha = 0.9f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Segment(fraction: Float, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .height(2.5.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(Color.White.copy(alpha = 0.28f)),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                .height(2.5.dp)
+                .background(Color.White),
+        )
+    }
+}
+
+// ── One card ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun StoryPage(
+    page: ReplayStoryPage,
+    summary: ReplaySummary,
+    onShare: (ReplayStoryPage) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp)
+            .padding(top = CHROME_HEIGHT, bottom = 18.dp),
+    ) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxSize()) {
+                val headline = summary.storyHeadline(page)
+                when (page) {
+                    ReplayStoryPage.INTRO -> Intro(summary, headline)
+                    ReplayStoryPage.MINUTES -> Minutes(summary, headline)
+                    ReplayStoryPage.SONGS ->
+                        Leaderboard(headline, summary.songRows(STORY_ROWS), circular = false)
+                    ReplayStoryPage.ARTISTS ->
+                        Leaderboard(headline, summary.artistRows(STORY_ROWS), circular = true)
+                    ReplayStoryPage.ALBUMS ->
+                        Leaderboard(headline, summary.albumRows(STORY_ROWS), circular = false)
+                    ReplayStoryPage.GENRES -> Genres(summary, headline)
+                    ReplayStoryPage.HABITS -> Habits(summary, headline)
+                    ReplayStoryPage.SUMMARY -> Recap(summary, headline)
+                }
+            }
+        }
+        // The share button is on every card, not only the last one: the card
+        // somebody wants to send is whichever one surprised them, and making
+        // them sit through the rest to reach a button is how a share doesn't
+        // happen. It sends *this* card — the one being looked at — because that
+        // is the one that prompted the tap; the whole-Replay picture is what the
+        // button at the foot of the Replay page produces.
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.18f))
+                    .clickable { onShare(page) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.IosShare,
+                    contentDescription = "Share my Replay",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The sentence at the top of every card.
+ *
+ * Two weights in one line rather than a heading and a subheading, which is what
+ * lets the number be the loud part of an ordinary sentence instead of a figure
+ * with a caption under it. [parts] pairs each run of text with whether it is the
+ * emphasised one.
+ */
+@Composable
