@@ -180,3 +180,26 @@ fun ReplayShareSheet(
                 enabled = ready,
                 modifier = Modifier.weight(1f),
             ) {
+                val image = poster ?: return@ShareAction
+                scope.launch {
+                    val uri = cacheForSharing(context, image) ?: return@launch
+                    context.startActivity(
+                        Intent.createChooser(sendIntent(uri), "Share your Replay"),
+                    )
+                    onDismiss()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShareAction(
+    label: String,
+    icon: ImageVector,
+    /** The one that sends it, which is the one that should be reached for. */
+    accent: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
