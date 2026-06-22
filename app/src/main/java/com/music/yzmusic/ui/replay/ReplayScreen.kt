@@ -259,3 +259,13 @@ private fun Heading(state: ReplayState, onPeriodChange: (ReplayPeriod) -> Unit) 
  * would make it a lie for the first thirty days of every month.
  */
 @Composable
+private fun PeriodPicker(selected: ReplayPeriod, onSelect: (ReplayPeriod) -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.10f))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        ReplayPeriod.entries.forEach { period ->
+            val active = period == selected
