@@ -238,3 +238,44 @@ private fun ShareAction(
     }
 }
 
+private fun sendIntent(uri: Uri) = Intent(Intent.ACTION_SEND)
+    .setType(MIME)
+    .putExtra(Intent.EXTRA_STREAM, uri)
+    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+/**
+ * Writes the poster somewhere another app can read it.
+ *
+ * The app's own cache, exposed through a [FileProvider] rather than by handing
+ * out a `file://` path: that has been illegal since API 24, and a content URI is
+ * what lets the read grant travel with the intent and expire with it — the other
+ * app gets this one picture and nothing else in the folder.
+ */
+private suspend fun cacheForSharing(context: Context, bitmap: Bitmap): Uri? =
+    withContext(Dispatchers.IO) {
+    runCatching {
+        val folder = File(context.cacheDir, SHARE_FOLDER).apply { mkdirs() }
+        // One name, overwritten: the folder is a hand-off point, not an album,
+        // and a file per share would accumulate megabytes nobody ever looks at.
+        val file = File(folder, "replay.png")
+        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }.getOrNull()
+}
+
+/**
+ * Saves the poster to the device's pictures, where a gallery will find it.
+ *
+ * Through MediaStore, which from API 29 needs no permission at all for a row the
+ * app created. Below that it writes into the public Pictures folder directly,
+ * which is why the legacy branch exists — and why saving is offered rather than
+ * assumed: on an older device it can fail on a permission this app doesn't ask
+ * for until a download is started.
+ */
+private suspend fun saveToGallery(
+    context: Context,
+    bitmap: Bitmap,
+    label: String,
+): Boolean = withContext(Dispatchers.IO) {
+    val name = "bitchord-replay-${label.replace(' ', '-').lowercase(Locale.ROOT)}.png"
+    runCatching {
