@@ -574,3 +574,68 @@ private fun ColumnScope.Leaderboard(
     rows: List<ReplayRow>,
     circular: Boolean,
 ) {
+    val lead = rows.firstOrNull() ?: return
+    val shape = if (circular) CircleShape else RoundedCornerShape(10.dp)
+    Headline(headline)
+    Spacer(Modifier.height(18.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Cover(lead.artworkUrl, lead.title, 116.dp, shape, HEADER_ART_PX, elevated = true)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = lead.title,
+                style = MaterialTheme.typography.headlineMedium,
+                fontSize = 26.sp,
+                lineHeight = 30.sp,
+                fontWeight = FontWeight.W800,
+                color = Color.White,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            lead.subtitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "${formatListening(lead.ms)} · ${countOf(lead.plays, "play")}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.55f),
+            )
+        }
+    }
+    Spacer(Modifier.weight(1f))
+    rows.drop(1).forEach { row ->
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RankBadge(row.rank, AccentRed)
+            Cover(row.artworkUrl, row.title, 36.dp, shape, ROW_ART_PX)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = row.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.W600,
+                color = Color.White.copy(alpha = 0.92f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = formatListening(row.ms),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.5f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.Genres(summary: ReplaySummary, headline: List<HeadlineRun>) {
+    val rows = summary.genreRows(STORY_ROWS)
