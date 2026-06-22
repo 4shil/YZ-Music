@@ -574,3 +574,185 @@ private fun ColumnScope.Leaderboard(
     rows: List<ReplayRow>,
     circular: Boolean,
 ) {
+    val lead = rows.firstOrNull() ?: return
+    val shape = if (circular) CircleShape else RoundedCornerShape(10.dp)
+    Headline(headline)
+    Spacer(Modifier.height(18.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Cover(lead.artworkUrl, lead.title, 116.dp, shape, HEADER_ART_PX, elevated = true)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = lead.title,
+                style = MaterialTheme.typography.headlineMedium,
+                fontSize = 26.sp,
+                lineHeight = 30.sp,
+                fontWeight = FontWeight.W800,
+                color = Color.White,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            lead.subtitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "${formatListening(lead.ms)} · ${countOf(lead.plays, "play")}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.55f),
+            )
+        }
+    }
+    Spacer(Modifier.weight(1f))
+    rows.drop(1).forEach { row ->
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RankBadge(row.rank, AccentRed)
+            Cover(row.artworkUrl, row.title, 36.dp, shape, ROW_ART_PX)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = row.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.W600,
+                color = Color.White.copy(alpha = 0.92f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = formatListening(row.ms),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.5f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.Genres(summary: ReplaySummary, headline: List<HeadlineRun>) {
+    val rows = summary.genreRows(STORY_ROWS)
+    val lead = rows.firstOrNull() ?: return
+    Headline(headline)
+    Spacer(Modifier.weight(1f))
+    Text(
+        text = lead.title,
+        style = MaterialTheme.typography.displayLarge,
+        fontSize = 60.sp,
+        lineHeight = 62.sp,
+        fontWeight = FontWeight.W800,
+        color = Color.White,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+    Text(
+        text = formatListening(lead.ms),
+        style = MaterialTheme.typography.titleMedium,
+        color = Color.White.copy(alpha = 0.6f),
+    )
+    Spacer(Modifier.height(22.dp))
+    rows.drop(1).forEach { row ->
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RankBadge(row.rank, AccentRed)
+            Text(
+                text = row.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.W600,
+                color = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = formatListening(row.ms),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.45f),
+            )
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun ColumnScope.Habits(summary: ReplaySummary, headline: List<HeadlineRun>) {
+    Headline(headline)
+    Spacer(Modifier.weight(1f))
+    if (summary.distinctAlbums > 0) {
+        BigStat(grouped(summary.distinctAlbums.toLong()), "different albums")
+    }
+    summary.busiestDay?.let {
+        BigStat(formatDay(it), "your biggest day — ${formatListening(summary.busiestDayMs)}")
+    }
+    summary.peakHour?.let { BigStat(formatHour(it), "when you listen most") }
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun BigStat(value: String, label: String) {
+    Column(Modifier.padding(bottom = 22.dp)) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.W800,
+            color = Color.White,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.58f),
+        )
+    }
+}
+
+@Composable
+private fun ColumnScope.Recap(summary: ReplaySummary, headline: List<HeadlineRun>) {
+    Headline(headline)
+    Spacer(Modifier.height(20.dp))
+    RecapLine("Minutes", formatMinutes(summary.totalMs))
+    summary.songs.firstOrNull()?.let { RecapLine("Top song", it.song.title) }
+    summary.artists.firstOrNull()?.let { RecapLine("Top artist", it.title) }
+    summary.albums.firstOrNull()?.let { RecapLine("Top album", it.title) }
+    summary.genres.firstOrNull()?.let { RecapLine("Top genre", it.title) }
+    Spacer(Modifier.weight(1f))
+    Text(
+        text = "Tap share to turn all of this into one picture.",
+        style = MaterialTheme.typography.bodyLarge,
+        color = Color.White.copy(alpha = 0.55f),
+    )
+}
+
+@Composable
+private fun RecapLine(label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.5f),
+            modifier = Modifier.width(96.dp),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.W700,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+// ── Pieces ──────────────────────────────────────────────────────────────────
+
+@Composable
