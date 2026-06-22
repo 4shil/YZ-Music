@@ -269,3 +269,69 @@ private fun PeriodPicker(selected: ReplayPeriod, onSelect: (ReplayPeriod) -> Uni
     ) {
         ReplayPeriod.entries.forEach { period ->
             val active = period == selected
+            val background by animateColorAsState(
+                if (active) Color.White.copy(alpha = 0.92f) else Color.Transparent,
+                tween(160),
+                label = "periodChip",
+            )
+            Text(
+                text = period.chip,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.W700,
+                color = if (active) Color.Black else Color.White.copy(alpha = 0.75f),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(background)
+                    .clickable { onSelect(period) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+    }
+}
+
+// ── The cards ───────────────────────────────────────────────────────────────
+
+/**
+ * The wallet of cards, wherever it is drawn.
+ *
+ * It lives on the Library page rather than here — see [ReplayScreen]'s note on
+ * where each half of Replay belongs — but it is defined alongside the page it
+ * summarises, because the two have to keep saying the same thing.
+ */
+@Composable
+private fun ReplayCardRow(
+    cards: List<ReplayHeroCard>,
+    holder: String,
+    memberSince: String?,
+    onOpenStory: (ReplayStoryPage) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyRow(
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = PAGE_GUTTER + 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(cards, key = { it.label }) { card ->
+            ReplayCreditCard(
+                label = card.label,
+                value = card.value,
+                detail = card.detail,
+                artworkUrl = card.artworkUrl,
+                holder = holder,
+                memberSince = memberSince,
+                onClick = { onOpenStory(card.page) },
+                modifier = Modifier.width(300.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The two things this page can do, drawn the same way.
+ *
+ * They sit at either end of it and are the same kind of act — open the Replay,
+ * send the Replay — so they have no business looking unalike. The share button
+ * used to be a filled red slab, which on a page with no destructive control on
+ * it was the loudest thing there and read like one.
+ */
+@Composable
