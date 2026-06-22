@@ -194,3 +194,158 @@ fun ReplayStories(
 
 
     val page = pages.getOrElse(current) { ReplayStoryPage.INTRO }
+    val artwork = summary.storyArtwork(page)
+    // Rotated per card, so the backdrop is visibly a different colour on every
+    // one — see [storyHue].
+    val palette = rememberArtworkColors(artwork).rotated(storyHue(page))
+
+    // The system bars are kept outside the frame rather than padded for inside
+    // it: the card is a fixed canvas and its own margins are part of the
+    // design, so an inset applied within would move the headline on one phone
+    // and not another. Fitting the whole card into the safe area instead leaves
+    // it identical everywhere and puts the letterboxing where the bars are.
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.Center,
+    ) {
+        StoryFrame {
+            Stage(
+                pages = pages,
+                pagerState = pagerState,
+                summary = summary,
+                current = current,
+                progress = progress,
+                onHold = { held = it },
+                onStep = ::step,
+                onClose = onClose,
+                onShare = onShare,
+                palette = palette,
+                artwork = artwork,
+                page = page,
+            )
+        }
+    }
+}
+
+/**
+ * Holds a story to 9:16 whatever shape the screen is.
+ *
+ * A story is a fixed canvas, not a responsive layout: the type sizes, the
+ * collage offsets and the room the headline is allowed are all set against one
+ * set of proportions, and a 20:9 phone stretches that into a column with a hole
+ * in the middle while a tablet flattens it. It is also the shape the shared
+ * image comes out as, so a card the user sends looks like the card they were
+ * looking at when they tapped share.
+ *
+ * Fitted rather than filled — whichever of width and height runs out first is
+ * the one that sets the size, and the rest is black. Letterboxing is the honest
+ * failure here: cropping would take the headline or the share button off the
+ * edge of the screen on the exact devices most likely to be running this.
+ */
+@Composable
+private fun StoryFrame(content: @Composable () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val fitsByWidth = maxWidth / maxHeight < STORY_ASPECT
+        Box(
+            Modifier
+                .then(if (fitsByWidth) Modifier.fillMaxWidth() else Modifier.fillMaxHeight())
+                .aspectRatio(STORY_ASPECT),
+        ) {
+            content()
+        }
+    }
+}
+
+/** The story card itself, inside whatever box [StoryFrame] gave it. */
+@Composable
+private fun Stage(
+    pages: List<ReplayStoryPage>,
+    pagerState: PagerState,
+    summary: ReplaySummary,
+    current: Int,
+    progress: Animatable<Float, *>,
+    onHold: (Boolean) -> Unit,
+    onStep: (Boolean) -> Unit,
+    onClose: () -> Unit,
+    onShare: (ReplayStoryPage) -> Unit,
+    palette: MeshPalette,
+    artwork: String?,
+    page: ReplayStoryPage,
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF17171A))
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        onHold(true)
+                        tryAwaitRelease()
+                        onHold(false)
+                    },
+                    // Supplied, and deliberately empty. Without an
+                    // `onLongPress`, `detectTapGestures` has no notion of a long
+                    // press at all and reports every press-and-release as a tap
+                    // — so holding to pause the story turned the page the
+                    // instant the finger came off it, which is the opposite of
+                    // what holding is for. Handing it a callback is what makes
+                    // it draw the line at the long-press timeout.
+                    onLongPress = {},
+                    // Every tap is a step; where it lands is worked out in
+                    // [ReplayStories.step], which owns the pager.
+                    onTap = { offset -> onStep(offset.x >= size.width * BACK_ZONE) },
+                )
+            },
+    ) {
+        // The soft colour behind everything, drawn from whatever the card is
+        // about and rotated per card — so no two backdrops in the run are the
+        // same colour. Keyed on the page as well as the artwork, or a card
+        // sharing a cover with the one before it would not crossfade at all.
+        MeshGradientBackground(palette = palette, trackKey = page.name, animated = false)
+        // Enough ink for white type, weighted to the top where the headline sits
+        // and to the foot where the controls do.
+        //
+        // Lighter than it looks like it should be, because the mesh carries a
+        // vertical scrim of its own and the two stack: at the weights this
+        // started on, the lower half of every card came out near black and the
+        // backdrop read as a glow at the top rather than as a colour the card
+        // was painted in.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Black.copy(alpha = 0.45f),
+                        0.35f to Color.Black.copy(alpha = 0.10f),
+                        1.0f to Color.Black.copy(alpha = 0.34f),
+                    ),
+                ),
+        )
+
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { index ->
+            StoryPage(page = pages[index], summary = summary, onShare = onShare)
+        }
+
+        StoryChrome(
+            label = summary.label,
+            count = pages.size,
+            current = current,
+            progress = progress.value,
+            onClose = onClose,
+        )
+    }
+}
+
+/**
+ * The furniture that doesn't move between cards: the cross, the run of progress
+ * segments, and the two words saying what this is.
+ *
+ * Drawn over the pager rather than inside each page so it stays put while the
+ * cards slide under it — a header that swipes with its page reads as eight
+ * headers rather than one.
+ */
+@Composable
