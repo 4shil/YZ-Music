@@ -520,3 +520,130 @@ private fun drawGenres(canvas: Canvas, type: Fonts, summary: ReplaySummary, top:
     if (genres.isEmpty()) return
     canvas.drawText("TOP GENRES", MARGIN, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
     val paint = type.body(32f, Color.WHITE, bold = true)
+    val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x26FFFFFF }
+    var x = MARGIN
+    val y = top + 44f
+    genres.forEach { genre ->
+        val width = paint.measureText(genre.title) + 44f
+        if (x + width > POSTER_W - MARGIN) return
+        canvas.drawRoundRect(RectF(x, y, x + width, y + 62f), 31f, 31f, chip)
+        canvas.drawText(genre.title, x + 22f, y + 42f, paint)
+        x += width + 14f
+    }
+}
+
+private fun drawFooter(canvas: Canvas, type: Fonts) {
+    canvas.drawText(
+        "Counted on device with YZ Music",
+        MARGIN,
+        POSTER_H - 64f,
+        type.label(24f, 0x73FFFFFF, tracking = 0.08f),
+    )
+}
+
+// ── Pieces ──────────────────────────────────────────────────────────────────
+
+/**
+ * A cover, cropped square and rounded — or, where one never loaded, the same
+ * lettered stand-in the lists use, so a missing sleeve is a deliberate-looking
+ * tile rather than a hole.
+ */
+private fun drawArtwork(
+    canvas: Canvas,
+    bitmap: Bitmap?,
+    fallback: String,
+    x: Float,
+    y: Float,
+    size: Float,
+    circular: Boolean,
+) {
+    val bounds = RectF(x, y, x + size, y + size)
+    val radius = if (circular) size / 2f else size * 0.10f
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    if (bitmap != null) {
+        val scale = size / minOf(bitmap.width, bitmap.height).toFloat()
+        val matrix = Matrix().apply {
+            setScale(scale, scale)
+            postTranslate(
+                x - (bitmap.width * scale - size) / 2f,
+                y - (bitmap.height * scale - size) / 2f,
+            )
+        }
+        paint.shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            .apply { setLocalMatrix(matrix) }
+        canvas.drawRoundRect(bounds, radius, radius, paint)
+        paint.shader = null
+    } else {
+        val hue = (fallback.hashCode().toFloat() % 360f + 360f) % 360f
+        paint.color = ColorUtils.HSLToColor(floatArrayOf(hue, 0.55f, 0.45f))
+        canvas.drawRoundRect(bounds, radius, radius, paint)
+    }
+}
+
+/**
+ * A card's sentence, wrapped, with the emphasised runs in the heavier face.
+ *
+ * Laid out by hand because a canvas has no notion of a paragraph made of two
+ * typefaces: the runs are broken into words, each word keeps the weight of the
+ * run it came from, and they are placed greedily until the next one would not
+ * fit. Measuring per word rather than per run is what lets a line break in the
+ * middle of the bold part — which every one of these sentences does.
+ */
+private fun drawRuns(
+    canvas: Canvas,
+    type: Fonts,
+    runs: List<HeadlineRun>,
+    x: Float,
+    top: Float,
+    maxWidth: Float,
+): Float {
+    val bold = type.heading(HEADLINE_SIZE, Color.WHITE)
+    val plain = type.body(HEADLINE_SIZE, 0x9EFFFFFF.toInt(), bold = true)
+
+    // Flattened first, with a weight remembered per character, and only then
+    // split on whitespace. Splitting the runs individually looked equivalent and
+    // was not: a run ending mid-word — "4 songs" bold followed by ", one was…"
+    // plain — became two tokens with a space invented between them, and the
+    // sentence read "4 songs , one was your anthem". A word that straddles a
+    // weight boundary takes the weight of its first letter, which is why the
+    // comma there comes out bold; that is the right way to be wrong, since the
+    // alternative is a comma floating a space away from what it punctuates.
+    val text = StringBuilder()
+    val weights = ArrayList<Boolean>()
+    runs.forEach { run ->
+        text.append(run.text)
+        repeat(run.text.length) { weights += run.bold }
+    }
+
+    var lineX = x
+    var y = top + HEADLINE_SIZE
+    var index = 0
+    while (index < text.length) {
+        if (text[index].isWhitespace()) {
+            index++
+            continue
+        }
+        var end = index
+        while (end < text.length && !text[end].isWhitespace()) end++
+        val word = text.substring(index, end)
+        val paint = if (weights[index]) bold else plain
+        val width = paint.measureText("$word ")
+        if (lineX + width - x > maxWidth && lineX > x) {
+            lineX = x
+            y += HEADLINE_LEADING
+        }
+        canvas.drawText(word, lineX, y, paint)
+        lineX += width
+        index = end
+    }
+    return y + 24f
+}
+
+/**
+ * The YZ Music mark, baseline-aligned with the word beside it.
+ *
+ * The same vector the app draws everywhere, tinted and given bounds rather than
+ * rasterised to a PNG first — a vector drawable renders into an ordinary canvas
+ * on every version this app supports, so there is nothing to be gained by
+ * keeping a second copy of the logo around at a fixed size.
+ */
