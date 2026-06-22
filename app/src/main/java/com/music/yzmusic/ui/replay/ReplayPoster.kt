@@ -647,3 +647,93 @@ private fun drawRuns(
  * on every version this app supports, so there is nothing to be gained by
  * keeping a second copy of the logo around at a fixed size.
  */
+private fun drawLogo(canvas: Canvas, context: Context, right: Float, baseline: Float) {
+    val logo = runCatching {
+        ResourcesCompat.getDrawable(context.resources, R.drawable.ic_logo, null)
+    }.getOrNull() ?: return
+    val left = right - LOGO_W
+    val top = baseline - LOGO_H
+    logo.setTint(0xE6FFFFFF.toInt())
+    logo.setBounds(left.toInt(), top.toInt(), (left + LOGO_W).toInt(), (top + LOGO_H).toInt())
+    logo.draw(canvas)
+}
+
+/** Trims [text] to [width], with an ellipsis, the way a single-line row would. */
+private fun ellipsised(text: String, paint: Paint, width: Float): String {
+    if (paint.measureText(text) <= width) return text
+    var end = text.length
+    while (end > 1 && paint.measureText(text.take(end) + "…") > width) end--
+    return text.take(end).trimEnd() + "…"
+}
+
+/**
+ * The app's own face, on a canvas.
+ *
+ * The poster is the one thing from this app that ends up somewhere else, so it
+ * has more reason than any screen to be set in the type the app is set in.
+ * Falls back to the platform sans if a weight can't be loaded, which keeps a
+ * missing font resource a slightly plainer picture rather than a crash on the
+ * share button.
+ */
+private class Fonts(context: Context) {
+    private val heavy = font(context, R.font.sf_pro_display_heavy) ?: Typeface.DEFAULT_BOLD
+    private val semibold = font(context, R.font.sf_pro_display_semibold) ?: Typeface.DEFAULT_BOLD
+    private val regular = font(context, R.font.sf_pro_display_regular) ?: Typeface.DEFAULT
+
+    fun heading(size: Float, color: Int) = paint(heavy, size, color)
+
+    fun body(size: Float, color: Int, bold: Boolean = false) =
+        paint(if (bold) semibold else regular, size, color)
+
+    fun label(size: Float, color: Int, tracking: Float = 0.10f) =
+        paint(semibold, size, color).apply { letterSpacing = tracking }
+
+    private fun paint(face: Typeface, size: Float, color: Int) =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = face
+            textSize = size
+            this.color = color
+        }
+
+    private fun font(context: Context, id: Int): Typeface? =
+        runCatching { ResourcesCompat.getFont(context, id) }.getOrNull()
+}
+
+private suspend fun loadBitmap(context: Context, url: String): Bitmap? = runCatching {
+    val request = ImageRequest.Builder(context)
+        .data(url.artworkAt(CARD_ART_PX))
+        // Palette needs pixel access, and a hardware bitmap cannot be drawn
+        // into a software canvas at all — which is the whole of this file.
+        .allowHardware(false)
+        .build()
+    (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap()
+}.getOrNull()
+
+/** 9:16, the shape the story cards are held to — see `StoryFrame`. */
+private const val POSTER_W = 1080
+private const val POSTER_H = 1920
+
+private const val MARGIN = 72f
+
+/** The mark's drawn size. 730×484 in the vector, so this keeps its proportions. */
+private const val LOGO_W = 66f
+private const val LOGO_H = 44f
+private const val LOGO_GAP = 20f
+
+/** The width type and artwork are laid out in. */
+private const val CONTENT_W = POSTER_W - MARGIN * 2
+
+/** Matches the 30sp the card on screen sets its sentence at, at 3x. */
+private const val HEADLINE_SIZE = 88f
+private const val HEADLINE_LEADING = 108f
+
+/** How far down a chart a shared card goes — the same five the card shows. */
+private const val CARD_ROWS = 5
+private const val COLUMN_GAP = 36f
+private const val ROW_HEIGHT = 116f
+private const val ART = 84f
+private const val ACCENT = 0xFFFA2D48.toInt()
+
+private const val POSTER_ROWS = 5
+private const val POSTER_ALBUMS = 3
+private const val POSTER_GENRES = 4
