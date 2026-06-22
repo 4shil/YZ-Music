@@ -756,3 +756,46 @@ private fun RecapLine(label: String, value: String) {
 // ── Pieces ──────────────────────────────────────────────────────────────────
 
 @Composable
+private fun Cover(
+    url: String?,
+    fallbackText: String,
+    size: Dp,
+    shape: Shape,
+    px: Int,
+    modifier: Modifier = Modifier,
+    elevated: Boolean = false,
+) {
+    val base = modifier
+        .size(size)
+        .let { if (elevated) it.shadow(18.dp, shape, clip = false) else it }
+        .clip(shape)
+    when {
+        url != null -> AsyncImage(
+            model = url.artworkAt(px),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = base,
+        )
+        fallbackText.isNotBlank() -> Box(base) { InitialTile(fallbackText, size, shape) }
+        else -> Box(base.background(Color.White.copy(alpha = 0.10f)))
+    }
+}
+
+/**
+ * The scatter of covers and faces the opening cards are built around.
+ *
+ * Deliberately hand-placed rather than laid out. A grid of the top six looks
+ * like a search result; the point of this is to look like a pile of records
+ * someone has been through, which needs overlap, rotation and inconsistent
+ * sizes — none of which any layout the framework offers will produce, and all of
+ * which are stable here because the offsets are fractions of the box rather than
+ * pixel positions.
+ *
+ * Artists come back as circles and releases as squares, which is the same
+ * distinction every music app makes and the only label these need.
+ */
+@Composable
+private fun ArtworkCollage(summary: ReplaySummary, modifier: Modifier = Modifier) {
+    val covers = remember(summary) {
+        summary.songs.mapNotNull { it.song.thumbnailUrl }.distinct().take(3)
+    }
