@@ -238,3 +238,22 @@ private fun ShareAction(
     }
 }
 
+private fun sendIntent(uri: Uri) = Intent(Intent.ACTION_SEND)
+    .setType(MIME)
+    .putExtra(Intent.EXTRA_STREAM, uri)
+    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+/**
+ * Writes the poster somewhere another app can read it.
+ *
+ * The app's own cache, exposed through a [FileProvider] rather than by handing
+ * out a `file://` path: that has been illegal since API 24, and a content URI is
+ * what lets the read grant travel with the intent and expire with it — the other
+ * app gets this one picture and nothing else in the folder.
+ */
+private suspend fun cacheForSharing(context: Context, bitmap: Bitmap): Uri? =
+    withContext(Dispatchers.IO) {
+    runCatching {
+        val folder = File(context.cacheDir, SHARE_FOLDER).apply { mkdirs() }
+        // One name, overwritten: the folder is a hand-off point, not an album,
+        // and a file per share would accumulate megabytes nobody ever looks at.
