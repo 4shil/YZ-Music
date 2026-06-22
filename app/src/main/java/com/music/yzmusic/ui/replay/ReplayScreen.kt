@@ -402,3 +402,55 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
+private fun ReplayChartRow(row: ReplayRow, circular: Boolean, onClick: () -> Unit) {
+    val shape = if (circular) CircleShape else RoundedCornerShape(6.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = PAGE_GUTTER + 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RankBadge(row.rank, AccentRed)
+        if (row.artworkUrl != null) {
+            AsyncImage(
+                model = row.artworkUrl.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(48.dp).clip(shape),
+            )
+        } else {
+            InitialTile(row.title, 48.dp, shape)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = row.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.W600,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = listOfNotNull(row.subtitle, formatListening(row.ms))
+                    .joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (row.plays > 0) {
+            Text(
+                text = row.plays.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.45f),
+            )
+        }
+    }
+}
+
+// ── Tail ────────────────────────────────────────────────────────────────────
+
+@Composable
