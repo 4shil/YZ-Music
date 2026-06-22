@@ -799,3 +799,22 @@ private fun ArtworkCollage(summary: ReplaySummary, modifier: Modifier = Modifier
     val covers = remember(summary) {
         summary.songs.mapNotNull { it.song.thumbnailUrl }.distinct().take(3)
     }
+    val faces = remember(summary) {
+        summary.artists.mapNotNull { it.artworkUrl }.distinct()
+            .filterNot { it in covers }
+            .take(3)
+    }
+    if (covers.isEmpty() && faces.isEmpty()) return
+
+    BoxWithConstraints(modifier.fillMaxWidth().height(300.dp)) {
+        val w = maxWidth
+        val h = maxHeight
+        // Top-left corner as a fraction of the box, then the size and the tilt.
+        // Every anchor is chosen so `fraction * width + size` lands inside the
+        // box on the narrowest frame this is drawn in — a piece cropped by the
+        // edge reads as a layout that overflowed, not as a pile.
+        val squares = listOf(
+            Triple(0.26f to 0.34f, 168.dp, -3f),
+            Triple(0.05f to 0.10f, 88.dp, -9f),
+            Triple(0.62f to 0.04f, 72.dp, 7f),
+        )
