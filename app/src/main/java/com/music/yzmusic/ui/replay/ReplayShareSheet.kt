@@ -257,3 +257,25 @@ private suspend fun cacheForSharing(context: Context, bitmap: Bitmap): Uri? =
         val folder = File(context.cacheDir, SHARE_FOLDER).apply { mkdirs() }
         // One name, overwritten: the folder is a hand-off point, not an album,
         // and a file per share would accumulate megabytes nobody ever looks at.
+        val file = File(folder, "replay.png")
+        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }.getOrNull()
+}
+
+/**
+ * Saves the poster to the device's pictures, where a gallery will find it.
+ *
+ * Through MediaStore, which from API 29 needs no permission at all for a row the
+ * app created. Below that it writes into the public Pictures folder directly,
+ * which is why the legacy branch exists — and why saving is offered rather than
+ * assumed: on an older device it can fail on a permission this app doesn't ask
+ * for until a download is started.
+ */
+private suspend fun saveToGallery(
+    context: Context,
+    bitmap: Bitmap,
+    label: String,
+): Boolean = withContext(Dispatchers.IO) {
+    val name = "bitchord-replay-${label.replace(' ', '-').lowercase(Locale.ROOT)}.png"
+    runCatching {
