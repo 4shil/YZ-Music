@@ -79,3 +79,5 @@ fun ReplayShareSheet(
     page: ReplayStoryPage?,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
