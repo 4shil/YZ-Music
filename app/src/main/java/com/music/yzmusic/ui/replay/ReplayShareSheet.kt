@@ -279,3 +279,26 @@ private suspend fun saveToGallery(
 ): Boolean = withContext(Dispatchers.IO) {
     val name = "bitchord-replay-${label.replace(' ', '-').lowercase(Locale.ROOT)}.png"
     runCatching {
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, MIME)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(
+                    MediaStore.Images.Media.RELATIVE_PATH,
+                    "${Environment.DIRECTORY_PICTURES}/YZ Music",
+                )
+            }
+        }
+        val uri = context.contentResolver
+            .insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: error("no row")
+        context.contentResolver.openOutputStream(uri)?.use {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        } ?: error("no stream")
+        true
+    }.getOrDefault(false)
+}
+
+private const val MIME = "image/png"
+private const val SHARE_FOLDER = "shared"
+
