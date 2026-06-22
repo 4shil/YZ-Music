@@ -81,3 +81,5 @@ fun ReplayShareSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var poster by remember { mutableStateOf<Bitmap?>(null) }
+    var failed by remember { mutableStateOf(false) }
