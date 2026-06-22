@@ -203,3 +203,38 @@ private fun ShareAction(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    val background = when {
+        accent -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val foreground = when {
+        accent -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(background.copy(alpha = if (enabled) 1f else 0.4f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 15.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = foreground,
+            modifier = Modifier.size(19.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.W700,
+            color = foreground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
