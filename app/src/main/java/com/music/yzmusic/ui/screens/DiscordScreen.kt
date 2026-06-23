@@ -135,3 +135,376 @@ fun DiscordScreen(
     val button2Visible by AppSettings.discordButton2Visible.collectAsStateWithLifecycle()
     val infoDismissed by AppSettings.discordInfoDismissed.collectAsStateWithLifecycle()
 
+    val connected = token.isNotEmpty()
+    val discordIcon = ImageVector.vectorResource(R.drawable.ic_discord)
+
+    // Refreshes the cached profile whenever the connected account changes. A
+    // failure is left to stand rather than clearing the cache: the usual reason
+    // for one is being offline, and blanking the name every time the phone loses
+    // signal would read as having been signed out.
+    LaunchedEffect(token) {
+        if (token.isEmpty()) {
+            AppSettings.setDiscordAccount("", "", null)
+            return@LaunchedEffect
+        }
+        withContext(Dispatchers.IO) {
+            KizzyRPC.getUserInfo(
+                token,
+                SuperProperties.userAgent,
+                SuperProperties.superPropertiesBase64,
+            ).onSuccess {
+                AppSettings.setDiscordAccount(it.username, it.name, it.avatar)
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding),
+    ) {
+        Text(
+            text = "Discord",
+            style = MaterialTheme.typography.displayLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
+        )
+
+        DiscordAccountCard(
+            connected = connected,
+            name = name,
+            username = username,
+            avatar = avatar,
+            status = statusOf(status),
+            icon = discordIcon,
+            onConnect = onOpenLogin,
+        )
+
+        if (!connected) {
+            SettingsGroup(
+                footer = "Signing in opens Discord's own login page. Nothing is typed into this app.",
+            ) {
+                SettingsRow(
+                    icon = Icons.Rounded.Key,
+                    title = "Enter a token instead",
+                    subtitle = "For when the login page won't load",
+                    onClick = { onOpenDialog(DiscordDialog.TOKEN) },
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = !infoDismissed) {
+            NoticeCard(
+                text = "Discord has no API for an app to set your presence, so this " +
+                    "signs in as your account and speaks its protocol. Your token is " +
+                    "stored encrypted on this device and only ever sent to Discord — " +
+                    "but it is your whole account, and automating one is against " +
+                    "Discord's terms of service. Bans for presence alone aren't a " +
+                    "thing anyone reports; it's still your call.",
+                onDismiss = { AppSettings.setDiscordInfoDismissed(true) },
+            )
+        }
+
+        SettingsGroup(
+            header = "Rich presence",
+            footer = "The card updates on every track change, seek, and pause — and " +
+                "clears itself when playback stops.",
+        ) {
+            SettingsRow(
+                icon = discordIcon,
+                title = "Show what I'm playing",
+                subtitle = if (connected) null else "Connect an account first",
+                enabled = connected,
+                trailing = {
+                    Switch(
+                        checked = rpcEnabled && connected,
+                        onCheckedChange = AppSettings::setDiscordRpcEnabled,
+                        enabled = connected,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setDiscordRpcEnabled(!rpcEnabled) },
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.AutoMirrored.Rounded.Label,
+                title = "Lead with the song",
+                subtitle = "Puts the title on the bold line, in place of the artist",
+                enabled = connected && rpcEnabled,
+                trailing = {
+                    Switch(
+                        checked = useDetails,
+                        onCheckedChange = AppSettings::setDiscordUseDetails,
+                        enabled = connected && rpcEnabled,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setDiscordUseDetails(!useDetails) },
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.Tune,
+                title = "Customise the card",
+                subtitle = "Status, wording, and the two buttons",
+                enabled = connected && rpcEnabled,
+                trailing = {
+                    Switch(
+                        checked = advancedMode,
+                        onCheckedChange = AppSettings::setDiscordAdvancedMode,
+                        enabled = connected && rpcEnabled,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setDiscordAdvancedMode(!advancedMode) },
+            )
+        }
+
+        AnimatedVisibility(visible = connected && rpcEnabled && advancedMode) {
+            Column(Modifier.fillMaxWidth()) {
+                SettingsGroup(header = "Presence") {
+                    SettingsRow(
+                        icon = Icons.Rounded.RadioButtonChecked,
+                        title = "Status",
+                        value = statusOf(status).label,
+                        onClick = { onOpenDialog(DiscordDialog.STATUS) },
+                    )
+                    RowDivider()
+                    SettingsRow(
+                        icon = Icons.Rounded.Tune,
+                        title = "Activity",
+                        value = kindOf(activityType).label,
+                        onClick = { onOpenDialog(DiscordDialog.ACTIVITY_TYPE) },
+                    )
+                    RowDivider()
+                    SettingsRow(
+                        icon = Icons.AutoMirrored.Rounded.Label,
+                        title = "Name",
+                        subtitle = activityName.ifEmpty { appName() },
+                        onClick = { onOpenDialog(DiscordDialog.ACTIVITY_NAME) },
+                    )
+                }
+
+                SettingsGroup(
+                    header = "Buttons",
+                    footer = "{song_name}, {artist_name} and {album_name} are replaced " +
+                        "with the track. The first button opens the song on YouTube " +
+                        "Music, the second this project.",
+                ) {
+                    SettingsRow(
+                        icon = Icons.Rounded.SmartButton,
+                        title = "First button",
+                        subtitle = button1Text.ifEmpty { DiscordRPC.DEFAULT_BUTTON_1 },
+                        trailing = {
+                            Switch(
+                                checked = button1Visible,
+                                onCheckedChange = AppSettings::setDiscordButton1Visible,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { onOpenDialog(DiscordDialog.BUTTON_1) },
+                    )
+                    RowDivider()
+                    SettingsRow(
+                        icon = Icons.Rounded.SmartButton,
+                        title = "Second button",
+                        subtitle = button2Text.ifEmpty { DiscordRPC.DEFAULT_BUTTON_2 },
+                        trailing = {
+                            Switch(
+                                checked = button2Visible,
+                                onCheckedChange = AppSettings::setDiscordButton2Visible,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { onOpenDialog(DiscordDialog.BUTTON_2) },
+                    )
+                }
+            }
+        }
+
+        SettingsGroup(
+            header = "Preview",
+            footer = if (song == null) "Play something to see it filled in." else null,
+        ) {
+            RichPresencePreview(
+                song = song,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                heading = activityName.ifEmpty { appName() },
+                verb = kindOf(activityType).verb,
+                useDetails = useDetails,
+                button1Text = button1Text,
+                button1Visible = button1Visible,
+                button2Text = button2Text,
+                button2Visible = button2Visible,
+            )
+        }
+
+        if (connected) {
+            SettingsGroup {
+                DestructiveRow(
+                    label = "Disconnect",
+                    onClick = { AppSettings.clearDiscordAccount() },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** Who this posts as. Same frame as [AccountCard], with Discord's status dot. */
+@Composable
+private fun DiscordAccountCard(
+    connected: Boolean,
+    name: String,
+    username: String,
+    avatar: String,
+    status: DiscordPresenceStatus,
+    icon: ImageVector,
+    onConnect: () -> Unit,
+) {
+    val cardColor = MaterialTheme.colorScheme.surfaceVariant
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = GROUP_INSET)
+            .clip(GroupShape)
+            .background(cardColor)
+            .then(if (connected) Modifier else Modifier.clickable(onClick = onConnect))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(52.dp)) {
+            if (avatar.isNotEmpty()) {
+                AsyncImage(
+                    model = avatar,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(52.dp).clip(CircleShape).thumbnailBorder(CircleShape),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.outline),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
+            if (connected) {
+                Box(
+                    modifier = Modifier
+                        .size(15.dp)
+                        .align(Alignment.BottomEnd)
+                        // Discord rings the dot in the card's own colour so it
+                        // reads as punched out of the avatar rather than on it.
+                        .border(2.5.dp, cardColor, CircleShape)
+                        .padding(2.5.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when (status) {
+                                DiscordPresenceStatus.IDLE -> MaterialTheme.colorScheme.tertiary
+                                DiscordPresenceStatus.DND -> MaterialTheme.colorScheme.error
+                                DiscordPresenceStatus.ONLINE -> MaterialTheme.colorScheme.primary
+                            },
+                        ),
+                )
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = if (connected) name.ifEmpty { "Connected" } else "Not connected",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = when {
+                    username.isNotEmpty() -> "@$username"
+                    connected -> "Discord account"
+                    else -> "Tap to sign in with Discord"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (!connected) {
+            Spacer(Modifier.width(8.dp))
+            Chevron()
+        }
+    }
+}
+
+/** A one-off explanation with its own dismiss, shaped like a settings group. */
+@Composable
+private fun NoticeCard(text: String, onDismiss: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            // Same 26dp gap SettingsGroup leaves above itself, so this sits in
+            // the rhythm of the groups either side of it.
+            .padding(start = GROUP_INSET, end = GROUP_INSET, top = 26.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(GroupShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Got it",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onDismiss)
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The card as Discord will draw it: heading, sleeve, three lines of text, a
+ * countdown, and up to two buttons.
+ *
+ * Deliberately not built from our own row primitives — this is a picture of
+ * another app's UI, and the only way it does its job is by looking like one.
+ * The buttons work, so it doubles as a way to check the links land.
+ */
+@Composable
