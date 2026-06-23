@@ -130,3 +130,8 @@ fun DiscordScreen(
     val activityType by AppSettings.discordActivityType.collectAsStateWithLifecycle()
     val activityName by AppSettings.discordActivityName.collectAsStateWithLifecycle()
     val button1Text by AppSettings.discordButton1Text.collectAsStateWithLifecycle()
+    val button1Visible by AppSettings.discordButton1Visible.collectAsStateWithLifecycle()
+    val button2Text by AppSettings.discordButton2Text.collectAsStateWithLifecycle()
+    val button2Visible by AppSettings.discordButton2Visible.collectAsStateWithLifecycle()
+    val infoDismissed by AppSettings.discordInfoDismissed.collectAsStateWithLifecycle()
+
