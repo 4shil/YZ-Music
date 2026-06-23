@@ -639,3 +639,163 @@ private fun ColumnScope.Leaderboard(
 @Composable
 private fun ColumnScope.Genres(summary: ReplaySummary, headline: List<HeadlineRun>) {
     val rows = summary.genreRows(STORY_ROWS)
+    val lead = rows.firstOrNull() ?: return
+    Headline(headline)
+    Spacer(Modifier.weight(1f))
+    Text(
+        text = lead.title,
+        style = MaterialTheme.typography.displayLarge,
+        fontSize = 60.sp,
+        lineHeight = 62.sp,
+        fontWeight = FontWeight.W800,
+        color = Color.White,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+    Text(
+        text = formatListening(lead.ms),
+        style = MaterialTheme.typography.titleMedium,
+        color = Color.White.copy(alpha = 0.6f),
+    )
+    Spacer(Modifier.height(22.dp))
+    rows.drop(1).forEach { row ->
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RankBadge(row.rank, AccentRed)
+            Text(
+                text = row.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.W600,
+                color = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = formatListening(row.ms),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.45f),
+            )
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun ColumnScope.Habits(summary: ReplaySummary, headline: List<HeadlineRun>) {
+    Headline(headline)
+    Spacer(Modifier.weight(1f))
+    if (summary.distinctAlbums > 0) {
+        BigStat(grouped(summary.distinctAlbums.toLong()), "different albums")
+    }
+    summary.busiestDay?.let {
+        BigStat(formatDay(it), "your biggest day — ${formatListening(summary.busiestDayMs)}")
+    }
+    summary.peakHour?.let { BigStat(formatHour(it), "when you listen most") }
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun BigStat(value: String, label: String) {
+    Column(Modifier.padding(bottom = 22.dp)) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.W800,
+            color = Color.White,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.58f),
+        )
+    }
+}
+
+@Composable
+private fun ColumnScope.Recap(summary: ReplaySummary, headline: List<HeadlineRun>) {
+    Headline(headline)
+    Spacer(Modifier.height(20.dp))
+    RecapLine("Minutes", formatMinutes(summary.totalMs))
+    summary.songs.firstOrNull()?.let { RecapLine("Top song", it.song.title) }
+    summary.artists.firstOrNull()?.let { RecapLine("Top artist", it.title) }
+    summary.albums.firstOrNull()?.let { RecapLine("Top album", it.title) }
+    summary.genres.firstOrNull()?.let { RecapLine("Top genre", it.title) }
+    Spacer(Modifier.weight(1f))
+    Text(
+        text = "Tap share to turn all of this into one picture.",
+        style = MaterialTheme.typography.bodyLarge,
+        color = Color.White.copy(alpha = 0.55f),
+    )
+}
+
+@Composable
+private fun RecapLine(label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.5f),
+            modifier = Modifier.width(96.dp),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.W700,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+// ── Pieces ──────────────────────────────────────────────────────────────────
+
+@Composable
+private fun Cover(
+    url: String?,
+    fallbackText: String,
+    size: Dp,
+    shape: Shape,
+    px: Int,
+    modifier: Modifier = Modifier,
+    elevated: Boolean = false,
+) {
+    val base = modifier
+        .size(size)
+        .let { if (elevated) it.shadow(18.dp, shape, clip = false) else it }
+        .clip(shape)
+    when {
+        url != null -> AsyncImage(
+            model = url.artworkAt(px),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = base,
+        )
+        fallbackText.isNotBlank() -> Box(base) { InitialTile(fallbackText, size, shape) }
+        else -> Box(base.background(Color.White.copy(alpha = 0.10f)))
+    }
+}
+
+/**
+ * The scatter of covers and faces the opening cards are built around.
+ *
+ * Deliberately hand-placed rather than laid out. A grid of the top six looks
+ * like a search result; the point of this is to look like a pile of records
+ * someone has been through, which needs overlap, rotation and inconsistent
+ * sizes — none of which any layout the framework offers will produce, and all of
+ * which are stable here because the offsets are fractions of the box rather than
+ * pixel positions.
+ *
+ * Artists come back as circles and releases as squares, which is the same
+ * distinction every music app makes and the only label these need.
+ */
+@Composable
+private fun ArtworkCollage(summary: ReplaySummary, modifier: Modifier = Modifier) {
+    val covers = remember(summary) {
+        summary.songs.mapNotNull { it.song.thumbnailUrl }.distinct().take(3)
+    }
