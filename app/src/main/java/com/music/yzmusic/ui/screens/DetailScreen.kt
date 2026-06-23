@@ -210,3 +210,24 @@ fun DetailScreen(
     // needs that scrolling can't give it. Off by default and reset with the
     // page: a filter left on an album that was closed and reopened would be a
     // page that appears to have lost most of its tracks.
+    var searching by rememberSaveable(page.browseId) { mutableStateOf(false) }
+    var query by rememberSaveable(page.browseId) { mutableStateOf("") }
+    // Whether the field still owes the keyboard an appearance. Held here rather
+    // than in the field, which is a row in a lazy list: scrolled out of sight it
+    // is disposed, and a field that asks for focus every time it is composed
+    // would throw the keyboard back up each time it scrolled into view.
+    var focusSearch by remember(page.browseId) { mutableStateOf(false) }
+    val closeSearch = {
+        searching = false
+        query = ""
+    }
+    // Back closes the search first — this handler is registered after the one
+    // that pops the page, so it is the one that answers while it's enabled.
+    BackHandler(enabled = searching) { closeSearch() }
+
+    // Each surviving row still knows where it sat in the full running order, so
+    // an album's track numbers stay the album's rather than becoming positions
+    // in the filtered list.
+    val matches = remember(songs, query) { songs.matching(query) }
+    // What a tap plays: the list as it is being read. Playing the whole release
+    // from a filtered row would start a queue the user cannot see.
