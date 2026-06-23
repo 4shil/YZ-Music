@@ -508,3 +508,81 @@ private fun NoticeCard(text: String, onDismiss: () -> Unit) {
  * The buttons work, so it doubles as a way to check the links land.
  */
 @Composable
+private fun RichPresencePreview(
+    song: Song?,
+    positionMs: Long,
+    durationMs: Long,
+    heading: String,
+    verb: String,
+    useDetails: Boolean,
+    button1Text: String,
+    button1Visible: Boolean,
+    button2Text: String,
+    button2Visible: Boolean,
+) {
+    val context = LocalContext.current
+    val title = song?.title ?: "Song title"
+    val artist = song?.artist ?: "Artist"
+
+    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        Text(
+            text = "$verb $heading".uppercase(Locale.ROOT),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.W700,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        Row(verticalAlignment = Alignment.Top) {
+            val artShape = RoundedCornerShape(6.dp)
+            if (song?.thumbnailUrl != null) {
+                AsyncImage(
+                    model = song.artworkAt(CARD_ART_PX),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(84.dp).clip(artShape).thumbnailBorder(artShape),
+                )
+            } else {
+                Box(
+                    Modifier
+                        .size(84.dp)
+                        .clip(artShape)
+                        .background(MaterialTheme.colorScheme.outline),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                // Discord bolds whichever line `status_display_type` names, and
+                // that is the one it also repeats next to the user's name in a
+                // member list — so which of these is emphasised is the whole
+                // point of the "Lead with the song" switch.
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                    fontWeight = if (useDetails) FontWeight.W700 else FontWeight.W400,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = artist,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                    fontWeight = if (useDetails) FontWeight.W400 else FontWeight.W700,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                song?.albumName?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                ProgressLine(positionMs = positionMs, durationMs = durationMs)
+            }
+        }
+
