@@ -1458,3 +1458,33 @@ private fun DetailPage.headerLines(trackCount: Int): Pair<String, String> {
     val parts = subtitle.split("•", "·").map { it.trim() }.filter { it.isNotEmpty() }
     val year = parts.lastOrNull { it.length == 4 && it.all(Char::isDigit) }
     val kind = parts.firstOrNull { it.lowercase(Locale.ROOT) in KIND_WORDS }
+    val credit = parts.filter { it != year && it != kind }.joinToString(", ")
+    val meta = listOfNotNull(
+        kind ?: type.label,
+        year,
+        trackCount.takeIf { it > 0 }?.let { "$it ${if (it == 1) "song" else "songs"}" },
+    ).joinToString(" • ").uppercase(Locale.ROOT)
+    return credit to meta
+}
+
+/** Subtitle words that name what a page *is* rather than who made it. */
+private val KIND_WORDS = setOf(
+    "album", "single", "ep", "playlist", "artist", "podcast", "episode", "song", "video",
+)
+
+private val BrowseType.label: String?
+    get() = when (this) {
+        BrowseType.ALBUM -> "Album"
+        BrowseType.PLAYLIST -> "Playlist"
+        BrowseType.ARTIST -> "Artist"
+        BrowseType.OTHER -> null
+    }
+
+/** "12 songs, 41 minutes" — omitting the time when the rows carry no durations. */
+private fun List<Song>.playtimeSummary(): String {
+    val count = "$size ${if (size == 1) "song" else "songs"}"
+    val minutes = sumOf { it.durationText.toSeconds() } / 60
+    return when {
+        minutes <= 0 -> count
+        minutes < 60 -> "$count, $minutes minutes"
+        else -> {
