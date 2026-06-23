@@ -425,3 +425,192 @@ fun DetailScreen(
                     // Every row on an album carries the same sleeve, which is
                     // already the largest thing on the page — Apple Music
                     // numbers those rows instead, and so does this.
+                    val numbered = page.type == BrowseType.ALBUM
+                    if (matches.isEmpty() && state.data.isNotEmpty()) {
+                        item(key = "no-matches") {
+                            MessageState("Nothing here matches “$query”")
+                        }
+                    }
+                    itemsIndexed(matches) { position, entry ->
+                        val song = entry.value
+                        SongRow(
+                            song = if (numbered) {
+                                song
+                            } else {
+                                song.copy(thumbnailUrl = song.thumbnailUrl ?: page.thumbnailUrl)
+                            },
+                            onClick = { onSongClick(queue, position) },
+                            onLongPress = { onSongLongPress(song) },
+                            onSwipeToQueue = { onSongSwipe(song) },
+                            rowBackground = Color.Transparent,
+                            // The track's place on the release, not its place in
+                            // what the filter left standing.
+                            trackNumber = (entry.index + 1).takeIf { numbered },
+                            subtitleColor = palette.onBackgroundVariant,
+                            downloadedTint = downloadedTint,
+                        )
+                        if (position < matches.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                                thickness = 0.5.dp,
+                                color = palette.divider,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Tracks YouTube offers to round the playlist out, never folded
+            // into the list above — see [DetailPage.suggestedSongs].
+            if (suggested.isNotEmpty()) {
+                item(key = "suggested-heading") {
+                    SectionHeading("Suggested", palette)
+                }
+                itemsIndexed(
+                    suggested,
+                    key = { _, song -> "suggested-${song.videoId}" },
+                ) { index, song ->
+                    SuggestedSongRow(
+                        song = song,
+                        palette = palette,
+                        onClick = { onSongClick(suggested, index) },
+                        onLongPress = { onSongLongPress(song) },
+                        onAdd = { onAddSuggested(song) },
+                        downloadedTint = downloadedTint,
+                    )
+                    if (index < suggested.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                            thickness = 0.5.dp,
+                            color = palette.divider,
+                        )
+                    }
+                }
+            }
+
+            // Albums / Singles & EPs carousels (artist pages).
+            items(page.sections) { shelf ->
+                Column(Modifier.padding(top = 22.dp)) {
+                    SectionHeading(shelf.title, palette)
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        items(shelf.items) { item ->
+                            SectionCard(
+                                item = item,
+                                palette = palette,
+                                onClick = { onSectionItemClick(item) },
+                                onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * An album or playlist: the title, credit, meta and action buttons that sit
+ * over the foot of the artwork.
+ *
+ * The artwork itself is not here — [PageBackground] draws it, so that
+ * [MergeBand] can blur it without blurring any of this. What this item holds in
+ * its place is a spacer of exactly the picture's height, which is what keeps
+ * the two in step: the list reserves the room, the background fills it.
+ */
+@Composable
+private fun ReleaseHeader(
+    page: DetailPage,
+    palette: ArtworkPalette,
+    artHeight: Dp,
+    trackCount: Int,
+    songs: List<Song>,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+    searching: Boolean,
+    onSearch: () -> Unit,
+    onMore: ((List<Song>) -> Unit)?,
+    onArtistClick: (String, String) -> Unit,
+    onToggleLibrary: (() -> Unit)?,
+) {
+    val (credit, meta) = page.headerLines(trackCount)
+    // Every row on a release carries the same credit — see [pageCredit] — so
+    // the first one speaks for the whole page, the same source the rows'
+    // own long-press "Open artist" already reads from.
+    val artist = songs.firstOrNull()
+
+    // The outer Box just needs to be as tall as its content — we don't force
+    // an aspect ratio here so the action buttons can extend below the artwork.
+    Box(Modifier.fillMaxWidth()) {
+
+        Spacer(Modifier.fillMaxWidth().height(artHeight + HEADER_DROP))
+
+        // Text + action row stacked, pinned to the bottom of the Box.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(bottom = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = page.title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = palette.onBackground,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = HEADER_GUTTER),
+            )
+            // Artist / credit line
+            if (credit.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = credit,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.accent,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .padding(horizontal = HEADER_GUTTER)
+                        .let { m ->
+                            val id = artist?.artistId
+                            if (id == null) {
+                                m
+                            } else {
+                                m.clip(RoundedCornerShape(6.dp))
+                                    .clickable { onArtistClick(id, artist.artist) }
+                            }
+                        },
+                )
+            }
+            // Metadata (kind • year • count)
+            if (meta.isNotBlank()) {
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    text = meta,
+                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.7.sp),
+                    color = palette.onBackgroundVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = HEADER_GUTTER),
+                )
+            }
+
+            // Action buttons — live inside the header so there is zero gap
+            // between the cover zone and the first song row.
+            if (songs.isNotEmpty()) {
+                // Only where YouTube said the release can be saved and the
+                // caller is willing to take the write — see [onToggleLibrary].
+                val library = page.library?.takeIf { onToggleLibrary != null }
+                // Four circles and the pill is as much as this row can carry,
+                // and on a 360dp screen it only carries it by giving something
+                // up: the pill sheds padding first, being the widest thing here,
+                // and the circles come down 4dp after that. The alternative is a
+                // row that runs off the edge of the screen.
+                val circles = listOfNotNull(library, onMore).size + 2 // + Shuffle, Search
+                val full = circles >= 4
