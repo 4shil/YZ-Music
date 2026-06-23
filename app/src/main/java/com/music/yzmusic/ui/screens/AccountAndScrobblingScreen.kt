@@ -48,3 +48,5 @@ fun AccountAndScrobblingScreen(
     val lastfmNowPlayingEnabled by AppSettings.lastfmNowPlaying.collectAsStateWithLifecycle()
     val scrobbleMinDuration by AppSettings.scrobbleMinDuration.collectAsStateWithLifecycle()
     val scrobbleDelayPercent by AppSettings.scrobbleDelayPercent.collectAsStateWithLifecycle()
+    val scrobbleDelaySeconds by AppSettings.scrobbleDelaySeconds.collectAsStateWithLifecycle()
+    val listenBrainzEnabled by AppSettings.listenBrainzEnabled.collectAsStateWithLifecycle()
