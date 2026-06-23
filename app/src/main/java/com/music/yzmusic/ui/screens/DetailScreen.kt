@@ -1026,3 +1026,113 @@ private val MERGE_BLUR = 100.dp
 
 /** Shuffle • Play • Download — the Apple Music action row. */
 @Composable
+private fun ActionRow(
+    palette: ArtworkPalette,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+    bottomSpace: Dp = 22.dp,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = HEADER_GUTTER),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Circular Shuffle button
+        CircleIconButton(
+            icon = YZMusicIcons.Shuffle,
+            contentDescription = "Shuffle",
+            palette = palette,
+            onClick = onShuffle,
+            haptic = Haptic.Resume,
+        )
+
+        PlayPill(
+            palette = palette,
+            onClick = onPlay,
+        )
+    }
+    Spacer(Modifier.height(bottomSpace))
+}
+
+/**
+ * The prominent, pill-shaped Play button that anchors the action row.
+ * White-ish solid fill with the accent colour, like Apple Music's Play button.
+ */
+@Composable
+private fun PlayPill(
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    horizontalPadding: Dp = 32.dp,
+) {
+    // Resume rather than a flat tap: this button starts a queue, and the rising
+    // pair says so.
+    val haptics = rememberHaptics()
+    Row(
+        modifier = modifier
+            .height(50.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+            .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+            .clickable {
+                haptics.play(Haptic.Resume)
+                onClick()
+            }
+            .padding(horizontal = horizontalPadding),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = YZMusicIcons.Play,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "Play",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+/**
+ * Small circular icon-only button — used for Shuffle and Download flanking the
+ * Play pill. Translucent glassy fill, accent-coloured icon.
+ */
+@Composable
+private fun CircleIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    haptic: Haptic = Haptic.Tap,
+    size: Dp = 50.dp,
+) {
+    val haptics = rememberHaptics()
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+            .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+            .clickable {
+                haptics.play(haptic)
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(size * 0.44f),
+        )
+    }
+}
+
+/** Track count and running time, the way a release page signs off. */
+@Composable
