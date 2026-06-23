@@ -425,3 +425,117 @@ fun DetailScreen(
                     // Every row on an album carries the same sleeve, which is
                     // already the largest thing on the page — Apple Music
                     // numbers those rows instead, and so does this.
+                    val numbered = page.type == BrowseType.ALBUM
+                    if (matches.isEmpty() && state.data.isNotEmpty()) {
+                        item(key = "no-matches") {
+                            MessageState("Nothing here matches “$query”")
+                        }
+                    }
+                    itemsIndexed(matches) { position, entry ->
+                        val song = entry.value
+                        SongRow(
+                            song = if (numbered) {
+                                song
+                            } else {
+                                song.copy(thumbnailUrl = song.thumbnailUrl ?: page.thumbnailUrl)
+                            },
+                            onClick = { onSongClick(queue, position) },
+                            onLongPress = { onSongLongPress(song) },
+                            onSwipeToQueue = { onSongSwipe(song) },
+                            rowBackground = Color.Transparent,
+                            // The track's place on the release, not its place in
+                            // what the filter left standing.
+                            trackNumber = (entry.index + 1).takeIf { numbered },
+                            subtitleColor = palette.onBackgroundVariant,
+                            downloadedTint = downloadedTint,
+                        )
+                        if (position < matches.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                                thickness = 0.5.dp,
+                                color = palette.divider,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Tracks YouTube offers to round the playlist out, never folded
+            // into the list above — see [DetailPage.suggestedSongs].
+            if (suggested.isNotEmpty()) {
+                item(key = "suggested-heading") {
+                    SectionHeading("Suggested", palette)
+                }
+                itemsIndexed(
+                    suggested,
+                    key = { _, song -> "suggested-${song.videoId}" },
+                ) { index, song ->
+                    SuggestedSongRow(
+                        song = song,
+                        palette = palette,
+                        onClick = { onSongClick(suggested, index) },
+                        onLongPress = { onSongLongPress(song) },
+                        onAdd = { onAddSuggested(song) },
+                        downloadedTint = downloadedTint,
+                    )
+                    if (index < suggested.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                            thickness = 0.5.dp,
+                            color = palette.divider,
+                        )
+                    }
+                }
+            }
+
+            // Albums / Singles & EPs carousels (artist pages).
+            items(page.sections) { shelf ->
+                Column(Modifier.padding(top = 22.dp)) {
+                    SectionHeading(shelf.title, palette)
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        items(shelf.items) { item ->
+                            SectionCard(
+                                item = item,
+                                palette = palette,
+                                onClick = { onSectionItemClick(item) },
+                                onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * An album or playlist: the title, credit, meta and action buttons that sit
+ * over the foot of the artwork.
+ *
+ * The artwork itself is not here — [PageBackground] draws it, so that
+ * [MergeBand] can blur it without blurring any of this. What this item holds in
+ * its place is a spacer of exactly the picture's height, which is what keeps
+ * the two in step: the list reserves the room, the background fills it.
+ */
+@Composable
+private fun ReleaseHeader(
+    page: DetailPage,
+    palette: ArtworkPalette,
+    artHeight: Dp,
+    trackCount: Int,
+    songs: List<Song>,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+    searching: Boolean,
+    onSearch: () -> Unit,
+    onMore: ((List<Song>) -> Unit)?,
+    onArtistClick: (String, String) -> Unit,
+    onToggleLibrary: (() -> Unit)?,
+) {
+    val (credit, meta) = page.headerLines(trackCount)
+    // Every row on a release carries the same credit — see [pageCredit] — so
+    // the first one speaks for the whole page, the same source the rows'
+    // own long-press "Open artist" already reads from.
