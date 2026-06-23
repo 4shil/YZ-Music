@@ -614,3 +614,415 @@ private fun ReleaseHeader(
                 // row that runs off the edge of the screen.
                 val circles = listOfNotNull(library, onMore).size + 2 // + Shuffle, Search
                 val full = circles >= 4
+                val circleSize = if (full) 46.dp else 50.dp
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = HEADER_GUTTER),
+                    horizontalArrangement = Arrangement.spacedBy(
+                        if (full) 8.dp else 10.dp,
+                        Alignment.CenterHorizontally,
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (library != null) {
+                        CircleIconButton(
+                            // A tick, not a filled-in plus: the pair reads as
+                            // "not yet / done", which is what the state is.
+                            icon = if (library.saved) YZMusicIcons.Check else YZMusicIcons.Plus,
+                            contentDescription = if (library.saved) {
+                                "Remove from library"
+                            } else {
+                                "Add to library"
+                            },
+                            palette = palette,
+                            onClick = { onToggleLibrary?.invoke() },
+                            haptic = if (library.saved) Haptic.ToggleOff else Haptic.ToggleOn,
+                            size = circleSize,
+                        )
+                    }
+                    CircleIconButton(
+                        icon = YZMusicIcons.Shuffle,
+                        contentDescription = "Shuffle",
+                        palette = palette,
+                        onClick = onShuffle,
+                        haptic = Haptic.Resume,
+                        size = circleSize,
+                    )
+                    PlayPill(
+                        palette = palette,
+                        onClick = onPlay,
+                        horizontalPadding = when (circles) {
+                            1, 2 -> 32.dp
+                            3 -> 24.dp
+                            else -> 14.dp
+                        },
+                    )
+                    // Where the download circle used to be. Downloading a
+                    // release is a thing done once and then not thought about;
+                    // finding a track on a long playlist is a thing done while
+                    // reading the page, so it is the one that earns a button and
+                    // the download moved to the overflow beside it.
+                    CircleIconButton(
+                        icon = if (searching) Icons.Rounded.Close else YZMusicIcons.Search,
+                        contentDescription = if (searching) "Close search" else "Search this list",
+                        palette = palette,
+                        onClick = onSearch,
+                        size = circleSize,
+                    )
+                    onMore?.let { more ->
+                        CircleIconButton(
+                            icon = Icons.Rounded.MoreHoriz,
+                            contentDescription = "More",
+                            palette = palette,
+                            onClick = { more(songs) },
+                            size = circleSize,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The filter box, shown under the header while the search circle is lit.
+ *
+ * Live rather than submit-on-enter, and for the same reason the Local Music
+ * one is (see `LocalSearchField`): the list it narrows is already in memory, so
+ * there is nothing for a submit action to wait for.
+ *
+ * Glass rather than a filled field — it is one of the header's controls that
+ * happens to be typed into, and it sits close enough to the circles that a
+ * Material text field beside them would read as a different app's furniture.
+ */
+@Composable
+private fun DetailSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+    autoFocus: Boolean,
+    onFocused: () -> Unit,
+    palette: ArtworkPalette,
+    type: BrowseType,
+) {
+    // Opened by a tap on a button, which is as clear a statement of intent as
+    // the keyboard is going to get — so it comes up with the field rather than
+    // making the tap land twice. Once only: see [autoFocus]'s owner.
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(autoFocus) {
+        if (autoFocus) {
+            focus.requestFocus()
+            onFocused()
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = HEADER_GUTTER)
+            .padding(bottom = 10.dp)
+            .height(46.dp)
+            .clip(PILL_SHAPE)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+            .border(0.5.dp, Color.White.copy(alpha = 0.10f), PILL_SHAPE)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = YZMusicIcons.Search,
+            contentDescription = null,
+            tint = palette.onBackgroundVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(
+                    text = "Search this ${type.label?.lowercase(Locale.ROOT) ?: "list"}",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = palette.onBackgroundVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = palette.onBackground),
+                cursorBrush = SolidColor(palette.accent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focus),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                // Clearing and closing are the same gesture: an empty filter
+                // showing an unfiltered list is a row of furniture with nothing
+                // left to do.
+                .clickable { if (query.isEmpty()) onClose() else onQueryChange("") },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = if (query.isEmpty()) "Close search" else "Clear search",
+                tint = palette.onBackgroundVariant,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The rows a typed query leaves standing, each still carrying its place in the
+ * full list — see the track numbers on an album, which are the release's own
+ * and not positions in whatever the filter left.
+ */
+private fun List<Song>.matching(query: String): List<IndexedValue<Song>> {
+    val all = withIndex().toList()
+    if (query.isBlank()) return all
+    return all.filter { (_, song) ->
+        song.title.contains(query, ignoreCase = true) ||
+            song.artist.contains(query, ignoreCase = true) ||
+            song.albumName?.contains(query, ignoreCase = true) == true
+    }
+}
+
+/**
+ * An artist: their name across the foot of the photo [PageBackground] is
+ * drawing behind this. See [ReleaseHeader] for why the picture isn't here.
+ */
+@Composable
+private fun ArtistHeader(page: DetailPage, palette: ArtworkPalette, artHeight: Dp) {
+    Box(Modifier.fillMaxWidth()) {
+        Spacer(Modifier.fillMaxWidth().height(artHeight + HEADER_DROP))
+        Text(
+            text = page.title,
+            style = MaterialTheme.typography.displayLarge,
+            color = palette.onBackground,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                // Bottom is half the top inset — the stats pills (or, absent
+                // those, the action row) sit closer under the name than the
+                // name sits under the artwork.
+                .padding(start = HEADER_GUTTER, end = HEADER_GUTTER, top = 14.dp, bottom = 7.dp),
+        )
+    }
+}
+
+/**
+ * Everything on a detail page that is colour rather than words: the page wash,
+ * and the artwork sitting on top of it.
+ *
+ * This is the whole of what [MergeBand] blurs, and the reason it is a layer of
+ * its own. The artwork used to live in the list's first item, which put it in
+ * the same layer as the title and the buttons and the song rows — glass laid
+ * over that would have smeared the text along with the picture. Split out, the
+ * blur has the join to itself.
+ *
+ * It carries the artwork's scroll instead of being scrolled: the list owns the
+ * gesture and reserves the room, and the picture is offset to follow whatever
+ * the list did with item zero. Read in a layer block, so a scroll moves it
+ * without recomposing anything.
+ */
+@Composable
+private fun PageBackground(
+    page: DetailPage,
+    palette: ArtworkPalette,
+    canvas: CanvasArtwork?,
+    artHeight: Dp,
+    listState: LazyListState,
+    hazeState: HazeState,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .clipToBounds()
+            .hazeSource(hazeState),
+    ) {
+        ArtworkWash(palette = palette, modifier = Modifier.matchParentSize())
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(artHeight)
+                .offset { IntOffset(0, listState.headerTop(artHeight.toPx()).roundToInt()) },
+        ) {
+            AsyncImage(
+                model = page.thumbnailUrl.artworkAt(HEADER_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(palette.elevated),
+            )
+
+            // Above the still art but below both gradients, so the scrim and
+            // the wash that blend the header into the page still sit over it.
+            // Always running: unlike the player's sleeve there is no transport
+            // here to follow, and the page is only up while it's being read.
+            canvas?.let { clip ->
+                CanvasArtworkPlayer(
+                    canvas = clip,
+                    isPlaying = true,
+                    modifier = Modifier.matchParentSize(),
+                )
+            }
+
+            // Shade under the glass bar. Drawn in the page's own tint rather
+            // than in black, so the back arrow — which is themed, not always
+            // white — keeps its contrast in light mode as well as dark.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.28f)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(palette.background.copy(alpha = 0.55f), Color.Transparent),
+                        ),
+                    ),
+            )
+
+            // Settles the foot of the picture onto the colour the page is made
+            // of, so the two sides of the join are already close before the
+            // glass goes over them — a blur averages what it is given and
+            // cannot invent agreement that isn't there. It matters most on a
+            // monochrome sleeve, where the wash is the only thing with a hue.
+            //
+            // Inside this layer, deliberately: drawn above the glass it would
+            // be a hard-edged rectangle of its own.
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.55f to Color.Transparent,
+                            1.00f to palette.wash.copy(alpha = 0.88f),
+                        ),
+                    ),
+            )
+        }
+    }
+}
+
+/**
+ * One pane of glass laid across the join, blurring [PageBackground] through it.
+ *
+ * Centred on the bottom edge of the artwork, so half of it is over the picture
+ * and half over the page below — which is what makes it a merge rather than a
+ * fade. A blur samples across its own footprint, so colour from the sleeve is
+ * carried down past where the sleeve ends and the page's colour is carried up
+ * into it, and the line that used to be there has nothing left to be a line
+ * between.
+ *
+ * Its own two edges are the only ones left to hide, and the mask does that: the
+ * band arrives from nothing and leaves to nothing over [MERGE_BAND]'s full
+ * height, which is long enough that there is no moment where it starts.
+ *
+ * Sits between the background and the list, so the title, the buttons and the
+ * song rows are drawn on top of it and stay sharp.
+ */
+@Composable
+private fun MergeBand(
+    palette: ArtworkPalette,
+    artHeight: Dp,
+    listState: LazyListState,
+    hazeState: HazeState,
+) {
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    // Asked for no dynamic blur, the page falls back to what the background
+    // does on its own: the sleeve settling onto the wash it is drawn over.
+    if (reduceDynamicBlur) return
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(MERGE_BAND)
+            // Placed rather than translated, which for this one matters a great
+            // deal: haze records where it is when it is *placed*, and a
+            // graphicsLayer moves content at draw time, long after. Translated,
+            // the band went on believing it was at the top of the screen — so
+            // it blurred the top of the screen and painted that down here,
+            // which is a blur of the wrong thing and leaves the join intact.
+            .offset {
+                IntOffset(
+                    x = 0,
+                    y = (
+                        listState.headerTop(artHeight.toPx()) +
+                            artHeight.toPx() - MERGE_BAND.toPx() / 2f
+                        ).roundToInt(),
+                )
+            }
+            .hazeEffect(hazeState) {
+                // Without this the band draws nothing at all.
+                //
+                // Haze defaults to only blurring sources *below* it, which it
+                // decides with `area.zIndex < hazeZIndex` — where hazeZIndex
+                // comes from the nearest enclosing source. This page sits
+                // inside the app's own full-window source, so that value is
+                // 0f; our source is nested inside the same one, so its zIndex
+                // is 0f as well; and `0 < 0` is false. The page's own
+                // background was being filtered out of its own effect, leaving
+                // it with no areas to blur. The bottom fade behind the tab bar
+                // escapes this only because it is drawn outside that source
+                // and so has no zIndex to be compared against.
+                //
+                // [hazeState] is private to this page and holds exactly one
+                // area, so there is nothing here to filter.
+                canDrawArea = { true }
+                blurRadius = MERGE_BLUR
+                // Haze's film grain is uniform across the layer, so it would
+                // show up at the ends as texture over content the mask has
+                // otherwise left alone — exactly the edges it is hiding.
+                noiseFactor = 0f
+                // An empty list falls through to whatever style is in scope, so
+                // "no tint" has to be said as a transparent one. The band is
+                // here to move colour around, not to add any.
+                tints = listOf(HazeTint(Color.Transparent))
+                backgroundColor = palette.wash
+                mask = Brush.verticalGradient(
+                    0.00f to Color.Transparent,
+                    0.50f to Color.Black,
+                    1.00f to Color.Transparent,
+                )
+            },
+    )
+}
+
+/**
+ * Where the top of the artwork currently is.
+ *
+ * The list is the one being scrolled; the background only has to agree with it.
+ * While the header is item zero and on screen, how far it has been scrolled off
+ * the top is exactly the offset the picture behind it needs. Once it isn't,
+ * there is nothing to agree with, and everything hanging off this parks two
+ * artwork-heights up — far enough that no part of anything comes back down.
+ */
+private fun LazyListState.headerTop(artHeightPx: Float): Float =
+    if (firstVisibleItemIndex == 0) -firstVisibleItemScrollOffset.toFloat() else -artHeightPx * 2f
+
+/**
+ * How tall the glass is — generous, because half of its run is spent arriving
+ * and half leaving, and a band that reaches full strength quickly has an edge
+ * again.
+ */
+private val MERGE_BAND = 320.dp
+
+/**
+ * Wide enough that nothing of the picture survives where the band is at full
+ * strength — not softened detail, none. A blur that leaves shapes behind reads
+ * as a blurred photograph, and a blurred photograph next to a flat colour is
+ * still two surfaces.
+ */
+private val MERGE_BLUR = 100.dp
+
+/** Shuffle • Play • Download — the Apple Music action row. */
+@Composable
