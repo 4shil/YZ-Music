@@ -1136,3 +1136,85 @@ private fun CircleIconButton(
 
 /** Track count and running time, the way a release page signs off. */
 @Composable
+private fun ReleaseFooter(songs: List<Song>, palette: ArtworkPalette) {
+    Text(
+        text = songs.playtimeSummary(),
+        style = MaterialTheme.typography.labelMedium,
+        color = palette.onBackgroundVariant,
+        modifier = Modifier.padding(start = HEADER_GUTTER, end = HEADER_GUTTER, top = 18.dp),
+    )
+}
+
+/** "1.2M subscribers" and "3.4M monthly listeners", off the artist header. */
+@Composable
+private fun ArtistStatsRow(
+    subscriberCountText: String?,
+    monthlyListenerCount: String?,
+    palette: ArtworkPalette,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            // Top padding is left to the header's own bottom inset (7.dp).
+            .padding(start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+    ) {
+        // YouTube's own count text already reads "1.2M subscribers" in full,
+        // so only the number is kept and the label re-said in the app's own
+        // words — the one way to fit both stats on one line on a narrow
+        // screen without either wrapping into two.
+        subscriberCountText?.let {
+            StatChip(
+                icon = Icons.Rounded.Person,
+                text = "${it.substringBefore(' ')} subscribers",
+                palette = palette,
+            )
+        }
+        monthlyListenerCount?.let {
+            StatChip(
+                icon = Icons.Rounded.GraphicEq,
+                text = "${it.substringBefore(' ')} monthly listeners",
+                palette = palette,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatChip(icon: ImageVector, text: String, palette: ArtworkPalette) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+            .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = palette.onBackgroundVariant,
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.onBackgroundVariant,
+        )
+    }
+}
+
+/**
+ * YouTube's own editorial note for a release or an artist, collapsed to a
+ * few lines with a tap to read the rest — the same "About" block Apple
+ * Music and YouTube Music itself show under the header.
+ *
+ * Whether there's anything to expand is only knowable once the text has
+ * been laid out at the collapsed line count, so the "More" toggle is held
+ * back until that measurement says the clipped text actually lost
+ * something — otherwise a two-line bio would show a toggle with nothing
+ * behind it to reveal.
+ */
+@Composable
+private fun AboutSection(title: String, text: String, palette: ArtworkPalette) {
