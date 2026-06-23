@@ -1488,3 +1488,20 @@ private fun List<Song>.playtimeSummary(): String {
         minutes <= 0 -> count
         minutes < 60 -> "$count, $minutes minutes"
         else -> {
+            val hours = minutes / 60
+            val rest = minutes % 60
+            val hourLabel = "$hours ${if (hours == 1) "hour" else "hours"}"
+            if (rest == 0) "$count, $hourLabel" else "$count, $hourLabel $rest minutes"
+        }
+    }
+}
+
+/** "3:45" or "1:02:33" as seconds; 0 for anything that isn't a duration. */
+private fun String?.toSeconds(): Int {
+    val parts = this?.split(":")?.map { it.trim().toIntOrNull() ?: return 0 } ?: return 0
+    return when (parts.size) {
+        2 -> parts[0] * 60 + parts[1]
+        3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
+        else -> 0
+    }
+}
