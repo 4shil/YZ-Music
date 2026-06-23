@@ -1406,3 +1406,55 @@ private fun SuggestedSongRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+private fun SectionCard(
+    item: ShelfItem,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
+    Column(
+        modifier = Modifier
+            .width(SHELF_CARD_WIDTH)
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+    ) {
+        AsyncImage(
+            model = item.thumbnailUrl.artworkAt(CARD_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .width(SHELF_CARD_WIDTH)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .thumbnailBorder(RoundedCornerShape(10.dp))
+                .background(palette.elevated),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = item.subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.onBackgroundVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Splits the one subtitle a browse row hands over — "Album • Travis Scott •
+ * 2023", or sometimes just "Travis Scott" — into the credit line and the
+ * metadata line the header shows separately.
+ *
+ * Everything is optional, because every caller supplies a different amount of
+ * it: the player knows an album's artist but not its year, search knows both,
+ * and a home card frequently knows neither.
+ */
+private fun DetailPage.headerLines(trackCount: Int): Pair<String, String> {
+    val parts = subtitle.split("•", "·").map { it.trim() }.filter { it.isNotEmpty() }
+    val year = parts.lastOrNull { it.length == 4 && it.all(Char::isDigit) }
+    val kind = parts.firstOrNull { it.lowercase(Locale.ROOT) in KIND_WORDS }
