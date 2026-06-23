@@ -50,3 +50,5 @@ fun AccountAndScrobblingScreen(
     val scrobbleDelayPercent by AppSettings.scrobbleDelayPercent.collectAsStateWithLifecycle()
     val scrobbleDelaySeconds by AppSettings.scrobbleDelaySeconds.collectAsStateWithLifecycle()
     val listenBrainzEnabled by AppSettings.listenBrainzEnabled.collectAsStateWithLifecycle()
+    val listenBrainzToken by AppSettings.listenBrainzToken.collectAsStateWithLifecycle()
+    val discordToken by AppSettings.discordToken.collectAsStateWithLifecycle()
