@@ -818,3 +818,71 @@ private fun ArtworkCollage(summary: ReplaySummary, modifier: Modifier = Modifier
             Triple(0.05f to 0.10f, 88.dp, -9f),
             Triple(0.62f to 0.04f, 72.dp, 7f),
         )
+        val circles = listOf(
+            Triple(0.02f to 0.62f, 62.dp, 0f),
+            Triple(0.70f to 0.34f, 76.dp, 0f),
+            Triple(0.44f to 0.78f, 66.dp, 0f),
+        )
+        covers.forEachIndexed { index, url ->
+            val (position, size, angle) = squares[index]
+            Cover(
+                url = url,
+                fallbackText = "",
+                size = size,
+                shape = RoundedCornerShape(4.dp),
+                px = CARD_ART_PX,
+                modifier = Modifier
+                    .offset(x = w * position.first, y = h * position.second)
+                    .rotate(angle),
+                elevated = true,
+            )
+        }
+        faces.forEachIndexed { index, url ->
+            val (position, size, _) = circles[index]
+            Cover(
+                url = url,
+                fallbackText = "",
+                size = size,
+                shape = CircleShape,
+                px = CARD_ART_PX,
+                modifier = Modifier.offset(x = w * position.first, y = h * position.second),
+                elevated = true,
+            )
+        }
+    }
+}
+
+/** [this] with every colour turned [degrees] around the wheel, tone untouched. */
+private fun MeshPalette.rotated(degrees: Float): MeshPalette {
+    if (degrees == 0f) return this
+    return MeshPalette(
+        colors.map { color ->
+            val hsl = FloatArray(3)
+            ColorUtils.colorToHSL(color.toArgb(), hsl)
+            hsl[0] = (hsl[0] + degrees) % 360f
+            Color(ColorUtils.HSLToColor(hsl))
+        },
+    )
+}
+
+/**
+ * How much room [StoryChrome] takes above a card's content — the cross, the
+ * segments and the two words, measured rather than guessed at because the
+ * chrome is drawn over the pager and cannot push anything down.
+ */
+private val CHROME_HEIGHT = 96.dp
+
+/** How far down a chart a card goes. */
+private const val STORY_ROWS = 5
+
+/**
+ * The shape of a story card, everywhere. See [StoryFrame] for why it is fixed
+ * rather than following the screen.
+ */
+private const val STORY_ASPECT = 9f / 16f
+
+/** How long a card holds before moving on, unless a finger is on the screen. */
+private const val PAGE_MILLIS = 6_000f
+
+/** The share of the width that means "back" — the left edge, as everywhere else. */
+private const val BACK_ZONE = 0.32f
