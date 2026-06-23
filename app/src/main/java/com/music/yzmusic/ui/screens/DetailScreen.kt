@@ -539,3 +539,78 @@ private fun ReleaseHeader(
     // Every row on a release carries the same credit — see [pageCredit] — so
     // the first one speaks for the whole page, the same source the rows'
     // own long-press "Open artist" already reads from.
+    val artist = songs.firstOrNull()
+
+    // The outer Box just needs to be as tall as its content — we don't force
+    // an aspect ratio here so the action buttons can extend below the artwork.
+    Box(Modifier.fillMaxWidth()) {
+
+        Spacer(Modifier.fillMaxWidth().height(artHeight + HEADER_DROP))
+
+        // Text + action row stacked, pinned to the bottom of the Box.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(bottom = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = page.title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = palette.onBackground,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = HEADER_GUTTER),
+            )
+            // Artist / credit line
+            if (credit.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = credit,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.accent,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .padding(horizontal = HEADER_GUTTER)
+                        .let { m ->
+                            val id = artist?.artistId
+                            if (id == null) {
+                                m
+                            } else {
+                                m.clip(RoundedCornerShape(6.dp))
+                                    .clickable { onArtistClick(id, artist.artist) }
+                            }
+                        },
+                )
+            }
+            // Metadata (kind • year • count)
+            if (meta.isNotBlank()) {
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    text = meta,
+                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.7.sp),
+                    color = palette.onBackgroundVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = HEADER_GUTTER),
+                )
+            }
+
+            // Action buttons — live inside the header so there is zero gap
+            // between the cover zone and the first song row.
+            if (songs.isNotEmpty()) {
+                // Only where YouTube said the release can be saved and the
+                // caller is willing to take the write — see [onToggleLibrary].
+                val library = page.library?.takeIf { onToggleLibrary != null }
+                // Four circles and the pill is as much as this row can carry,
+                // and on a 360dp screen it only carries it by giving something
+                // up: the pill sheds padding first, being the widest thing here,
+                // and the circles come down 4dp after that. The alternative is a
+                // row that runs off the edge of the screen.
+                val circles = listOfNotNull(library, onMore).size + 2 // + Shuffle, Search
+                val full = circles >= 4
