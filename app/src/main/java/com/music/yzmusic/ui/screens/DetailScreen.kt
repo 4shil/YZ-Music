@@ -1218,3 +1218,191 @@ private fun StatChip(icon: ImageVector, text: String, palette: ArtworkPalette) {
  */
 @Composable
 private fun AboutSection(title: String, text: String, palette: ArtworkPalette) {
+    var expanded by remember(text) { mutableStateOf(false) }
+    var clipped by remember(text) { mutableStateOf(false) }
+    Column {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.onBackground,
+            modifier = Modifier.padding(
+                start = PAGE_GUTTER, end = PAGE_GUTTER, top = 2.dp, bottom = 6.dp,
+            ),
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+            color = palette.onBackgroundVariant,
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { result -> if (!expanded) clipped = result.hasVisualOverflow },
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize()
+                .padding(horizontal = PAGE_GUTTER)
+                .let { m -> if (clipped || expanded) m.clickable { expanded = !expanded } else m },
+        )
+        if (clipped || expanded) {
+            Text(
+                text = if (expanded) "Less" else "More",
+                style = MaterialTheme.typography.labelLarge,
+                color = palette.accent,
+                modifier = Modifier
+                    .padding(horizontal = PAGE_GUTTER, vertical = 4.dp)
+                    .clickable { expanded = !expanded },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionHeading(title: String, palette: ArtworkPalette) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.headlineMedium,
+        color = palette.onBackground,
+        modifier = Modifier.padding(
+            start = PAGE_GUTTER, end = PAGE_GUTTER, top = 10.dp, bottom = 8.dp,
+        ),
+    )
+}
+
+/** Compact row used inside the artist song grid; no swipe, to keep the
+ *  horizontal pager's gestures unambiguous. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CompactSongRow(
+    song: Song,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+    downloadedTint: Color? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = song.artworkAt(ROW_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .thumbnailBorder(RoundedCornerShape(7.dp))
+                .background(palette.elevated),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = palette.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = song.artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.onBackgroundVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (downloadedTint != null) {
+            DownloadedBadge(song.videoId, downloadedTint)
+        }
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onLongPress),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Rounded.MoreVert,
+                contentDescription = "More",
+                tint = palette.onBackgroundVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/**
+ * A row under "Suggested" — a track YouTube offers to round the playlist
+ * out but that was never added. [onAdd] is the point of the row, so it gets
+ * the trailing spot a track already on the playlist spends on "more"; the
+ * long-press sheet is still one gesture away for anything else.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SuggestedSongRow(
+    song: Song,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+    onAdd: () -> Unit,
+    downloadedTint: Color? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = song.artworkAt(ROW_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .thumbnailBorder(RoundedCornerShape(8.dp))
+                .background(palette.elevated),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = palette.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = song.artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.onBackgroundVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (downloadedTint != null) {
+            DownloadedBadge(song.videoId, downloadedTint)
+        }
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(palette.accent.copy(alpha = 0.16f))
+                .clickable(onClick = onAdd),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Rounded.Add,
+                contentDescription = "Add to playlist",
+                tint = palette.accent,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
