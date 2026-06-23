@@ -252,3 +252,176 @@ fun DetailScreen(
     val credit = remember(page.subtitle, songs) {
         page.headerLines(songs.size).first.ifBlank { songs.firstOrNull()?.artist.orEmpty() }
     }
+    var canvas by remember(page.browseId) { mutableStateOf<CanvasArtwork?>(null) }
+    LaunchedEffect(page.browseId, page.title, credit, canvasEnabled) {
+        if (!canvasEnabled || page.type != BrowseType.ALBUM) {
+            canvas = null
+            return@LaunchedEffect
+        }
+        // As on the player: the credit fills in once the tracks load, so this
+        // can run twice. Keep a clip that is already playing if the second
+        // pass comes back empty.
+        canvas = CanvasRepository.canvasForAlbum(page.title, credit) ?: canvas
+    }
+
+    val pageHaze = remember { HazeState() }
+
+    // Opening the search carries the page up to it, so the field lands just
+    // clear of the frosted bar with the tracks under it rather than at the foot
+    // of a screen still filled with artwork. Done as an effect rather than in
+    // the tap, so the row it scrolls to is already in the list by the time it
+    // runs.
+    val searchStop = with(LocalDensity.current) { topBarContentPadding().roundToPx() }
+    LaunchedEffect(searching) {
+        if (searching) listState.animateScrollToItem(SEARCH_ITEM_INDEX, -searchStop)
+    }
+
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        // The artwork is drawn behind the list rather than in it, so both need
+        // to agree on its height without being able to ask each other. The
+        // width is the page's, so the ratio decides it and both can work it out
+        // alone.
+        //
+        // Measured rather than read off the window, because the two are not the
+        // same number everywhere: on a tablet the page is the column left over
+        // once the player has its pane, and a height derived from the whole
+        // window there is a sleeve half again as tall as it is wide.
+        val artHeight = maxWidth / if (isArtist) ARTIST_PHOTO_RATIO else SLEEVE_RATIO
+
+        PageBackground(
+            page = page,
+            palette = palette,
+            canvas = canvas,
+            artHeight = artHeight,
+            listState = listState,
+            hazeState = pageHaze,
+            modifier = Modifier.matchParentSize(),
+        )
+
+        MergeBand(
+            palette = palette,
+            artHeight = artHeight,
+            listState = listState,
+            hazeState = pageHaze,
+        )
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            // Both artist photos and release artwork run edge-to-edge up under
+            // the glass bar — the image is the top of the page, not a card on it.
+            contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+        ) {
+            item(key = "header") {
+                if (isArtist) {
+                    ArtistHeader(page = page, palette = palette, artHeight = artHeight)
+                } else {
+                    ReleaseHeader(
+                        page = page,
+                        palette = palette,
+                        artHeight = artHeight,
+                        trackCount = songs.size,
+                        songs = songs,
+                        onPlay = { onSongClick(songs, 0) },
+                        onShuffle = { onShuffle(songs) },
+                        searching = searching,
+                        onSearch = {
+                            if (searching) {
+                                closeSearch()
+                            } else {
+                                searching = true
+                                focusSearch = true
+                            }
+                        },
+                        onMore = onMore,
+                        onArtistClick = onArtistClick,
+                        onToggleLibrary = onToggleLibrary,
+                    )
+                }
+            }
+
+            if (isArtist && (page.subscriberCountText != null || page.monthlyListenerCount != null)) {
+                item(key = "artist-stats") {
+                    ArtistStatsRow(
+                        subscriberCountText = page.subscriberCountText,
+                        monthlyListenerCount = page.monthlyListenerCount,
+                        palette = palette,
+                    )
+                }
+            }
+
+            if (searching) {
+                item(key = "search") {
+                    DetailSearchField(
+                        query = query,
+                        onQueryChange = { query = it },
+                        onClose = closeSearch,
+                        autoFocus = focusSearch,
+                        onFocused = { focusSearch = false },
+                        palette = palette,
+                        type = page.type,
+                    )
+                }
+            }
+
+            if (songs.isNotEmpty() && isArtist) {
+                item(key = "actions") {
+                    ActionRow(
+                        palette = palette,
+                        onPlay = { onSongClick(songs, 0) },
+                        onShuffle = { onShuffle(songs) },
+                        // Halved when an About section follows directly — see
+                        // [AboutSection]'s own top inset, which makes up the
+                        // rest of that shorter gap.
+                        bottomSpace = if (page.description.isNullOrBlank()) 22.dp else 11.dp,
+                    )
+                }
+            }
+
+            // YouTube's own editorial blurb — an album or an artist only, per
+            // [DetailPage.description]. A playlist never carries one, and the
+            // section is skipped for it even on the rare response that does.
+            if (!page.description.isNullOrBlank() &&
+                (page.type == BrowseType.ALBUM || isArtist)
+            ) {
+                item(key = "about") {
+                    AboutSection(
+                        title = if (isArtist) "About the artist" else "About the album",
+                        text = page.description,
+                        palette = palette,
+                    )
+                }
+            }
+
+            when (val state = page.songs) {
+                is UiState.Loading -> detailSkeleton(isArtist)
+                is UiState.Error -> item { MessageState(state.message) }
+                is UiState.Success -> if (isArtist) {
+                    // An artist's full song list would bury the album shelves, so
+                    // it pages sideways four at a time and stops at twenty.
+                    item {
+                        val top = state.data.take(MAX_ARTIST_SONGS)
+                        SectionHeading("Top songs", palette)
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(top.chunked(SONGS_PER_COLUMN)) { column ->
+                                Column(Modifier.fillParentMaxWidth(0.88f)) {
+                                    column.forEach { song ->
+                                        CompactSongRow(
+                                            song = song,
+                                            palette = palette,
+                                            onClick = { onSongClick(top, top.indexOf(song)) },
+                                            onLongPress = { onSongLongPress(song) },
+                                            downloadedTint = downloadedTint,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Every row on an album carries the same sleeve, which is
+                    // already the largest thing on the page — Apple Music
+                    // numbers those rows instead, and so does this.
