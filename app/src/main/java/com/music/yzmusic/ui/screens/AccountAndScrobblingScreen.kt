@@ -42,3 +42,5 @@ fun AccountAndScrobblingScreen(
     modifier: Modifier = Modifier,
 ) {
     val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
+    val lastfmUsername by AppSettings.lastfmUsername.collectAsStateWithLifecycle()
+    val lastfmSessionKey by AppSettings.lastfmSessionKey.collectAsStateWithLifecycle()
