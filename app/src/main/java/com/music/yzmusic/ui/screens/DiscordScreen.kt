@@ -120,3 +120,13 @@ fun DiscordScreen(
     modifier: Modifier = Modifier,
 ) {
     val token by AppSettings.discordToken.collectAsStateWithLifecycle()
+    val username by AppSettings.discordUsername.collectAsStateWithLifecycle()
+    val name by AppSettings.discordName.collectAsStateWithLifecycle()
+    val avatar by AppSettings.discordAvatar.collectAsStateWithLifecycle()
+    val rpcEnabled by AppSettings.discordRpcEnabled.collectAsStateWithLifecycle()
+    val useDetails by AppSettings.discordUseDetails.collectAsStateWithLifecycle()
+    val advancedMode by AppSettings.discordAdvancedMode.collectAsStateWithLifecycle()
+    val status by AppSettings.discordStatus.collectAsStateWithLifecycle()
+    val activityType by AppSettings.discordActivityType.collectAsStateWithLifecycle()
+    val activityName by AppSettings.discordActivityName.collectAsStateWithLifecycle()
+    val button1Text by AppSettings.discordButton1Text.collectAsStateWithLifecycle()
