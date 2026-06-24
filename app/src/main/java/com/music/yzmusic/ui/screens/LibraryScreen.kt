@@ -231,3 +231,53 @@ fun LibraryScreen(
                     shelves.forEach { shelf ->
                         item(key = "shelf:${shelf.title}") {
                             if (shelf.title == PLAYLISTS) {
+                                val pinnedFirst = shelf.pinnedFirst(pinnedPlaylists)
+                                PlaylistShelf(
+                                    shelf = pinnedFirst,
+                                    onItemClick = onShelfItemClick,
+                                    onItemLongPress = onShelfItemLongPress,
+                                    onNewPlaylist = onNewPlaylist,
+                                    onShowAll = { onShowAll(pinnedFirst) },
+                                    pinnedPlaylists = pinnedPlaylists,
+                                )
+                            } else {
+                                LibraryGridShelf(
+                                    shelf = shelf,
+                                    onItemClick = onShelfItemClick,
+                                    onItemLongPress = onShelfItemLongPress,
+                                    onShowAll = { onShowAll(shelf) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The way in to Replay, at the top of the page.
+ *
+ * On the Library tab rather than a tab of its own because that is what Replay
+ * is — a view of what is already yours, alongside the playlists and the
+ * downloads. A fifth tab would give a page most people open a handful of times
+ * a year the same standing as Search.
+ *
+ * ## Why it is painted the way the cards are
+ *
+ * The mesh is the same one the Replay cards and the player's backdrop run —
+ * sampled from the artwork of the record the period was mostly spent on, and
+ * drifting rather than settling (see [MeshGradientBackground]'s `continuous`).
+ * A fixed brand gradient here looked like a promo banner, which is the one thing
+ * this must not be: it advertises the user's own listening, so it should be lit
+ * by the user's own listening, and it should not look like anything else on the
+ * page. With nothing played yet the mesh falls back to its stock colours, which
+ * is a perfectly good button and still not a red rectangle.
+ *
+ * A single wide strip rather than a shelf of cards: there is exactly one of it,
+ * and a carousel with one item in it always reads as a carousel that failed to
+ * load the rest.
+ */
+@Composable
+private fun ReplayBanner(card: ReplayHeroCard?, onClick: () -> Unit) {
