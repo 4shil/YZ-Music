@@ -55,3 +55,21 @@ fun HistoryScreen(
                 )
             }
 
+            is UiState.Success -> {
+                val songs = state.data
+                // The videoId alone is not a key here: the feed is deduplicated
+                // on it, but a list keyed on something that could repeat is one
+                // bad response away from a crash. The index makes it total.
+                itemsIndexed(songs) { index, song ->
+                    SongRow(
+                        song = song,
+                        onClick = { onSongClick(songs, index) },
+                        onLongPress = { onSongLongPress(song) },
+                        onSwipeToQueue = { onSongSwipe(song) },
+                    )
+                    if (index < songs.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        )
