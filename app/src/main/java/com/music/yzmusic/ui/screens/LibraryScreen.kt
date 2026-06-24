@@ -281,3 +281,121 @@ fun LibraryScreen(
  */
 @Composable
 private fun ReplayBanner(card: ReplayHeroCard?, onClick: () -> Unit) {
+    val palette = rememberArtworkColors(card?.artworkUrl)
+    Box(
+        Modifier
+            .padding(horizontal = PAGE_GUTTER, vertical = 6.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick),
+    ) {
+        // Behind the row and sized to it rather than given a height of its own,
+        // so the strip is as tall as its two lines of type and no taller.
+        Box(Modifier.matchParentSize()) {
+            MeshGradientBackground(
+                palette = palette,
+                trackKey = card?.artworkUrl ?: "replay",
+                continuous = true,
+                // A short wide strip: at the backdrop's own radius the four
+                // colours blur into one wash before they reach its ends.
+                blurRadius = 28.dp,
+            )
+        }
+        // The mesh carries a vertical scrim of its own, pitched for a full
+        // screen where it has hundreds of dp to fade across; over a strip this
+        // short it lands as a flat darkening of the whole thing. So this one is
+        // kept deliberately light and runs the other way — just enough under the
+        // words on the left, and almost nothing over the colour on the right,
+        // which is the half anyone actually sees as a gradient.
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color.Black.copy(alpha = 0.34f),
+                            Color.Black.copy(alpha = 0.12f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Your Replay",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                )
+                Text(
+                    // The numbers when there are any, because "5,231 minutes" is
+                    // a reason to tap and a description of the feature is not.
+                    text = card?.let { "${it.value} ${it.label.lowercase(Locale.ROOT)} · ${it.detail}" }
+                        ?: "Top songs, artists, albums and genres — counted on this device",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.82f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Icon(
+                imageVector = YZMusicIcons.ChevronRight,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The one shelf on this page that can be written to: it leads with the tile
+ * that creates a playlist, and holding a card gets rename and delete on top of
+ * the queue actions every other shelf's menu offers.
+ */
+@Composable
+private fun PlaylistShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: (ShelfItem) -> Unit,
+    onNewPlaylist: () -> Unit,
+    onShowAll: () -> Unit,
+    pinnedPlaylists: List<String> = emptyList(),
+) {
+    LibraryGridShelf(
+        shelf = shelf,
+        onItemClick = onItemClick,
+        onItemLongPress = onItemLongPress,
+        onShowAll = onShowAll,
+        pinnedPlaylists = pinnedPlaylists,
+        leadingCard = {
+            NewShelfCard(
+                icon = YZMusicIcons.Plus,
+                label = "New playlist",
+                subtitle = stringResource(R.string.saved_to_youtube_music),
+                onClick = onNewPlaylist,
+            )
+        },
+    )
+}
+
+/** A Library shelf's preview row never swipes past this many cards. */
+private const val LIBRARY_ROW_MAX_ITEMS = 5
+
+/**
+ * A Library shelf: a sideways-scrolling row of [SHELF_CARD_WIDTH] cards, the
+ * same as every other shelf, but stopped at [LIBRARY_ROW_MAX_ITEMS] rather
+ * than left to run the shelf's whole length — with a "Show all" beside the
+ * title whenever there's more than that, opening the rest as a
+ * vertically-scrolling grid instead. See [LibraryGridPage].
+ *
+ * [leadingCard], if given, occupies the first slot and counts against that
+ * cap — see [PlaylistShelf].
+ */
+@Composable
