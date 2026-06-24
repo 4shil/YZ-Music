@@ -127,3 +127,91 @@ fun LibraryScreen(
      */
     downloadedPlaylists: List<SavedCollection> = emptyList(),
 ) {
+    val pinnedPlaylists by AppSettings.pinnedPlaylists.collectAsStateWithLifecycle()
+    PullToRefresh(
+        refreshing = refreshing,
+        onRefresh = onRefresh,
+        state = pullState,
+        modifier = modifier,
+    ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            item {
+                Text(
+                    text = stringResource(R.string.library),
+                    style = MaterialTheme.typography.displayLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
+                )
+            }
+            // Drawn whether or not anything has been played: with nothing behind
+            // it the page still has to say the feature exists, or the only way
+            // to discover it is to have already used it.
+            item(key = "replay") { ReplayBanner(replayCard, onOpenReplay) }
+            item(key = "shelf:$ON_DEVICE") {
+                val onDeviceShelf = HomeShelf(
+                    title = ON_DEVICE,
+                    items = listOf(
+                        ShelfItem(
+                            title = stringResource(R.string.downloads),
+                            subtitle = stringResource(R.string.downloaded_songs),
+                            thumbnailUrl = null,
+                            videoId = null,
+                            browseId = "local:downloads",
+                        ),
+                        ShelfItem(
+                            title = stringResource(R.string.local_music),
+                            subtitle = stringResource(R.string.audio_files_on_device),
+                            thumbnailUrl = null,
+                            videoId = null,
+                            browseId = "local:all",
+                        ),
+                    ) + downloadedPlaylists.map { playlist ->
+                        ShelfItem(
+                            title = playlist.title,
+                            // The credit the playlist was downloaded with,
+                            // because this is also what the page it opens
+                            // bills itself by — see `headerLines`, which
+                            // reads the kind and the owner back out of it.
+                            // Saying "Downloaded playlist" here instead would
+                            // make that header read "Downloaded playlist" over
+                            // "PLAYLIST • 12 SONGS", and the shelf this card
+                            // is on already says where it lives.
+                            subtitle = playlist.subtitle.ifBlank { "Downloaded playlist" },
+                            thumbnailUrl = playlist.thumbnailUrl,
+                            videoId = null,
+                            browseId = Downloads.pageIdFor(playlist.id),
+                        )
+                    },
+                )
+                LibraryGridShelf(
+                    shelf = onDeviceShelf,
+                    onItemClick = onShelfItemClick,
+                    onItemLongPress = onShelfItemLongPress,
+                    onShowAll = { onShowAll(onDeviceShelf) },
+                )
+            }
+            if (!signedIn) {
+                item {
+                    MessageState(
+                        message = "Sign in to your Google account to see your YouTube Music " +
+                            "liked songs, playlists and history.",
+                        actionLabel = "Sign in",
+                        onAction = onSignIn,
+                    )
+                }
+                return@LazyColumn
+            }
+            when (state) {
+                is UiState.Loading -> librarySkeleton()
+                is UiState.Error -> item {
+                    MessageState(state.message, actionLabel = "Retry", onAction = onRetry)
+                }
+                is UiState.Success -> {
+                    // A fresh account has no Playlists shelf at all, and that
+                    // is exactly the account most in need of the button that
+                    // makes one — so the row is drawn either way, empty but
+                    // for the tile that creates the first playlist.
