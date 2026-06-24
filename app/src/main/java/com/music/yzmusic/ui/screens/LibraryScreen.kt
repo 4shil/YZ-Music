@@ -215,3 +215,19 @@ fun LibraryScreen(
                     // is exactly the account most in need of the button that
                     // makes one — so the row is drawn either way, empty but
                     // for the tile that creates the first playlist.
+                    val shelves = state.data.shelves
+                    if (shelves.none { it.title == PLAYLISTS }) {
+                        item(key = "shelf:$PLAYLISTS") {
+                            val emptyPlaylists = HomeShelf(PLAYLISTS, emptyList())
+                            PlaylistShelf(
+                                shelf = emptyPlaylists,
+                                onItemClick = onShelfItemClick,
+                                onItemLongPress = onShelfItemLongPress,
+                                onNewPlaylist = onNewPlaylist,
+                                onShowAll = { onShowAll(emptyPlaylists) },
+                            )
+                        }
+                    }
+                    shelves.forEach { shelf ->
+                        item(key = "shelf:${shelf.title}") {
+                            if (shelf.title == PLAYLISTS) {
