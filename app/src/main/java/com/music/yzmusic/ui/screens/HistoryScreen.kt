@@ -64,3 +64,12 @@ fun HistoryScreen(
                     SongRow(
                         song = song,
                         onClick = { onSongClick(songs, index) },
+                        onLongPress = { onSongLongPress(song) },
+                        onSwipeToQueue = { onSongSwipe(song) },
+                    )
+                    if (index < songs.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        )
