@@ -136,3 +136,5 @@ fun HomeScreen(
         // view — appending shelves doesn't reset it, only leaving the
         // bottom and scrolling back down does, which is exactly when
         // another page is worth asking for.
+        val nearEnd by remember {
+            derivedStateOf {
