@@ -746,3 +746,91 @@ fun DiscordDialogHost(
         }
 
         DiscordDialog.STATUS -> {
+            val current by AppSettings.discordStatus.collectAsStateWithLifecycle()
+            ChoiceAlert(
+                hazeState = hazeState,
+                title = "Status",
+                message = "What your account shows while a presence is up.",
+                options = DiscordPresenceStatus.entries,
+                selected = statusOf(current),
+                label = { it.label },
+                detail = { it.detail },
+                onSelect = {
+                    AppSettings.setDiscordStatus(it.value)
+                    onDismiss()
+                },
+                onDismiss = onDismiss,
+            )
+        }
+
+        DiscordDialog.ACTIVITY_TYPE -> {
+            val current by AppSettings.discordActivityType.collectAsStateWithLifecycle()
+            // Read out here: `detail` is a plain lambda, so the composable
+            // lookup can't happen inside it.
+            val name = AppSettings.discordActivityName.value.ifEmpty { appName() }
+            ChoiceAlert(
+                hazeState = hazeState,
+                title = "Activity",
+                message = "The verb above the card.",
+                options = DiscordActivityKind.entries,
+                selected = kindOf(current),
+                label = { it.label },
+                detail = { "\"${it.verb} $name\"" },
+                onSelect = {
+                    AppSettings.setDiscordActivityType(it.value)
+                    onDismiss()
+                },
+                onDismiss = onDismiss,
+            )
+        }
+
+        DiscordDialog.ACTIVITY_NAME -> {
+            val current by AppSettings.discordActivityName.collectAsStateWithLifecycle()
+            var input by remember { mutableStateOf(current) }
+            TextValueAlert(
+                hazeState = hazeState,
+                title = "Name",
+                message = "What follows the verb on the profile. Leave it empty for " +
+                    "${appName()}.",
+                placeholder = appName(),
+                value = input,
+                onValueChange = { input = it },
+                onSave = {
+                    AppSettings.setDiscordActivityName(input.trim())
+                    onDismiss()
+                },
+                onDismiss = onDismiss,
+            )
+        }
+
+        DiscordDialog.BUTTON_1, DiscordDialog.BUTTON_2 -> {
+            val first = which == DiscordDialog.BUTTON_1
+            val flow = if (first) AppSettings.discordButton1Text else AppSettings.discordButton2Text
+            val current by flow.collectAsStateWithLifecycle()
+            var input by remember { mutableStateOf(current) }
+            TextValueAlert(
+                hazeState = hazeState,
+                title = if (first) "First button" else "Second button",
+                message = "{song_name}, {artist_name} and {album_name} are replaced " +
+                    "with the track.",
+                placeholder = if (first) DiscordRPC.DEFAULT_BUTTON_1 else DiscordRPC.DEFAULT_BUTTON_2,
+                value = input,
+                onValueChange = { input = it },
+                onSave = {
+                    if (first) {
+                        AppSettings.setDiscordButton1Text(input.trim())
+                    } else {
+                        AppSettings.setDiscordButton2Text(input.trim())
+                    }
+                    onDismiss()
+                },
+                onDismiss = onDismiss,
+            )
+        }
+    }
+}
+
+/** The app's own label, minus the dev flavor's suffix. Matches [DiscordRPC]. */
+@Composable
+private fun appName(): String =
+    LocalContext.current.getString(R.string.app_name).removeSuffix(" Dev")
