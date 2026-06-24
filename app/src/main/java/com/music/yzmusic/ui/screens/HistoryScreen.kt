@@ -82,3 +82,9 @@ fun HistoryScreen(
 
 /** Keyed on both, for the reason given at the call site. */
 private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexed(
+    songs: List<Song>,
+    row: @Composable (Int, Song) -> Unit,
+) = items(
+    count = songs.size,
+    key = { "${songs[it].videoId}:$it" },
+) { index -> row(index, songs[index]) }
