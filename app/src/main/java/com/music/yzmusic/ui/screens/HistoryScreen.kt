@@ -37,3 +37,21 @@ fun HistoryScreen(
     onSongSwipe: (Song) -> Unit,
     onRetry: () -> Unit,
     contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        when (state) {
+            is UiState.Loading -> songListSkeleton(count = 10, keyPrefix = "skeleton:history")
+
+            is UiState.Error -> item(key = "history:message") {
+                MessageState(
+                    message = state.message,
+                    actionLabel = "Try again",
+                    onAction = onRetry,
+                )
+            }
+
