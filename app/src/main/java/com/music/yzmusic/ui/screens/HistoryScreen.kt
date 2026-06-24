@@ -73,3 +73,12 @@ fun HistoryScreen(
                             thickness = 0.5.dp,
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Keyed on both, for the reason given at the call site. */
+private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexed(
