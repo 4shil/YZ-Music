@@ -46,3 +46,21 @@ fun HistoryScreen(
     ) {
         when (state) {
             is UiState.Loading -> songListSkeleton(count = 10, keyPrefix = "skeleton:history")
+
+            is UiState.Error -> item(key = "history:message") {
+                MessageState(
+                    message = state.message,
+                    actionLabel = "Try again",
+                    onAction = onRetry,
+                )
+            }
+
+            is UiState.Success -> {
+                val songs = state.data
+                // The videoId alone is not a key here: the feed is deduplicated
+                // on it, but a list keyed on something that could repeat is one
+                // bad response away from a crash. The index makes it total.
+                itemsIndexed(songs) { index, song ->
+                    SongRow(
+                        song = song,
+                        onClick = { onSongClick(songs, index) },
