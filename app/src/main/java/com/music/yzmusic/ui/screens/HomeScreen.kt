@@ -216,3 +216,37 @@ internal fun SectionHeader(title: String, subtitle: String = "", onShowAll: (() 
 }
 
 @Composable
+private fun HeroShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle)
+        // Measured rather than taken as a share of the parent, because the card
+        // has a ceiling as well as a fraction — see [heroCardWidth]. A fixed
+        // width is also the only one of the two the aspect ratio below can turn
+        // into a height, so the card keeps its shape however it was arrived at.
+        BoxWithConstraints {
+            val cardWidth = heroCardWidth(maxWidth)
+            LazyRow(
+                state = rememberLazyListState(),
+                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(shelf.items) { item ->
+                    HeroCard(
+                        item = item,
+                        onClick = { onItemClick(item) },
+                        onLongPress = onItemLongPress?.let { { it(item) } },
+                        modifier = Modifier.width(cardWidth),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Big card: artwork with the caption laid over a scrim, as on Listen Now. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
