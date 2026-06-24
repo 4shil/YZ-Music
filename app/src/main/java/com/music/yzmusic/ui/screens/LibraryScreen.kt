@@ -437,3 +437,17 @@ internal fun LibraryGridShelf(
  * same [libraryGrid] width, run down the screen instead of stopping at one row.
  */
 @Composable
+fun LibraryGridPage(
+    shelf: HomeShelf,
+    gridState: LazyGridState,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: (ShelfItem) -> Unit,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    onNewPlaylist: (() -> Unit)? = null,
+) {
+    // Re-read live rather than trusting [shelf] to already be sorted: this page
+    // is opened from a snapshot (see `libraryShowAll` in MainActivity), and a
+    // pin toggled from this page's own long-press menu must move the card
+    // immediately rather than waiting for the row underneath to be revisited.
+    val pinnedPlaylists by AppSettings.pinnedPlaylists.collectAsStateWithLifecycle()
