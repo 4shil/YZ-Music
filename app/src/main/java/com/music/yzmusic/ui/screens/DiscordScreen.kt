@@ -689,3 +689,60 @@ private fun ProgressLine(positionMs: Long, durationMs: Long) {
     }
 }
 
+private fun formatClock(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    return "%d:%02d".format(Locale.ROOT, total / 60, total % 60)
+}
+
+/**
+ * The Discord screen's dialogs, rendered by the activity so their scrim covers
+ * the tab bar and mini player like every other alert in the app.
+ */
+@Composable
+fun DiscordDialogHost(
+    which: DiscordDialog,
+    hazeState: HazeState,
+    onDismiss: () -> Unit,
+) {
+    when (which) {
+        DiscordDialog.TOKEN -> {
+            val scope = rememberCoroutineScope()
+            var input by remember { mutableStateOf("") }
+            var error by remember { mutableStateOf<String?>(null) }
+            var checking by remember { mutableStateOf(false) }
+            DiscordTokenAlert(
+                hazeState = hazeState,
+                tokenInput = input,
+                onTokenInputChange = { input = it },
+                error = error,
+                loading = checking,
+                // Verified before it is saved, because a token that doesn't work
+                // fails silently later: the presence simply never appears, with
+                // nothing on this screen to say why.
+                onSave = {
+                    checking = true
+                    error = null
+                    scope.launch {
+                        val trimmed = input.trim()
+                        val info = withContext(Dispatchers.IO) {
+                            KizzyRPC.getUserInfo(
+                                trimmed,
+                                SuperProperties.userAgent,
+                                SuperProperties.superPropertiesBase64,
+                            )
+                        }
+                        info.onSuccess {
+                            AppSettings.setDiscordAccount(it.username, it.name, it.avatar)
+                            AppSettings.setDiscordToken(trimmed)
+                            onDismiss()
+                        }.onFailure {
+                            error = "Discord rejected that token."
+                            checking = false
+                        }
+                    }
+                },
+                onDismiss = onDismiss,
+            )
+        }
+
+        DiscordDialog.STATUS -> {
