@@ -746,3 +746,61 @@ fun DiscordDialogHost(
         }
 
         DiscordDialog.STATUS -> {
+            val current by AppSettings.discordStatus.collectAsStateWithLifecycle()
+            ChoiceAlert(
+                hazeState = hazeState,
+                title = "Status",
+                message = "What your account shows while a presence is up.",
+                options = DiscordPresenceStatus.entries,
+                selected = statusOf(current),
+                label = { it.label },
+                detail = { it.detail },
+                onSelect = {
+                    AppSettings.setDiscordStatus(it.value)
+                    onDismiss()
+                },
+                onDismiss = onDismiss,
+            )
+        }
+
+        DiscordDialog.ACTIVITY_TYPE -> {
+            val current by AppSettings.discordActivityType.collectAsStateWithLifecycle()
+            // Read out here: `detail` is a plain lambda, so the composable
+            // lookup can't happen inside it.
+            val name = AppSettings.discordActivityName.value.ifEmpty { appName() }
+            ChoiceAlert(
+                hazeState = hazeState,
+                title = "Activity",
+                message = "The verb above the card.",
+                options = DiscordActivityKind.entries,
+                selected = kindOf(current),
+                label = { it.label },
+                detail = { "\"${it.verb} $name\"" },
+                onSelect = {
+                    AppSettings.setDiscordActivityType(it.value)
+                    onDismiss()
+                },
+                onDismiss = onDismiss,
+            )
+        }
+
+        DiscordDialog.ACTIVITY_NAME -> {
+            val current by AppSettings.discordActivityName.collectAsStateWithLifecycle()
+            var input by remember { mutableStateOf(current) }
+            TextValueAlert(
+                hazeState = hazeState,
+                title = "Name",
+                message = "What follows the verb on the profile. Leave it empty for " +
+                    "${appName()}.",
+                placeholder = appName(),
+                value = input,
+                onValueChange = { input = it },
+                onSave = {
+                    AppSettings.setDiscordActivityName(input.trim())
+                    onDismiss()
+                },
+                onDismiss = onDismiss,
+            )
+        }
+
+        DiscordDialog.BUTTON_1, DiscordDialog.BUTTON_2 -> {
