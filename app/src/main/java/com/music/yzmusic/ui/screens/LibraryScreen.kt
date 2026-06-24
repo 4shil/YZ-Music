@@ -399,3 +399,11 @@ private const val LIBRARY_ROW_MAX_ITEMS = 5
  * cap — see [PlaylistShelf].
  */
 @Composable
+internal fun LibraryGridShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: (ShelfItem) -> Unit,
+    onShowAll: () -> Unit,
+    leadingCard: (@Composable () -> Unit)? = null,
+    pinnedPlaylists: List<String> = emptyList(),
+) {
