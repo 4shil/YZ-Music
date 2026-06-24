@@ -804,3 +804,33 @@ fun DiscordDialogHost(
         }
 
         DiscordDialog.BUTTON_1, DiscordDialog.BUTTON_2 -> {
+            val first = which == DiscordDialog.BUTTON_1
+            val flow = if (first) AppSettings.discordButton1Text else AppSettings.discordButton2Text
+            val current by flow.collectAsStateWithLifecycle()
+            var input by remember { mutableStateOf(current) }
+            TextValueAlert(
+                hazeState = hazeState,
+                title = if (first) "First button" else "Second button",
+                message = "{song_name}, {artist_name} and {album_name} are replaced " +
+                    "with the track.",
+                placeholder = if (first) DiscordRPC.DEFAULT_BUTTON_1 else DiscordRPC.DEFAULT_BUTTON_2,
+                value = input,
+                onValueChange = { input = it },
+                onSave = {
+                    if (first) {
+                        AppSettings.setDiscordButton1Text(input.trim())
+                    } else {
+                        AppSettings.setDiscordButton2Text(input.trim())
+                    }
+                    onDismiss()
+                },
+                onDismiss = onDismiss,
+            )
+        }
+    }
+}
+
+/** The app's own label, minus the dev flavor's suffix. Matches [DiscordRPC]. */
+@Composable
+private fun appName(): String =
+    LocalContext.current.getString(R.string.app_name).removeSuffix(" Dev")
