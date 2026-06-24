@@ -385,3 +385,16 @@ internal fun NewShelfCard(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+internal fun ShelfCard(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
+    /** Set on a Library playlist card that's in [AppSettings.pinnedPlaylists][com.music.yzmusic.data.settings.AppSettings.pinnedPlaylists]. */
+    isPinned: Boolean = false,
+) {
+    Column(
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress),
+    ) {
+        when (item.browseId) {
+            "local:downloads" -> {
