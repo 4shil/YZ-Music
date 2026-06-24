@@ -407,3 +407,47 @@ internal fun LibraryGridShelf(
     leadingCard: (@Composable () -> Unit)? = null,
     pinnedPlaylists: List<String> = emptyList(),
 ) {
+    val leadingCount = if (leadingCard != null) 1 else 0
+    val visibleItems = shelf.items.take((LIBRARY_ROW_MAX_ITEMS - leadingCount).coerceAtLeast(0))
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(
+            title = shelf.title,
+            subtitle = shelf.subtitle,
+            onShowAll = onShowAll.takeIf { shelf.items.size + leadingCount > LIBRARY_ROW_MAX_ITEMS },
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(LIBRARY_GRID_SPACING),
+        ) {
+            leadingCard?.let { card -> item(key = "leading") { card() } }
+            items(visibleItems) { item ->
+                ShelfCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    onLongPress = { onItemLongPress(item) },
+                    isPinned = item.browseId != null && item.browseId in pinnedPlaylists,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Everything a Library shelf's "Show all" opens onto — the same cards, at the
+ * same [libraryGrid] width, run down the screen instead of stopping at one row.
+ */
+@Composable
+fun LibraryGridPage(
+    shelf: HomeShelf,
+    gridState: LazyGridState,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: (ShelfItem) -> Unit,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    onNewPlaylist: (() -> Unit)? = null,
+) {
+    // Re-read live rather than trusting [shelf] to already be sorted: this page
+    // is opened from a snapshot (see `libraryShowAll` in MainActivity), and a
+    // pin toggled from this page's own long-press menu must move the card
+    // immediately rather than waiting for the row underneath to be revisited.
+    val pinnedPlaylists by AppSettings.pinnedPlaylists.collectAsStateWithLifecycle()
