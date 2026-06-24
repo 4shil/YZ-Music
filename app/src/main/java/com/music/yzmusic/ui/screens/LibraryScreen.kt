@@ -407,3 +407,33 @@ internal fun LibraryGridShelf(
     leadingCard: (@Composable () -> Unit)? = null,
     pinnedPlaylists: List<String> = emptyList(),
 ) {
+    val leadingCount = if (leadingCard != null) 1 else 0
+    val visibleItems = shelf.items.take((LIBRARY_ROW_MAX_ITEMS - leadingCount).coerceAtLeast(0))
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(
+            title = shelf.title,
+            subtitle = shelf.subtitle,
+            onShowAll = onShowAll.takeIf { shelf.items.size + leadingCount > LIBRARY_ROW_MAX_ITEMS },
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(LIBRARY_GRID_SPACING),
+        ) {
+            leadingCard?.let { card -> item(key = "leading") { card() } }
+            items(visibleItems) { item ->
+                ShelfCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    onLongPress = { onItemLongPress(item) },
+                    isPinned = item.browseId != null && item.browseId in pinnedPlaylists,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Everything a Library shelf's "Show all" opens onto — the same cards, at the
+ * same [libraryGrid] width, run down the screen instead of stopping at one row.
+ */
+@Composable
