@@ -139,3 +139,41 @@ fun HomeScreen(
         val nearEnd by remember {
             derivedStateOf {
                 val layout = listState.layoutInfo
+                val last = layout.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+                layout.totalItemsCount > 0 && last >= layout.totalItemsCount - 3
+            }
+        }
+        LaunchedEffect(nearEnd) {
+            if (nearEnd) onLoadMore()
+        }
+    }
+}
+
+/**
+ * The lead shelf gets Apple's full-bleed treatment — near-page-width cards that
+ * page sideways — and the rest fall back to the compact grid of square cards.
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
+    shelves: List<HomeShelf>,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)?,
+) {
+    shelves.forEachIndexed { index, shelf ->
+        item(key = shelf.title + index) {
+            if (index == 0) {
+                HeroShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress)
+            } else {
+                Shelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress)
+            }
+        }
+    }
+}
+
+/**
+ * Shared by the home feed, Explore and Library so headings line up across tabs.
+ *
+ * [onShowAll] is only ever set on Library, whose rows stop at five cards
+ * rather than running the shelf's whole length — see [LibraryGridShelf].
+ * Home and Explore never pass it, so their heading is unchanged.
+ */
+@Composable
