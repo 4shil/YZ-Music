@@ -138,3 +138,4 @@ fun HomeScreen(
         // another page is worth asking for.
         val nearEnd by remember {
             derivedStateOf {
+                val layout = listState.layoutInfo
