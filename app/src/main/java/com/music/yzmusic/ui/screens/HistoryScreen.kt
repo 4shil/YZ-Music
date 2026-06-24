@@ -1,0 +1,48 @@
+﻿package com.music.yzmusic.ui.screens
+
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.music.yzmusic.data.model.Song
+import com.music.yzmusic.data.model.UiState
+import com.music.yzmusic.ui.components.MessageState
+import com.music.yzmusic.ui.components.ROW_DIVIDER_INSET
+import com.music.yzmusic.ui.components.SongRow
+import com.music.yzmusic.ui.components.songListSkeleton
+
+/**
+ * What the account has been listening to, most recent first.
+ *
+ * A plain list rather than a page with a header: no single cover stands for a
+ * history, and borrowing one — the newest track's, say — would claim the page
+ * belonged to it.
+ *
+ * Tapping a row plays it with the rest of the history behind it, so the list
+ * doubles as a queue that has already been approved once. That is the useful
+ * reading of a history: not a receipt, but everything worth playing again.
+ */
+@Composable
+fun HistoryScreen(
+    state: UiState<List<Song>>,
+    listState: LazyListState,
+    onSongClick: (List<Song>, Int) -> Unit,
+    onSongLongPress: (Song) -> Unit,
+    onSongSwipe: (Song) -> Unit,
+    onRetry: () -> Unit,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        when (state) {
+            is UiState.Loading -> songListSkeleton(count = 10, keyPrefix = "skeleton:history")
