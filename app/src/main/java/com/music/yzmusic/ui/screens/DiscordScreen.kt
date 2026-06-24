@@ -586,3 +586,106 @@ private fun RichPresencePreview(
             }
         }
 
+        val resolved = { text: String, fallback: String ->
+            val chosen = text.ifEmpty { fallback }
+            if (song != null) DiscordRPC.resolveVariables(chosen, song) else chosen
+        }
+        if (button1Visible) {
+            Spacer(Modifier.height(12.dp))
+            PresenceButton(
+                label = resolved(button1Text, DiscordRPC.DEFAULT_BUTTON_1),
+                enabled = song != null,
+                onClick = {
+                    song?.let {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, DiscordRPC.watchUrl(it).toUri()),
+                        )
+                    }
+                },
+            )
+        }
+        if (button2Visible) {
+            Spacer(Modifier.height(8.dp))
+            PresenceButton(
+                label = resolved(button2Text, DiscordRPC.DEFAULT_BUTTON_2),
+                enabled = true,
+                onClick = {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, DiscordRPC.PROJECT_URL.toUri()),
+                    )
+                },
+            )
+        }
+    }
+}
+
+/** Discord's flat, full-width secondary button. */
+@Composable
+private fun PresenceButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.outline.copy(alpha = if (enabled) 0.9f else 0.4f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = if (enabled) 1f else 0.5f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Elapsed and total, either side of a plain track.
+ *
+ * Deliberately plain: Discord's own bar is a flat 4px rule, and the wavy
+ * indicator this is otherwise shaped like would be this app's idiom leaking
+ * into a picture of somewhere else.
+ */
+@Composable
+private fun ProgressLine(positionMs: Long, durationMs: Long) {
+    val fraction = if (durationMs > 0) {
+        (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.outline),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(fraction)
+                    .height(4.dp)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = formatClock(positionMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = formatClock(durationMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
