@@ -451,3 +451,49 @@ fun LibraryGridPage(
     // pin toggled from this page's own long-press menu must move the card
     // immediately rather than waiting for the row underneath to be revisited.
     val pinnedPlaylists by AppSettings.pinnedPlaylists.collectAsStateWithLifecycle()
+    val sortedShelf = shelf.pinnedFirst(pinnedPlaylists)
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val grid = libraryGrid(maxWidth - PAGE_GUTTER * 2)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(grid.columns),
+            state = gridState,
+            contentPadding = contentPadding,
+            horizontalArrangement = Arrangement.spacedBy(LIBRARY_GRID_SPACING),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            modifier = Modifier.padding(horizontal = PAGE_GUTTER),
+        ) {
+            if (onNewPlaylist != null) {
+                item(key = "leading") {
+                    NewShelfCard(
+                        icon = YZMusicIcons.Plus,
+                        label = "New playlist",
+                        subtitle = stringResource(R.string.saved_to_youtube_music),
+                        onClick = onNewPlaylist,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            items(sortedShelf.items, key = { it.browseId ?: it.title }) { item ->
+                ShelfCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    onLongPress = { onItemLongPress(item) },
+                    modifier = Modifier.fillMaxWidth(),
+                    isPinned = item.browseId != null && item.browseId in pinnedPlaylists,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Moves whichever of this shelf's cards are in [pinned] to the front, in the
+ * order they were pinned, leaving everything else in its existing order behind
+ * them.
+ *
+ * A no-op on any shelf that isn't Playlists: [pinned] only ever holds playlist
+ * browse ids, so an album or artist shelf never has a card that matches.
+ */
+private fun HomeShelf.pinnedFirst(pinned: List<String>): HomeShelf {
+    if (pinned.isEmpty()) return this
+    val byId = items.filter { it.browseId != null }.associateBy { it.browseId }
