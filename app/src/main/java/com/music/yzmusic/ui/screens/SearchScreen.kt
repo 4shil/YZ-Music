@@ -101,3 +101,101 @@ fun SearchScreen(
     contentPadding: PaddingValues,
 ) {
     val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    // Re-tapping the search tab from the nav bar increments focusTrigger;
+    // respond by focusing the field and opening the keyboard.
+    LaunchedEffect(focusTrigger) {
+        if (focusTrigger > 0) focusRequester.requestFocus()
+    }
+    // A non-empty suggestion list means the field is mid-edit — see
+    // MainViewModel.suggestions. Nothing below it is worth showing while it is
+    // up: the results are for whatever was searched before this edit began,
+    // and so are the filter tabs above them.
+    val suggesting = suggestions.isNotEmpty()
+    Column(modifier = modifier.fillMaxSize()) {
+        // Search field and filter tabs stay fixed at the top, outside the
+        // scrolling list, so they're always reachable rather than scrolling
+        // away with the results or recent searches beneath them.
+        Column(modifier = Modifier.padding(top = contentPadding.calculateTopPadding())) {
+            SearchField(
+                query = query,
+                onQueryChange = onQueryChange,
+                onSubmit = onSubmit,
+                focusRequester = focusRequester,
+                modifier = Modifier.padding(start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 4.dp),
+            )
+            // The filters only mean something once there is a result set to narrow;
+            // they stay up for an empty or failed search too, or picking a filter
+            // that finds nothing would take away the control needed to leave it.
+            if (results != null && !suggesting) {
+                SearchFilterTabs(filter = filter, onFilterChange = onFilterChange)
+            }
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+        ) {
+            when {
+                suggesting -> searchSuggestions(
+                    suggestions = suggestions,
+                    // Picking one is done typing, so the keyboard comes down
+                    // with it and the results get the whole screen.
+                    onClick = { term ->
+                        onSuggestionClick(term)
+                        focusManager.clearFocus()
+                    },
+                    onFill = onQueryChange,
+                )
+                results == null -> if (history.isEmpty()) {
+                    item { MessageState(stringResource(R.string.search_empty)) }
+                } else {
+                    recentSearches(history, onHistoryClick, onHistoryRemove, onHistoryClear)
+                }
+                results is UiState.Loading -> songListSkeleton(circular = filter == SearchFilter.ARTISTS)
+                results is UiState.Error -> item { MessageState(results.message) }
+                results is UiState.Success -> {
+                    // Tapping a track plays the tracks around it, not the browse rows.
+                    val tracks = results.data
+                        .filterIsInstance<SearchResult.Track>()
+                        .map { it.song }
+                    itemsIndexed(results.data) { index, row ->
+                        when (row) {
+                            is SearchResult.Track -> SongRow(
+                                song = row.song,
+                                onClick = {
+                                    onSongClick(tracks, tracks.indexOf(row.song).coerceAtLeast(0))
+                                },
+                                onLongPress = { onSongLongPress(row.song) },
+                                onSwipeToQueue = { onSongSwipe(row.song) },
+                            )
+                            is SearchResult.Browse -> BrowseRow(
+                                item = row.item,
+                                onClick = { onBrowseClick(row.item) },
+                                onLongPress = onBrowseLongPress?.let { { it(row.item) } },
+                            )
+                        }
+                        if (index < results.data.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * What YouTube would complete the half-typed query to, in place of the results
+ * while it is being typed.
+ *
+ * The first row is the text as typed, put there by the view model rather than
+ * taken from YouTube's answer, so running exactly what was asked for is always
+ * the nearest row to the keyboard rather than something the thumb has to aim
+ * past.
+ */
