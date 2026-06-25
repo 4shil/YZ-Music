@@ -185,3 +185,22 @@ fun SettingsScreen(
     // Scrobbling states
     val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
     val lastfmUsername by AppSettings.lastfmUsername.collectAsStateWithLifecycle()
+    val lastfmSessionKey by AppSettings.lastfmSessionKey.collectAsStateWithLifecycle()
+    val lastfmScrobbleEnabled by AppSettings.lastfmScrobbleEnabled.collectAsStateWithLifecycle()
+    val lastfmNowPlayingEnabled by AppSettings.lastfmNowPlaying.collectAsStateWithLifecycle()
+    val scrobbleMinDuration by AppSettings.scrobbleMinDuration.collectAsStateWithLifecycle()
+    val scrobbleDelayPercent by AppSettings.scrobbleDelayPercent.collectAsStateWithLifecycle()
+    val scrobbleDelaySeconds by AppSettings.scrobbleDelaySeconds.collectAsStateWithLifecycle()
+    val listenBrainzEnabled by AppSettings.listenBrainzEnabled.collectAsStateWithLifecycle()
+    val listenBrainzToken by AppSettings.listenBrainzToken.collectAsStateWithLifecycle()
+
+    val replayGenres by AppSettings.replayGenres.collectAsStateWithLifecycle()
+
+    var picking by remember { mutableStateOf<QualityTarget?>(null) }
+    var pickingDownloadQuality by remember { mutableStateOf(false) }
+    // What the last export or import did, shown on the row that did it rather
+    // than as a toast: a backup is the one action here whose outcome nobody can
+    // check by looking at the app afterwards. Held per direction, or an import's
+    // result reports itself under the word "Export".
+    var exportStatus by remember { mutableStateOf<String?>(null) }
+    var importStatus by remember { mutableStateOf<String?>(null) }
