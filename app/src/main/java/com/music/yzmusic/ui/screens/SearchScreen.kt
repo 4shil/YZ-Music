@@ -199,3 +199,117 @@ fun SearchScreen(
  * the nearest row to the keyboard rather than something the thumb has to aim
  * past.
  */
+private fun LazyListScope.searchSuggestions(
+    suggestions: List<String>,
+    onClick: (String) -> Unit,
+    onFill: (String) -> Unit,
+) {
+    itemsIndexed(suggestions, key = { _, term -> "suggest:$term" }) { index, term ->
+        SuggestionRow(
+            term = term,
+            // The lead row *is* what's in the field, so there is nothing to
+            // fill it with and the arrow would be a no-op button.
+            onFill = if (index == 0) null else ({ onFill(term) }),
+            onClick = { onClick(term) },
+        )
+    }
+}
+
+/**
+ * One typeahead row: tap the text to search it, or the arrow to put it in the
+ * field and carry on typing — the pair YouTube, Google and every mobile
+ * keyboard's own suggestion strip use, and the reason a longer completion
+ * isn't a dead end when it's only nearly right.
+ */
+@Composable
+private fun SuggestionRow(term: String, onFill: (() -> Unit)?, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = PAGE_GUTTER, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Rounded.Search,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(16.dp))
+        Text(
+            text = term,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (onFill != null) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onFill),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.NorthWest,
+                    contentDescription = stringResource(R.string.recent_search_edit, term),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        } else {
+            // Keeps the text column the same width as the rows below, so the
+            // lead row doesn't sit a touch wider than its completions.
+            Spacer(Modifier.width(40.dp))
+        }
+    }
+}
+
+/**
+ * What was searched for before, shown in place of the results while the field
+ * is empty — the same spot Spotify and Apple Music put it, and the reason the
+ * blank search page isn't just a sentence any more.
+ */
+private fun LazyListScope.recentSearches(
+    history: List<String>,
+    onClick: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    item(key = "recent:header") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = PAGE_GUTTER, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.recent_searches),
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.clear),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(percent = 50))
+                    .clickable(onClick = onClear)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+    items(history, key = { "recent:$it" }) { term ->
+        RecentSearchRow(
+            term = term,
+            onClick = { onClick(term) },
+            onRemove = { onRemove(term) },
+        )
+    }
+}
+
+@Composable
