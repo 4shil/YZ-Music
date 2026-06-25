@@ -100,3 +100,4 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues,
 ) {
+    val focusRequester = remember { FocusRequester() }
