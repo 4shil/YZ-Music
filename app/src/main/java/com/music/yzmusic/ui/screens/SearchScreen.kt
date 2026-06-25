@@ -455,3 +455,83 @@ private fun SearchField(
     focusRequester: FocusRequester = remember { FocusRequester() },
     modifier: Modifier = Modifier,
 ) {
+    val focusManager = LocalFocusManager.current
+    // Both ways of saying "search this" do the same two things, so they're
+    // written once here rather than twice.
+    val submit = {
+        onSubmit()
+        focusManager.clearFocus()
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            // Fixed height prevents the row from growing when text is entered
+            .height(46.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(11.dp))
+            // Asymmetric: the magnifier is a button now and wants a real touch
+            // target, so it's given the room by pulling the field's own start
+            // padding in rather than by pushing the glyph and the text along.
+            .padding(start = 8.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // The search button. It reads as one — a magnifier at the head of a
+        // text field is the search affordance on every platform — and now that
+        // pressing it is the only thing that runs a search, leaving it
+        // decorative would mean the keyboard's own key was the single way in.
+        Icon(
+            Icons.Rounded.Search,
+            contentDescription = stringResource(R.string.search),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .clickable(enabled = query.isNotBlank(), onClick = submit)
+                .padding(6.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.search_hint),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onBackground,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { submit() }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+            )
+        }
+        // Emptying the field is also how the recent searches are got back to,
+        // so it needs to be one tap rather than a held backspace.
+        if (query.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        onQueryChange("")
+                        focusManager.clearFocus()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = stringResource(R.string.clear_search),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
