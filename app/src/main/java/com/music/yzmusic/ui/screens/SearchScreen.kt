@@ -157,3 +157,119 @@ fun SearchScreen(
                 results is UiState.Error -> item { MessageState(results.message) }
                 results is UiState.Success -> {
                     // Tapping a track plays the tracks around it, not the browse rows.
+                    val tracks = results.data
+                        .filterIsInstance<SearchResult.Track>()
+                        .map { it.song }
+                    itemsIndexed(results.data) { index, row ->
+                        when (row) {
+                            is SearchResult.Track -> SongRow(
+                                song = row.song,
+                                onClick = {
+                                    onSongClick(tracks, tracks.indexOf(row.song).coerceAtLeast(0))
+                                },
+                                onLongPress = { onSongLongPress(row.song) },
+                                onSwipeToQueue = { onSongSwipe(row.song) },
+                            )
+                            is SearchResult.Browse -> BrowseRow(
+                                item = row.item,
+                                onClick = { onBrowseClick(row.item) },
+                                onLongPress = onBrowseLongPress?.let { { it(row.item) } },
+                            )
+                        }
+                        if (index < results.data.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * What YouTube would complete the half-typed query to, in place of the results
+ * while it is being typed.
+ *
+ * The first row is the text as typed, put there by the view model rather than
+ * taken from YouTube's answer, so running exactly what was asked for is always
+ * the nearest row to the keyboard rather than something the thumb has to aim
+ * past.
+ */
+private fun LazyListScope.searchSuggestions(
+    suggestions: List<String>,
+    onClick: (String) -> Unit,
+    onFill: (String) -> Unit,
+) {
+    itemsIndexed(suggestions, key = { _, term -> "suggest:$term" }) { index, term ->
+        SuggestionRow(
+            term = term,
+            // The lead row *is* what's in the field, so there is nothing to
+            // fill it with and the arrow would be a no-op button.
+            onFill = if (index == 0) null else ({ onFill(term) }),
+            onClick = { onClick(term) },
+        )
+    }
+}
+
+/**
+ * One typeahead row: tap the text to search it, or the arrow to put it in the
+ * field and carry on typing — the pair YouTube, Google and every mobile
+ * keyboard's own suggestion strip use, and the reason a longer completion
+ * isn't a dead end when it's only nearly right.
+ */
+@Composable
+private fun SuggestionRow(term: String, onFill: (() -> Unit)?, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = PAGE_GUTTER, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Rounded.Search,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(16.dp))
+        Text(
+            text = term,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (onFill != null) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onFill),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.NorthWest,
+                    contentDescription = stringResource(R.string.recent_search_edit, term),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        } else {
+            // Keeps the text column the same width as the rows below, so the
+            // lead row doesn't sit a touch wider than its completions.
+            Spacer(Modifier.width(40.dp))
+        }
+    }
+}
+
+/**
+ * What was searched for before, shown in place of the results while the field
+ * is empty — the same spot Spotify and Apple Music put it, and the reason the
+ * blank search page isn't just a sentence any more.
+ */
