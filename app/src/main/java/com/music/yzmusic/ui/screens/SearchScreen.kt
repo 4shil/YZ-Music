@@ -273,3 +273,43 @@ private fun SuggestionRow(term: String, onFill: (() -> Unit)?, onClick: () -> Un
  * is empty — the same spot Spotify and Apple Music put it, and the reason the
  * blank search page isn't just a sentence any more.
  */
+private fun LazyListScope.recentSearches(
+    history: List<String>,
+    onClick: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    item(key = "recent:header") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = PAGE_GUTTER, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.recent_searches),
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.clear),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(percent = 50))
+                    .clickable(onClick = onClear)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+    items(history, key = { "recent:$it" }) { term ->
+        RecentSearchRow(
+            term = term,
+            onClick = { onClick(term) },
+            onRemove = { onRemove(term) },
+        )
+    }
+}
+
+@Composable
