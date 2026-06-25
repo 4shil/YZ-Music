@@ -153,3 +153,143 @@ fun LocalMusicScreen(
 
     val inDrillDown = drillDownLabel != null
 
+    val leaveDrillDown = {
+        drillDownLabel = null
+        drillDownSongs = emptyList()
+        drillDownArt = null
+    }
+
+    BackHandler(enabled = inDrillDown) { leaveDrillDown() }
+
+    // The tab row is fixed above the scrolling content, so its own top
+    // padding has to clear the frosted top bar / status bar that the
+    // LazyColumns beneath it would otherwise scroll under.
+    val bodyContentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding())
+
+    // contentPadding.top carries extra breathing room meant for scrolling
+    // content resting under the glass bar; the tab row is fixed and sits
+    // right below the bar, so it only needs to clear the bar itself.
+    val barHeight = topBarHeight()
+
+    Column(modifier = modifier.fillMaxSize()) {
+        // ── Search ───────────────────────────────────────────────────────────
+        // Above the tabs rather than inside each one, since a query typed on
+        // Songs is just as reasonable to carry over to Artists or Albums.
+        LocalSearchField(
+            query = searchQuery,
+            onQueryChange = { searchQuery = it },
+            modifier = Modifier.padding(
+                // The same clearance every other page under the frosted bar
+                // gets — see topBarContentPadding, which this screen can't use
+                // directly since its tab row is fixed and only the search field
+                // above it needs to clear the bar.
+                top = barHeight + TopBarContentGap,
+                start = PAGE_GUTTER,
+                end = PAGE_GUTTER,
+                bottom = 4.dp,
+            ),
+        )
+
+        // ── Tab row ──────────────────────────────────────────────────────────
+        TabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.primary,
+            indicator = { tabPositions ->
+                TabRowDefaults.SecondaryIndicator(
+                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            },
+        ) {
+            LocalTab(
+                icon = Icons.Rounded.MusicNote,
+                label = "Songs",
+                selected = selectedTab == LOCAL_TAB_SONGS,
+                onClick = {
+                    selectedTab = LOCAL_TAB_SONGS
+                    leaveDrillDown()
+                },
+            )
+            LocalTab(
+                icon = Icons.Rounded.Person,
+                label = "Artists",
+                selected = selectedTab == LOCAL_TAB_ARTISTS,
+                onClick = {
+                    selectedTab = LOCAL_TAB_ARTISTS
+                    leaveDrillDown()
+                },
+            )
+            LocalTab(
+                icon = Icons.Rounded.Album,
+                label = "Albums",
+                selected = selectedTab == LOCAL_TAB_ALBUMS,
+                onClick = {
+                    selectedTab = LOCAL_TAB_ALBUMS
+                    leaveDrillDown()
+                },
+            )
+        }
+
+        // ── Content ──────────────────────────────────────────────────────────
+        AnimatedContent(
+            targetState = if (inDrillDown) "drill:$drillDownLabel" else "tab:$selectedTab",
+            transitionSpec = {
+                if (targetState.startsWith("drill:")) {
+                    (slideInHorizontally { it } + fadeIn()) togetherWith
+                        (slideOutHorizontally { -it / 3 } + fadeOut())
+                } else {
+                    (slideInHorizontally { -it / 3 } + fadeIn()) togetherWith
+                        (slideOutHorizontally { it } + fadeOut())
+                }
+            },
+            label = "local_music_content",
+            modifier = Modifier.fillMaxSize(),
+        ) { key ->
+            when {
+                // Nothing to tab through. The tab row stays put rather than
+                // being swapped out with the list, so the page still reads as
+                // itself while it says why it's empty.
+                songs.isEmpty() && emptyMessage != null -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bodyContentPadding),
+                    ) {
+                        MessageState(message = emptyMessage)
+                    }
+                }
+
+                key.startsWith("drill:") -> {
+                    // Drill-down song list for artist / album
+                    DrillDownSongList(
+                        label = drillDownLabel ?: "",
+                        artworkUrl = drillDownArt,
+                        songs = drillDownSongs,
+                        onSongClick = onSongClick,
+                        onSongLongPress = onSongLongPress,
+                        onSongSwipe = onSongSwipe,
+                        onShuffle = onShuffle,
+                        onMore = onCollectionLongPress?.let { more ->
+                            { more(drillDownLabel ?: "", drillDownSongs) }
+                        },
+                        onBack = leaveDrillDown,
+                        contentPadding = bodyContentPadding,
+                    )
+                }
+
+                key == "tab:$LOCAL_TAB_SONGS" -> {
+                    val filteredSongs = remember(songs, searchQuery) {
+                        if (searchQuery.isBlank()) songs
+                        else songs.filter { it.matchesSearch(searchQuery) }
+                    }
+                    SongsTab(
+                        songs = filteredSongs,
+                        onSongClick = onSongClick,
+                        onSongLongPress = onSongLongPress,
+                        onSongSwipe = onSongSwipe,
+                        contentPadding = bodyContentPadding,
+                    )
+                }
+
+                key == "tab:$LOCAL_TAB_ARTISTS" -> {
