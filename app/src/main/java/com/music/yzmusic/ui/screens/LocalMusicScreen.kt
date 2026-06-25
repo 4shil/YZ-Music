@@ -479,3 +479,9 @@ private fun ArtistRow(
  * live in a map entry.
  */
 private class AlbumEntry(
+    val title: String,
+    val artist: String,
+    val thumbnailUrl: String?,
+    /** Billed as a playlist rather than by artist; see [AlbumRow]. */
+    val playlist: Boolean,
+    /** Kept in the order it was downloaded in, which is the release's own. */
