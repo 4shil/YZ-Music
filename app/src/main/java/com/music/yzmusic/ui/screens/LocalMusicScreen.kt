@@ -144,3 +144,12 @@ fun LocalMusicScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
     // When non-null, we are showing a drill-down list for that artist or album.
+    var drillDownLabel by remember { mutableStateOf<String?>(null) }
+    var drillDownSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+    // The release's own cover, for the drill-down header. Only a downloaded
+    // album or playlist has one worth showing — a tag-derived grouping's
+    // "artwork" is just whichever of its rows happened to be first.
+    var drillDownArt by remember { mutableStateOf<String?>(null) }
+
+    val inDrillDown = drillDownLabel != null
+
