@@ -516,3 +516,151 @@ private fun albumEntries(
     songs: List<Song>,
     collections: List<DownloadedCollection>,
 ): List<AlbumEntry> {
+    val asked = collections.map { collection ->
+        AlbumEntry(
+            title = collection.title,
+            artist = collection.subtitle.ifBlank {
+                collection.songs.firstOrNull()?.artist.orEmpty()
+            },
+            thumbnailUrl = collection.thumbnailUrl,
+            playlist = collection.playlist,
+            songs = collection.songs,
+            asked = true,
+            key = "asked:${collection.id}",
+        )
+    }
+    val claimed = asked.mapTo(HashSet()) { it.title.lowercase(Locale.ROOT) }
+    val derived = songs
+        .groupBy { it.albumName }
+        .mapNotNull { (name, group) ->
+            // Null is every track that never said what release it was off, and
+            // there is no row to draw for "no album" — those are the Songs tab's
+            // and nothing else's.
+            if (name == null || name.lowercase(Locale.ROOT) in claimed) return@mapNotNull null
+            AlbumEntry(
+                title = name,
+                artist = group.firstOrNull()?.artist.orEmpty(),
+                thumbnailUrl = group.firstNotNullOfOrNull { it.thumbnailUrl },
+                playlist = false,
+                songs = group,
+                asked = false,
+                key = "tagged:$name",
+            )
+        }
+    return (asked + derived).sortedWith(
+        compareByDescending<AlbumEntry> { it.asked }.thenBy { it.title.lowercase(Locale.ROOT) },
+    )
+}
+
+@Composable
+private fun AlbumsTab(
+    albums: List<AlbumEntry>,
+    onAlbumClick: (AlbumEntry) -> Unit,
+    onAlbumLongPress: ((String, List<Song>) -> Unit)?,
+    contentPadding: PaddingValues,
+) {
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        item {
+            SectionHeader(
+                icon = Icons.Rounded.Album,
+                title = "${albums.size} ${if (albums.size == 1) "album" else "albums"}",
+            )
+        }
+        // Songs but no albums: nothing here was downloaded as a release and
+        // nothing carries an album tag either. Worth saying outright — a track
+        // downloaded one at a time from a row that never named a release has no
+        // album for any player to group it under.
+        if (albums.isEmpty()) {
+            item {
+                MessageState(
+                    message = "Nothing here belongs to an album or playlist yet. " +
+                        "Download a whole one and it turns up here.",
+                )
+            }
+        }
+        items(albums, key = { it.key }) { entry ->
+            AlbumRow(
+                entry = entry,
+                onClick = { onAlbumClick(entry) },
+                onLongPress = onAlbumLongPress?.let { { it(entry.title, entry.songs) } },
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AlbumRow(
+    entry: AlbumEntry,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CollectionArtwork(
+            url = entry.thumbnailUrl,
+            playlist = entry.playlist,
+            size = 48.dp,
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = entry.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = buildString {
+                    // A playlist's tracks are off forty different releases, so
+                    // the first one's artist is not a credit for it — the kind
+                    // of thing it is says more, and is true.
+                    if (entry.playlist) {
+                        append("Playlist · ")
+                    } else if (entry.artist.isNotBlank() && entry.artist != entry.title) {
+                        append("${entry.artist} · ")
+                    }
+                    append("${entry.songs.size} ${if (entry.songs.size == 1) "song" else "songs"}")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.PlayArrow,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/**
+ * A release's cover, with a glyph standing in when there isn't one.
+ *
+ * The placeholder is not a fallback so much as the common case for anything
+ * grouped off tags: those files' artwork is whatever the media scanner extracted,
+ * which for a `.m4a` this app wrote is frequently nothing at all. Drawn behind
+ * the image rather than instead of it, so a cover that loads late replaces the
+ * glyph without the row changing size under it.
+ */
+@Composable
+private fun CollectionArtwork(url: String?, playlist: Boolean, size: Dp) {
