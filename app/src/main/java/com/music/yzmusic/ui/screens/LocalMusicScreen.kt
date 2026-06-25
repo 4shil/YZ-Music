@@ -346,3 +346,142 @@ private fun SongsTab(
     onSongSwipe: (Song) -> Unit,
     contentPadding: PaddingValues,
 ) {
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        item {
+            SectionHeader(
+                icon = Icons.Rounded.LibraryMusic,
+                title = "${songs.size} songs",
+            )
+        }
+        itemsIndexed(songs) { index, song ->
+            SongRow(
+                song = song,
+                onClick = { onSongClick(songs, index) },
+                onLongPress = { onSongLongPress(song) },
+                onSwipeToQueue = { onSongSwipe(song) },
+            )
+            if (index < songs.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
+    }
+}
+
+// ── Artists tab ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun ArtistsTab(
+    artists: List<Map.Entry<String, List<Song>>>,
+    onArtistClick: (String, List<Song>) -> Unit,
+    onArtistLongPress: ((String, List<Song>) -> Unit)?,
+    contentPadding: PaddingValues,
+) {
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        item {
+            SectionHeader(
+                icon = Icons.Rounded.Person,
+                title = "${artists.size} artists",
+            )
+        }
+        items(artists) { (artist, artistSongs) ->
+            ArtistRow(
+                name = artist,
+                songCount = artistSongs.size,
+                onClick = { onArtistClick(artist, artistSongs) },
+                onLongPress = onArtistLongPress?.let { { it(artist, artistSongs) } },
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ArtistRow(
+    name: String,
+    songCount: Int,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Avatar circle
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Person,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "$songCount ${if (songCount == 1) "song" else "songs"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.PlayArrow,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+// ── Albums tab ────────────────────────────────────────────────────────────────
+
+/**
+ * One row of the Albums tab, whichever of the two things it came from.
+ *
+ * The tab used to be a `Map.Entry<String, List<Song>>` straight off a `groupBy`,
+ * which was exactly as much as a tag grouping can say. A downloaded release
+ * knows three more things — its own cover, whether it is a playlist rather than
+ * an album, and the order its tracks go in — and none of those has anywhere to
+ * live in a map entry.
+ */
+private class AlbumEntry(
+    val title: String,
+    val artist: String,
+    val thumbnailUrl: String?,
+    /** Billed as a playlist rather than by artist; see [AlbumRow]. */
+    val playlist: Boolean,
+    /** Kept in the order it was downloaded in, which is the release's own. */
