@@ -448,3 +448,10 @@ private fun SearchFilterTabs(filter: SearchFilter, onFilterChange: (SearchFilter
 private val FILTER_PILL_SHAPE = RoundedCornerShape(12.dp)
 
 @Composable
+private fun SearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    focusRequester: FocusRequester = remember { FocusRequester() },
+    modifier: Modifier = Modifier,
+) {
