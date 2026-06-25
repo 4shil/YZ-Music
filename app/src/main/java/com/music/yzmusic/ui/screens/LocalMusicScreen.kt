@@ -516,3 +516,40 @@ private fun albumEntries(
     songs: List<Song>,
     collections: List<DownloadedCollection>,
 ): List<AlbumEntry> {
+    val asked = collections.map { collection ->
+        AlbumEntry(
+            title = collection.title,
+            artist = collection.subtitle.ifBlank {
+                collection.songs.firstOrNull()?.artist.orEmpty()
+            },
+            thumbnailUrl = collection.thumbnailUrl,
+            playlist = collection.playlist,
+            songs = collection.songs,
+            asked = true,
+            key = "asked:${collection.id}",
+        )
+    }
+    val claimed = asked.mapTo(HashSet()) { it.title.lowercase(Locale.ROOT) }
+    val derived = songs
+        .groupBy { it.albumName }
+        .mapNotNull { (name, group) ->
+            // Null is every track that never said what release it was off, and
+            // there is no row to draw for "no album" — those are the Songs tab's
+            // and nothing else's.
+            if (name == null || name.lowercase(Locale.ROOT) in claimed) return@mapNotNull null
+            AlbumEntry(
+                title = name,
+                artist = group.firstOrNull()?.artist.orEmpty(),
+                thumbnailUrl = group.firstNotNullOfOrNull { it.thumbnailUrl },
+                playlist = false,
+                songs = group,
+                asked = false,
+                key = "tagged:$name",
+            )
+        }
+    return (asked + derived).sortedWith(
+        compareByDescending<AlbumEntry> { it.asked }.thenBy { it.title.lowercase(Locale.ROOT) },
+    )
+}
+
+@Composable
