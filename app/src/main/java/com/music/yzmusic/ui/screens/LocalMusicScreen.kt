@@ -485,3 +485,34 @@ private class AlbumEntry(
     /** Billed as a playlist rather than by artist; see [AlbumRow]. */
     val playlist: Boolean,
     /** Kept in the order it was downloaded in, which is the release's own. */
+    val songs: List<Song>,
+    /** Whether this is a release the user asked for, or a grouping inferred. */
+    val asked: Boolean,
+    /**
+     * What the list keys this row by — the release's own id where it has one.
+     *
+     * Not the title: an album and a playlist can be called the same thing (a
+     * self-titled record and its "This is …" mix, say), and two rows sharing a
+     * key is a crash out of `LazyColumn` rather than a cosmetic clash.
+     */
+    val key: String,
+)
+
+/**
+ * The Albums tab's rows: the releases downloaded whole, then whatever else the
+ * files' own album tags group up.
+ *
+ * The two are merged rather than shown as separate sections because they are the
+ * same kind of thing to whoever is looking for one — a folder of songs with a
+ * name they remember. What matters is only that the *named* ones win a collision:
+ * an album downloaded whole also stamps its name onto each of its tracks (see
+ * `withAlbum` in MainActivity), so without this every one of them would appear
+ * twice, once with its cover and once without.
+ *
+ * Releases lead within their own alphabetical run rather than being sorted
+ * together, because a tag grouping is a guess and a recorded release is not.
+ */
+private fun albumEntries(
+    songs: List<Song>,
+    collections: List<DownloadedCollection>,
+): List<AlbumEntry> {
