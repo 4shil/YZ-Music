@@ -293,3 +293,56 @@ fun LocalMusicScreen(
                 }
 
                 key == "tab:$LOCAL_TAB_ARTISTS" -> {
+                    val artists = remember(songs, searchQuery) {
+                        songs.groupBy { it.artist }
+                            .entries
+                            .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
+                            .sortedBy { it.key.lowercase(Locale.ROOT) }
+                    }
+                    ArtistsTab(
+                        artists = artists,
+                        onArtistClick = { artist, artistSongs ->
+                            drillDownLabel = artist
+                            drillDownSongs = artistSongs
+                            drillDownArt = null
+                        },
+                        onArtistLongPress = onCollectionLongPress,
+                        contentPadding = bodyContentPadding,
+                    )
+                }
+
+                else -> {
+                    // LOCAL_TAB_ALBUMS
+                    val albums = remember(songs, collections, searchQuery) {
+                        albumEntries(songs, collections).filter {
+                            searchQuery.isBlank() ||
+                                it.title.contains(searchQuery, ignoreCase = true) ||
+                                it.artist.contains(searchQuery, ignoreCase = true)
+                        }
+                    }
+                    AlbumsTab(
+                        albums = albums,
+                        onAlbumClick = { entry ->
+                            drillDownLabel = entry.title
+                            drillDownSongs = entry.songs
+                            drillDownArt = entry.thumbnailUrl
+                        },
+                        onAlbumLongPress = onCollectionLongPress,
+                        contentPadding = bodyContentPadding,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Songs tab ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SongsTab(
+    songs: List<Song>,
+    onSongClick: (List<Song>, Int) -> Unit,
+    onSongLongPress: (Song) -> Unit,
+    onSongSwipe: (Song) -> Unit,
+    contentPadding: PaddingValues,
+) {
