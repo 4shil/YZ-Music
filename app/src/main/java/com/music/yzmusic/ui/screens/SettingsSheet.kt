@@ -174,3 +174,14 @@ fun SettingsScreen(
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
+    val dontRepeatSuggestions by AppSettings.dontRepeatSuggestions.collectAsStateWithLifecycle()
+    val convertVideoToAudio by AppSettings.convertVideoToAudio.collectAsStateWithLifecycle()
+
+    // Whether the module index URL is baked into this build.
+    val losslessConfigured = BuildConfig.MODULE_INDEX_URL.trim().isNotEmpty()
+    // Whether the module source is currently enabled (toggle state).
+    val moduleEnabled = sourceConfigs.any { it.kind == SourceKind.MODULE && it.enabled && it.isComplete }
+
+    // Scrobbling states
+    val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
+    val lastfmUsername by AppSettings.lastfmUsername.collectAsStateWithLifecycle()
