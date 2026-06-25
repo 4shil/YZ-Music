@@ -664,3 +664,208 @@ private fun AlbumRow(
  */
 @Composable
 private fun CollectionArtwork(url: String?, playlist: Boolean, size: Dp) {
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (playlist) Icons.AutoMirrored.Rounded.QueueMusic else Icons.Rounded.Album,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.size(size * 0.54f),
+        )
+        if (url != null) {
+            AsyncImage(
+                model = url.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size)
+                    .clip(shape)
+                    .thumbnailBorder(shape),
+            )
+        }
+    }
+}
+
+// ── Drill-down song list ───────────────────────────────────────────────────────
+
+@Composable
+private fun DrillDownSongList(
+    label: String,
+    /** The release's cover, where it has one — see [CollectionArtwork]. */
+    artworkUrl: String?,
+    songs: List<Song>,
+    onSongClick: (List<Song>, Int) -> Unit,
+    onSongLongPress: (Song) -> Unit,
+    onSongSwipe: (Song) -> Unit,
+    onShuffle: (List<Song>) -> Unit,
+    onMore: (() -> Unit)?,
+    onBack: () -> Unit,
+    contentPadding: PaddingValues,
+) {
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        // Back + title header
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 6.dp, end = PAGE_GUTTER, top = 6.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                // Only where there is a real cover to show. An artist grouping
+                // has none, and a square of placeholder glyph next to the name
+                // would be decoration standing in for information.
+                if (artworkUrl != null) {
+                    CollectionArtwork(url = artworkUrl, playlist = false, size = 40.dp)
+                    Spacer(Modifier.width(10.dp))
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                // The same menu holding the row in the grid behind this opens.
+                // Reachable from here too because this is where someone ends up
+                // who wanted the whole album and tapped instead of held.
+                onMore?.let { more ->
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = more),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreHoriz,
+                            contentDescription = "More",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Play / Shuffle action row
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Play button
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable { if (songs.isNotEmpty()) onSongClick(songs, 0) }
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Play",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+                // Shuffle button
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                        .clickable { if (songs.isNotEmpty()) onShuffle(songs) }
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Shuffle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Shuffle",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+
+        // Song rows
+        itemsIndexed(songs) { index, song ->
+            SongRow(
+                song = song,
+                onClick = { onSongClick(songs, index) },
+                onLongPress = { onSongLongPress(song) },
+                onSwipeToQueue = { onSongSwipe(song) },
+            )
+            if (index < songs.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
+    }
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/** Whether this track is a hit for a query typed into [LocalSearchField]. */
+private fun Song.matchesSearch(query: String): Boolean =
+    title.contains(query, ignoreCase = true) ||
+        artist.contains(query, ignoreCase = true) ||
+        albumName?.contains(query, ignoreCase = true) == true
+
+/**
+ * The filter box above the tab row.
+ *
+ * Live rather than submit-on-enter: there is no network round trip behind it,
+ * only a list already in memory, so narrowing it on every keystroke costs
+ * nothing and a submit action would just be a tap this screen doesn't need.
+ */
+@Composable
