@@ -553,3 +553,319 @@ private fun albumEntries(
 }
 
 @Composable
+private fun AlbumsTab(
+    albums: List<AlbumEntry>,
+    onAlbumClick: (AlbumEntry) -> Unit,
+    onAlbumLongPress: ((String, List<Song>) -> Unit)?,
+    contentPadding: PaddingValues,
+) {
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        item {
+            SectionHeader(
+                icon = Icons.Rounded.Album,
+                title = "${albums.size} ${if (albums.size == 1) "album" else "albums"}",
+            )
+        }
+        // Songs but no albums: nothing here was downloaded as a release and
+        // nothing carries an album tag either. Worth saying outright — a track
+        // downloaded one at a time from a row that never named a release has no
+        // album for any player to group it under.
+        if (albums.isEmpty()) {
+            item {
+                MessageState(
+                    message = "Nothing here belongs to an album or playlist yet. " +
+                        "Download a whole one and it turns up here.",
+                )
+            }
+        }
+        items(albums, key = { it.key }) { entry ->
+            AlbumRow(
+                entry = entry,
+                onClick = { onAlbumClick(entry) },
+                onLongPress = onAlbumLongPress?.let { { it(entry.title, entry.songs) } },
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AlbumRow(
+    entry: AlbumEntry,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CollectionArtwork(
+            url = entry.thumbnailUrl,
+            playlist = entry.playlist,
+            size = 48.dp,
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = entry.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = buildString {
+                    // A playlist's tracks are off forty different releases, so
+                    // the first one's artist is not a credit for it — the kind
+                    // of thing it is says more, and is true.
+                    if (entry.playlist) {
+                        append("Playlist · ")
+                    } else if (entry.artist.isNotBlank() && entry.artist != entry.title) {
+                        append("${entry.artist} · ")
+                    }
+                    append("${entry.songs.size} ${if (entry.songs.size == 1) "song" else "songs"}")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.PlayArrow,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/**
+ * A release's cover, with a glyph standing in when there isn't one.
+ *
+ * The placeholder is not a fallback so much as the common case for anything
+ * grouped off tags: those files' artwork is whatever the media scanner extracted,
+ * which for a `.m4a` this app wrote is frequently nothing at all. Drawn behind
+ * the image rather than instead of it, so a cover that loads late replaces the
+ * glyph without the row changing size under it.
+ */
+@Composable
+private fun CollectionArtwork(url: String?, playlist: Boolean, size: Dp) {
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (playlist) Icons.AutoMirrored.Rounded.QueueMusic else Icons.Rounded.Album,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.size(size * 0.54f),
+        )
+        if (url != null) {
+            AsyncImage(
+                model = url.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size)
+                    .clip(shape)
+                    .thumbnailBorder(shape),
+            )
+        }
+    }
+}
+
+// ── Drill-down song list ───────────────────────────────────────────────────────
+
+@Composable
+private fun DrillDownSongList(
+    label: String,
+    /** The release's cover, where it has one — see [CollectionArtwork]. */
+    artworkUrl: String?,
+    songs: List<Song>,
+    onSongClick: (List<Song>, Int) -> Unit,
+    onSongLongPress: (Song) -> Unit,
+    onSongSwipe: (Song) -> Unit,
+    onShuffle: (List<Song>) -> Unit,
+    onMore: (() -> Unit)?,
+    onBack: () -> Unit,
+    contentPadding: PaddingValues,
+) {
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+    ) {
+        // Back + title header
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 6.dp, end = PAGE_GUTTER, top = 6.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                // Only where there is a real cover to show. An artist grouping
+                // has none, and a square of placeholder glyph next to the name
+                // would be decoration standing in for information.
+                if (artworkUrl != null) {
+                    CollectionArtwork(url = artworkUrl, playlist = false, size = 40.dp)
+                    Spacer(Modifier.width(10.dp))
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                // The same menu holding the row in the grid behind this opens.
+                // Reachable from here too because this is where someone ends up
+                // who wanted the whole album and tapped instead of held.
+                onMore?.let { more ->
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = more),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreHoriz,
+                            contentDescription = "More",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Play / Shuffle action row
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Play button
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable { if (songs.isNotEmpty()) onSongClick(songs, 0) }
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Play",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+                // Shuffle button
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                        .clickable { if (songs.isNotEmpty()) onShuffle(songs) }
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Shuffle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Shuffle",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+
+        // Song rows
+        itemsIndexed(songs) { index, song ->
+            SongRow(
+                song = song,
+                onClick = { onSongClick(songs, index) },
+                onLongPress = { onSongLongPress(song) },
+                onSwipeToQueue = { onSongSwipe(song) },
+            )
+            if (index < songs.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
+    }
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/** Whether this track is a hit for a query typed into [LocalSearchField]. */
+private fun Song.matchesSearch(query: String): Boolean =
+    title.contains(query, ignoreCase = true) ||
+        artist.contains(query, ignoreCase = true) ||
+        albumName?.contains(query, ignoreCase = true) == true
+
+/**
+ * The filter box above the tab row.
+ *
+ * Live rather than submit-on-enter: there is no network round trip behind it,
+ * only a list already in memory, so narrowing it on every keystroke costs
+ * nothing and a submit action would just be a tap this screen doesn't need.
+ */
+@Composable
