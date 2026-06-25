@@ -497,3 +497,12 @@ fun LibraryGridPage(
 private fun HomeShelf.pinnedFirst(pinned: List<String>): HomeShelf {
     if (pinned.isEmpty()) return this
     val byId = items.filter { it.browseId != null }.associateBy { it.browseId }
+    val pinnedItems = pinned.mapNotNull { byId[it] }
+    if (pinnedItems.isEmpty()) return this
+    val pinnedSet = pinnedItems.toSet()
+    return copy(items = pinnedItems + items.filter { it !in pinnedSet })
+}
+
+/** The library feed whose cards are the account's own — see [PlaylistShelf]. */
+private const val PLAYLISTS = YtMusicRepository.PLAYLISTS_SHELF
+private const val ON_DEVICE = "On Device"
