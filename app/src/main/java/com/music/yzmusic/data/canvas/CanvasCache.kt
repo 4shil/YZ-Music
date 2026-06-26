@@ -54,3 +54,6 @@ object CanvasCache {
     /**
      * [upstream] wrapped so a clip already on disk never touches the
      * network again — see the class doc for why that is the whole point.
+     * A cache write that fails (full disk, evicted mid-write) drops back to
+     * plain streaming rather than surfacing as a playback error, the same
+     * choice [com.music.yzmusic.playback.AudioCache] makes for audio.
