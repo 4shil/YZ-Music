@@ -258,3 +258,27 @@ object AppleMusicCanvas {
 
         // Not every hit expands its relationships, but the web URL always ends
         // in the album id: .../album/<slug>/<id>?i=<song id>
+        val url = song["attributes"]?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+            ?: return null
+        return url.substringAfter("/album/", "")
+            .substringBefore("?")
+            .substringAfterLast("/")
+            .takeIf { it.isNotBlank() && it.all(Char::isDigit) }
+    }
+
+    private fun fetchAlbum(
+        albumId: String,
+        bearer: String,
+        songTitle: String?,
+        songArtist: String?,
+    ): CanvasArtwork? {
+        val url = "$AMP/$storefront/albums/$albumId".toHttpUrl().newBuilder()
+            .addQueryParameter("extend", "editorialVideo")
+            .build()
+            .toString()
+
+        val body = get(url, bearer) ?: return null
+        val album = runCatching {
+            json.parseToJsonElement(body).jsonObject["data"]?.jsonArray?.firstOrNull()?.jsonObject
+        }.getOrNull() ?: return null
+
