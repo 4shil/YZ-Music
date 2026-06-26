@@ -50,3 +50,32 @@ data class CanvasArtwork(
 
         val titleArtists = splitArtists(wantArtist)
         val ourArtists = splitArtists(artist.orEmpty())
+        val artistOk = artist == null || wantArtist.isBlank() ||
+            (titleArtists.isNotEmpty() && ourArtists.isNotEmpty() &&
+                titleArtists.all { want -> ourArtists.any { it == want } })
+
+        val albumOk = album.isNullOrBlank() || wantAlbum.isNullOrBlank() ||
+            album.normalizeForMatch() == wantAlbum.normalizeForMatch()
+
+        return titleOk && artistOk && albumOk
+    }
+}
+
+/**
+ * Case, accents and punctuation all differ between YouTube Music, Apple and
+ * Tidal for the same release — "Beyoncé - CRAZY IN LOVE (feat. JAY-Z)" against
+ * "Beyonce Crazy in Love feat Jay Z". Fold all three away before comparing.
+ */
+internal fun String.normalizeForMatch(): String =
+    Normalizer.normalize(this, Normalizer.Form.NFD)
+        .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+        .lowercase(Locale.ROOT)
+        .replace(Regex("[^a-z0-9\\s]"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+/**
+ * One credit string into its individual artists. Every service picks its own
+ * separator — commas, ampersands, "feat.", a bare "x" between collaborators —
+ * so comparing the joined strings would fail on formatting alone.
+ */
