@@ -44,3 +44,8 @@ data class CanvasArtwork(
      * may never get one, so requiring it outright would mean no canvas at all
      * for most of a session.
      */
+    fun matches(wantTitle: String, wantArtist: String, wantAlbum: String?): Boolean {
+        val titleOk = title == null || wantTitle.isBlank() ||
+            title.normalizeForMatch() == wantTitle.normalizeForMatch()
+
+        val titleArtists = splitArtists(wantArtist)
