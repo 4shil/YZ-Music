@@ -33,3 +33,9 @@ import java.io.File
 @UnstableApi
 object CanvasCache {
 
+    /**
+     * Small on purpose — a clip is a few seconds of video, not a song, and
+     * this only needs to outlive one player screen's worth of looping, not
+     * a library. [SimpleCache]'s own evictor reclaims the rest.
+     */
+    private const val CACHE_LIMIT_BYTES = 150L * 1024 * 1024
