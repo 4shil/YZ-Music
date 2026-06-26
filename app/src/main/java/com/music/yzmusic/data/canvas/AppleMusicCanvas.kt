@@ -57,3 +57,44 @@ object AppleMusicCanvas {
             }
         }
 
+        val url = "$AMP/$storefront/search".toHttpUrl().newBuilder()
+            .addQueryParameter("term", term)
+            .addQueryParameter("types", "songs")
+            .addQueryParameter("limit", "10")
+            .addQueryParameter("extend", "editorialVideo")
+            .addQueryParameter("include", "albums")
+            .build()
+            .toString()
+
+        val body = get(url, bearer) ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        val hits = root["results"]?.jsonObject
+            ?.get("songs")?.jsonObject
+            ?.get("data")?.jsonArray
+            ?: return null
+
+        val ranked = hits.mapNotNull { hit ->
+            val song = hit as? JsonObject ?: return@mapNotNull null
+            val score = score(song, title, artist, album) ?: return@mapNotNull null
+            score to song
+        }.sortedByDescending { it.first }
+
+        for ((score, song) in ranked) {
+            if (score < MIN_SCORE) {
+                Log.d(TAG, "no hit scored above $MIN_SCORE for '$title' (best was $score)")
+                break
+            }
+            val attributes = song["attributes"]?.jsonObject ?: continue
+            val songName = attributes["name"]?.jsonPrimitive?.contentOrNull
+            val songArtist = attributes["artistName"]?.jsonPrimitive?.contentOrNull
+            val albumName = attributes["albumName"]?.jsonPrimitive?.contentOrNull
+
+            // Some searches already carry the motion artwork inline, which
+            // saves the album round trip entirely.
+            attributes["editorialVideo"]?.jsonObject?.let { video ->
+                motionUrls(video)?.let { (primary, alternate) ->
+                    Log.d(TAG, "inline motion artwork for '$songName'")
+                    return CanvasArtwork(primary, alternate, songName, songArtist, albumName)
+                }
+            }
+
