@@ -66,3 +66,16 @@ data class CanvasArtwork(
  * Tidal for the same release — "Beyoncé - CRAZY IN LOVE (feat. JAY-Z)" against
  * "Beyonce Crazy in Love feat Jay Z". Fold all three away before comparing.
  */
+internal fun String.normalizeForMatch(): String =
+    Normalizer.normalize(this, Normalizer.Form.NFD)
+        .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+        .lowercase(Locale.ROOT)
+        .replace(Regex("[^a-z0-9\\s]"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+/**
+ * One credit string into its individual artists. Every service picks its own
+ * separator — commas, ampersands, "feat.", a bare "x" between collaborators —
+ * so comparing the joined strings would fail on formatting alone.
+ */
