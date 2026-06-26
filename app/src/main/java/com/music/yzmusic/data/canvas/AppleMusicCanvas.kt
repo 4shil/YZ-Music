@@ -345,3 +345,29 @@ object AppleMusicCanvas {
      * fixes nothing and makes every canvas lookup pay for the round trip.
      */
     @Synchronized
+    private fun token(): String? {
+        val now = System.currentTimeMillis()
+        cachedToken?.let { if (now < tokenExpiresAtMs - 60_000) return it }
+        if (now < retryTokenAfterMs) return null
+
+        val html = canvasGet(WEB_PLAYER, mapOf("User-Agent" to CANVAS_UA))
+        val scripts = html?.let {
+            Regex("""/assets/index(?:-legacy)?[~-][A-Za-z0-9_-]+\.js""")
+                .findAll(it).map(MatchResult::value).distinct().toList()
+        }.orEmpty()
+
+        for (path in scripts) {
+            val script = canvasGet("https://music.apple.com$path", mapOf("User-Agent" to CANVAS_UA))
+                ?: continue
+            val candidates = Regex("""ey[A-Za-z0-9_-]+\.ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+""")
+                .findAll(script)
+                .map(MatchResult::value)
+                .distinct()
+                .filter { it !in rejected }
+                .mapNotNull { jwt -> expiry(jwt)?.let { jwt to it } }
+                .filter { it.second > now }
+                .toList()
+            if (candidates.isEmpty()) continue
+
+            // The web player's own token first; anything else is a guess kept
+            // only so a change in how Apple labels it isn't fatal.
