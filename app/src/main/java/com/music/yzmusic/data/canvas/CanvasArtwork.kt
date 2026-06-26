@@ -79,3 +79,37 @@ internal fun String.normalizeForMatch(): String =
  * separator — commas, ampersands, "feat.", a bare "x" between collaborators —
  * so comparing the joined strings would fail on formatting alone.
  */
+internal fun splitArtists(raw: String): List<String> =
+    raw.split(ARTIST_SEPARATORS)
+        .map { it.normalizeForMatch() }
+        .filter { it.isNotBlank() }
+
+private val ARTIST_SEPARATORS = Regex(
+    "(?:\\s*,\\s*|\\s*&\\s*|\\s+×\\s+|\\s+x\\s+|\\bfeat\\.?\\b|\\bft\\.?\\b|\\bfeaturing\\b|\\bwith\\b)",
+    RegexOption.IGNORE_CASE,
+)
+
+/**
+ * A plain GET returning the body, or null for anything that isn't a 2xx or
+ * that throws. Canvas is decoration: no provider failure is allowed to reach
+ * the caller, and none of these hosts are ours to depend on.
+ *
+ * Shares [Http.client] with the rest of the app so these lookups reuse its
+ * connection pool rather than standing up a second HTTP stack.
+ */
+internal fun canvasGet(url: String, headers: Map<String, String> = emptyMap()): String? {
+    val request = Request.Builder().url(url).apply {
+        headers.forEach { (name, value) -> header(name, value) }
+    }.build()
+    return runCatching {
+        Http.client.newCall(request).execute().use { response ->
+            if (response.isSuccessful) response.body?.string() else null
+        }
+    }.getOrNull()
+}
+
+/**
+ * Same as [canvasGet], but keeps the status code even on failure — for the
+ * few callers where "it wasn't a 2xx" needs to say *which* code, rather than
+ * collapsing every kind of failure into the same null.
+ */
