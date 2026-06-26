@@ -45,3 +45,9 @@ object CanvasCache {
     /** Opened once per process, alongside [com.music.yzmusic.playback.AudioCache.init]. */
     fun init(context: Context) {
         cache = SimpleCache(
+            File(context.cacheDir, "canvas"),
+            LeastRecentlyUsedCacheEvictor(CACHE_LIMIT_BYTES),
+            StandaloneDatabaseProvider(context),
+        )
+    }
+
