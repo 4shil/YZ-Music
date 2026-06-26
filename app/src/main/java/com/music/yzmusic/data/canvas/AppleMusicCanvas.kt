@@ -122,3 +122,21 @@ object AppleMusicCanvas {
             .build()
             .toString()
 
+        val body = get(url, bearer) ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        val hits = root["results"]?.jsonObject
+            ?.get("albums")?.jsonObject
+            ?.get("data")?.jsonArray
+            ?: return null
+
+        val ranked = hits.mapNotNull { hit ->
+            val record = hit as? JsonObject ?: return@mapNotNull null
+            // An album is its own "album" as far as the scoring goes, which is
+            // what keeps a deluxe edition from outranking the plain one.
+            val score = score(record, album, artist, album, albumIsSelf = true)
+                ?: return@mapNotNull null
+            score to record
+        }.sortedByDescending { it.first }
+
+        for ((score, record) in ranked) {
+            if (score < MIN_SCORE) break
