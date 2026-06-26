@@ -345,3 +345,78 @@ object AppleMusicCanvas {
      * fixes nothing and makes every canvas lookup pay for the round trip.
      */
     @Synchronized
+    private fun token(): String? {
+        val now = System.currentTimeMillis()
+        cachedToken?.let { if (now < tokenExpiresAtMs - 60_000) return it }
+        if (now < retryTokenAfterMs) return null
+
+        val html = canvasGet(WEB_PLAYER, mapOf("User-Agent" to CANVAS_UA))
+        val scripts = html?.let {
+            Regex("""/assets/index(?:-legacy)?[~-][A-Za-z0-9_-]+\.js""")
+                .findAll(it).map(MatchResult::value).distinct().toList()
+        }.orEmpty()
+
+        for (path in scripts) {
+            val script = canvasGet("https://music.apple.com$path", mapOf("User-Agent" to CANVAS_UA))
+                ?: continue
+            val candidates = Regex("""ey[A-Za-z0-9_-]+\.ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+""")
+                .findAll(script)
+                .map(MatchResult::value)
+                .distinct()
+                .filter { it !in rejected }
+                .mapNotNull { jwt -> expiry(jwt)?.let { jwt to it } }
+                .filter { it.second > now }
+                .toList()
+            if (candidates.isEmpty()) continue
+
+            // The web player's own token first; anything else is a guess kept
+            // only so a change in how Apple labels it isn't fatal.
+            val (jwt, expiresAt) = candidates.firstOrNull { isWebPlayerToken(it.first) }
+                ?: candidates.first()
+            cachedToken = jwt
+            tokenExpiresAtMs = expiresAt
+            Log.d(TAG, "web player token good until ${java.util.Date(expiresAt)}")
+            return jwt
+        }
+
+        Log.w(TAG, "no usable web player token in ${scripts.size} bundle(s); backing off")
+        retryTokenAfterMs = now + TOKEN_RETRY_MS
+        return null
+    }
+
+    private const val TOKEN_RETRY_MS = 30L * 60 * 1000
+
+    /**
+     * An authenticated catalog read. A 401 means the token we picked out of
+     * the bundle isn't the one this endpoint honours, so it is struck off and
+     * the next lookup re-scrapes and picks a different one — the alternative
+     * is being locked out until the app restarts.
+     */
+    private fun get(url: String, bearer: String): String? {
+        val request = Request.Builder().url(url).apply {
+            authHeaders(bearer).forEach { (name, value) -> header(name, value) }
+        }.build()
+        return runCatching {
+            Http.client.newCall(request).execute().use { response ->
+                when {
+                    response.isSuccessful -> response.body?.string()
+                    response.code == 401 -> {
+                        Log.w(TAG, "token rejected by the catalog API; will re-scrape")
+                        synchronized(this) {
+                            rejected += bearer
+                            if (cachedToken == bearer) {
+                                cachedToken = null
+                                tokenExpiresAtMs = 0L
+                            }
+                        }
+                        null
+                    }
+                    else -> null
+                }
+            }
+        }.getOrNull()
+    }
+
+    /** The web player's token names itself in the header `kid` and payload `iss`. */
+    private fun isWebPlayerToken(jwt: String): Boolean = runCatching {
+        val parts = jwt.split(".")
