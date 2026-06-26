@@ -420,3 +420,25 @@ object AppleMusicCanvas {
     /** The web player's token names itself in the header `kid` and payload `iss`. */
     private fun isWebPlayerToken(jwt: String): Boolean = runCatching {
         val parts = jwt.split(".")
+        val header = String(Base64.getUrlDecoder().decode(parts[0]), Charsets.UTF_8)
+        val payload = String(Base64.getUrlDecoder().decode(parts[1]), Charsets.UTF_8)
+        header.contains("WebPlayKid") || payload.contains("AMPWebPlay")
+    }.getOrDefault(false)
+
+    /** A JWT's `exp` in millis, or null if this isn't one we can read. */
+    private fun expiry(jwt: String): Long? = runCatching {
+        val payload = String(
+            Base64.getUrlDecoder().decode(jwt.split(".")[1]),
+            Charsets.UTF_8,
+        )
+        val seconds = Regex("\"exp\"\\s*:\\s*(\\d+)").find(payload)?.groupValues?.get(1)
+        seconds?.toLong()?.times(1000)
+    }.getOrDefault(null)
+
+    private fun authHeaders(bearer: String) = mapOf(
+        "Authorization" to "Bearer $bearer",
+        "Origin" to "https://music.apple.com",
+        "Referer" to "https://music.apple.com/",
+        "User-Agent" to CANVAS_UA,
+    )
+}
