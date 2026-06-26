@@ -312,3 +312,36 @@ object AppleMusicCanvas {
                 ?: asset["url"]?.jsonPrimitive?.contentOrNull
         }?.takeIf { it.isNotBlank() }
 
+        val square = link("motionDetailSquare") ?: link("motionSquareVideo1x1")
+        val raw = link("motionDetailRaw")
+        val tall = link("motionDetailTall") ?: link("motionTallVideo3x4")
+        val primary = square ?: raw ?: tall ?: return null
+        val alternate = listOfNotNull(square, raw, tall).firstOrNull { it != primary }
+        return primary to alternate
+    }
+
+    // ---- Token ---------------------------------------------------------
+
+    private var cachedToken: String? = null
+    private var tokenExpiresAtMs = 0L
+    private var retryTokenAfterMs = 0L
+
+    /** Tokens the catalog API has already turned down. See [get]. */
+    private val rejected = mutableSetOf<String>()
+
+    /**
+     * The anonymous bearer token the Apple Music web player uses for catalog
+     * reads. It isn't published anywhere and rotates every few weeks, so it is
+     * read the way the browser gets it: load the web player, find the JS
+     * bundle it pulls in, and pick the token out of it. Held until shortly
+     * before it expires.
+     *
+     * The bundle ships several unrelated JWTs and only the web player's own is
+     * accepted here — the others come back 401 — so this picks by issuer
+     * rather than taking the first one that parses.
+     *
+     * A failed scrape backs off for [TOKEN_RETRY_MS] rather than retrying per
+     * track: if Apple has changed the page shape, hammering it on every skip
+     * fixes nothing and makes every canvas lookup pay for the round trip.
+     */
+    @Synchronized
