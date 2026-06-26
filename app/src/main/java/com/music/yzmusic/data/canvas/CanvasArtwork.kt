@@ -29,3 +29,4 @@ data class CanvasArtwork(
     val url: String,
     val fallbackUrl: String? = null,
     val title: String? = null,
+    val artist: String? = null,
