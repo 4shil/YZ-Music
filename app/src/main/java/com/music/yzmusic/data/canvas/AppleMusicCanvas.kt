@@ -221,3 +221,40 @@ object AppleMusicCanvas {
         // A "(Deluxe)" or "(Remastered)" on one side only is a different
         // master of the same track, and often a different clip.
         for (word in EDITION_WORDS) {
+            val inWanted = title.contains(word, ignoreCase = true)
+            val inHit = hitName.contains(word, ignoreCase = true)
+            if (inWanted && inHit) score += 5 else if (inHit) score -= 3
+        }
+
+        return score
+    }
+
+    private val EDITION_WORDS =
+        listOf("deluxe", "expanded", "remastered", "remix", "version", "edit", "mix", "bonus")
+
+    /**
+     * Editorial playlists and radio mixes have motion artwork of their own,
+     * and Apple returns them alongside albums. Theirs belongs to the playlist,
+     * not to the track, so putting one behind a sleeve is always wrong.
+     */
+    private fun isCompilation(name: String): Boolean {
+        val lower = name.lowercase(Locale.ROOT)
+        return COMPILATION_MARKERS.any { lower.contains(it) }
+    }
+
+    private val COMPILATION_MARKERS = listOf(
+        "playlist", "set list", "essentials", "dj mix", "mixed",
+        "apple music", "today's hits", "session",
+    )
+
+    // ---- Album lookup --------------------------------------------------
+
+    private fun albumId(song: JsonObject): String? {
+        val fromRelationship = song["relationships"]?.jsonObject
+            ?.get("albums")?.jsonObject
+            ?.get("data")?.jsonArray?.firstOrNull()
+            ?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+        if (fromRelationship != null) return fromRelationship.takeUnless { it.startsWith("pl.") }
+
+        // Not every hit expands its relationships, but the web URL always ends
+        // in the album id: .../album/<slug>/<id>?i=<song id>
