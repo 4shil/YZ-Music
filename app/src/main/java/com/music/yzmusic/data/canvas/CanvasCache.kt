@@ -51,3 +51,6 @@ object CanvasCache {
         )
     }
 
+    /**
+     * [upstream] wrapped so a clip already on disk never touches the
+     * network again — see the class doc for why that is the whole point.
