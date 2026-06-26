@@ -27,3 +27,5 @@ enum class CanvasSource { SPOTIFY, OTHER }
  */
 data class CanvasArtwork(
     val url: String,
+    val fallbackUrl: String? = null,
+    val title: String? = null,
