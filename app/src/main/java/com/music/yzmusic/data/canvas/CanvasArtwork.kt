@@ -49,3 +49,4 @@ data class CanvasArtwork(
             title.normalizeForMatch() == wantTitle.normalizeForMatch()
 
         val titleArtists = splitArtists(wantArtist)
+        val ourArtists = splitArtists(artist.orEmpty())
