@@ -140,3 +140,59 @@ object AppleMusicCanvas {
 
         for ((score, record) in ranked) {
             if (score < MIN_SCORE) break
+            val attributes = record["attributes"]?.jsonObject ?: continue
+            val name = attributes["name"]?.jsonPrimitive?.contentOrNull
+            if (name != null && isCompilation(name)) continue
+            val video = attributes["editorialVideo"]?.jsonObject ?: continue
+            val (primary, alternate) = motionUrls(video) ?: continue
+
+            Log.d(TAG, "motion artwork for album '$name'")
+            return CanvasArtwork(
+                url = primary,
+                fallbackUrl = alternate,
+                title = name,
+                artist = attributes["artistName"]?.jsonPrimitive?.contentOrNull,
+                album = name,
+            )
+        }
+        return null
+    }
+
+    // ---- Search scoring ------------------------------------------------
+
+    /**
+     * The floor a hit has to clear. An exact artist and an exact title alone
+     * reach 25, so this only ever admits a result that matched on both, or one
+     * that matched the artist plus a fuzzy title and the right album.
+     */
+    private const val MIN_SCORE = 12
+
+    /**
+     * How well a search hit lines up with what's playing, or null to reject it
+     * outright. Artist is a gate rather than a score: a clip credited to
+     * someone else is never the right one, however well the title reads.
+     */
+    private fun score(
+        song: JsonObject,
+        title: String,
+        artist: String,
+        album: String?,
+        // An album result has no `albumName` of its own — it *is* the album.
+        albumIsSelf: Boolean = false,
+    ): Int? {
+        val attributes = song["attributes"]?.jsonObject ?: return null
+        val hitName = attributes["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val hitArtist = attributes["artistName"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val hitAlbum = if (albumIsSelf) {
+            hitName
+        } else {
+            attributes["albumName"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        }
+
+        if (isCompilation(hitName) || isCompilation(hitAlbum)) return null
+
+        val wanted = splitArtists(artist)
+        val credited = splitArtists(hitArtist)
+        if (wanted.isEmpty() || credited.isEmpty()) return null
+        if (!wanted.all { want -> credited.any { it == want } }) return null
+
