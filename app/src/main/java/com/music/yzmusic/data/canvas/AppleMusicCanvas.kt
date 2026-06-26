@@ -196,3 +196,28 @@ object AppleMusicCanvas {
         if (wanted.isEmpty() || credited.isEmpty()) return null
         if (!wanted.all { want -> credited.any { it == want } }) return null
 
+        var score = 10
+
+        val wantTitle = title.normalizeForMatch()
+        val hitTitle = hitName.normalizeForMatch()
+        score += when {
+            hitTitle == wantTitle -> 15
+            hitTitle.contains(wantTitle) || wantTitle.contains(hitTitle) -> 7
+            // Same artist, different song. Apple returns these freely and
+            // they are exactly the mismatch that has to be kept out.
+            else -> -10
+        }
+
+        if (!album.isNullOrBlank() && hitAlbum.isNotBlank()) {
+            val wantAlbum = album.normalizeForMatch()
+            val gotAlbum = hitAlbum.normalizeForMatch()
+            score += when {
+                gotAlbum == wantAlbum -> 20
+                gotAlbum.contains(wantAlbum) || wantAlbum.contains(gotAlbum) -> 10
+                else -> 0
+            }
+        }
+
+        // A "(Deluxe)" or "(Remastered)" on one side only is a different
+        // master of the same track, and often a different clip.
+        for (word in EDITION_WORDS) {
