@@ -74,3 +74,51 @@ object AppleMusicCanvas {
             ?: return null
 
         val ranked = hits.mapNotNull { hit ->
+            val song = hit as? JsonObject ?: return@mapNotNull null
+            val score = score(song, title, artist, album) ?: return@mapNotNull null
+            score to song
+        }.sortedByDescending { it.first }
+
+        for ((score, song) in ranked) {
+            if (score < MIN_SCORE) {
+                Log.d(TAG, "no hit scored above $MIN_SCORE for '$title' (best was $score)")
+                break
+            }
+            val attributes = song["attributes"]?.jsonObject ?: continue
+            val songName = attributes["name"]?.jsonPrimitive?.contentOrNull
+            val songArtist = attributes["artistName"]?.jsonPrimitive?.contentOrNull
+            val albumName = attributes["albumName"]?.jsonPrimitive?.contentOrNull
+
+            // Some searches already carry the motion artwork inline, which
+            // saves the album round trip entirely.
+            attributes["editorialVideo"]?.jsonObject?.let { video ->
+                motionUrls(video)?.let { (primary, alternate) ->
+                    Log.d(TAG, "inline motion artwork for '$songName'")
+                    return CanvasArtwork(primary, alternate, songName, songArtist, albumName)
+                }
+            }
+
+            val albumId = albumId(song) ?: continue
+            fetchAlbum(albumId, bearer, songName, songArtist)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * Motion artwork for a release rather than a track, for the album page.
+     *
+     * Simpler than the song path: albums carry `editorialVideo` inline on the
+     * search result, so there is no second lookup to resolve an id first.
+     */
+    fun searchAlbum(album: String, artist: String): CanvasArtwork? {
+        val bearer = token() ?: return null
+        val term = if (album.contains(artist, ignoreCase = true)) album else "$artist $album"
+
+        val url = "$AMP/$storefront/search".toHttpUrl().newBuilder()
+            .addQueryParameter("term", term)
+            .addQueryParameter("types", "albums")
+            .addQueryParameter("limit", "10")
+            .addQueryParameter("extend", "editorialVideo")
+            .build()
+            .toString()
+
