@@ -98,3 +98,27 @@ object AppleMusicCanvas {
                 }
             }
 
+            val albumId = albumId(song) ?: continue
+            fetchAlbum(albumId, bearer, songName, songArtist)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * Motion artwork for a release rather than a track, for the album page.
+     *
+     * Simpler than the song path: albums carry `editorialVideo` inline on the
+     * search result, so there is no second lookup to resolve an id first.
+     */
+    fun searchAlbum(album: String, artist: String): CanvasArtwork? {
+        val bearer = token() ?: return null
+        val term = if (album.contains(artist, ignoreCase = true)) album else "$artist $album"
+
+        val url = "$AMP/$storefront/search".toHttpUrl().newBuilder()
+            .addQueryParameter("term", term)
+            .addQueryParameter("types", "albums")
+            .addQueryParameter("limit", "10")
+            .addQueryParameter("extend", "editorialVideo")
+            .build()
+            .toString()
+
