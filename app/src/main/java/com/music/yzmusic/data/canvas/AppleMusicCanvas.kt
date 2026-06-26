@@ -282,3 +282,33 @@ object AppleMusicCanvas {
             json.parseToJsonElement(body).jsonObject["data"]?.jsonArray?.firstOrNull()?.jsonObject
         }.getOrNull() ?: return null
 
+        val attributes = album["attributes"]?.jsonObject ?: return null
+        val albumName = attributes["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (isCompilation(albumName)) return null
+
+        val video = attributes["editorialVideo"]?.jsonObject ?: return null
+        val (primary, alternate) = motionUrls(video) ?: return null
+
+        Log.d(TAG, "motion artwork on album '$albumName' ($albumId)")
+        return CanvasArtwork(
+            url = primary,
+            fallbackUrl = alternate,
+            title = songTitle,
+            artist = songArtist ?: attributes["artistName"]?.jsonPrimitive?.contentOrNull,
+            album = albumName,
+        )
+    }
+
+    /**
+     * The square rendition first — it fills a square sleeve without cropping.
+     * The tall one is the same clip framed for a phone-shaped surface and is
+     * only worth having as the retry when the square won't play.
+     */
+    private fun motionUrls(video: JsonObject): Pair<String, String?>? {
+        fun link(key: String): String? = video[key]?.jsonObject?.let { asset ->
+            asset["video"]?.jsonPrimitive?.contentOrNull
+                ?: asset["videoUrl"]?.jsonPrimitive?.contentOrNull
+                ?: asset["hlsUrl"]?.jsonPrimitive?.contentOrNull
+                ?: asset["url"]?.jsonPrimitive?.contentOrNull
+        }?.takeIf { it.isNotBlank() }
+
