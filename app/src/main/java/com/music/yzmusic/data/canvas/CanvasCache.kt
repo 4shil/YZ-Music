@@ -57,3 +57,9 @@ object CanvasCache {
      * A cache write that fails (full disk, evicted mid-write) drops back to
      * plain streaming rather than surfacing as a playback error, the same
      * choice [com.music.yzmusic.playback.AudioCache] makes for audio.
+     */
+    fun dataSourceFactory(upstream: DataSource.Factory): DataSource.Factory =
+        CacheDataSource.Factory()
+            .setCache(cache)
+            .setUpstreamDataSourceFactory(upstream)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
