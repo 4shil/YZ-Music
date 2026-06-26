@@ -49,3 +49,20 @@ data class CanvasArtwork(
             title.normalizeForMatch() == wantTitle.normalizeForMatch()
 
         val titleArtists = splitArtists(wantArtist)
+        val ourArtists = splitArtists(artist.orEmpty())
+        val artistOk = artist == null || wantArtist.isBlank() ||
+            (titleArtists.isNotEmpty() && ourArtists.isNotEmpty() &&
+                titleArtists.all { want -> ourArtists.any { it == want } })
+
+        val albumOk = album.isNullOrBlank() || wantAlbum.isNullOrBlank() ||
+            album.normalizeForMatch() == wantAlbum.normalizeForMatch()
+
+        return titleOk && artistOk && albumOk
+    }
+}
+
+/**
+ * Case, accents and punctuation all differ between YouTube Music, Apple and
+ * Tidal for the same release — "Beyoncé - CRAZY IN LOVE (feat. JAY-Z)" against
+ * "Beyonce Crazy in Love feat Jay Z". Fold all three away before comparing.
+ */
