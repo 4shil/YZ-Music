@@ -127,3 +127,23 @@ object SpotifyCanvas {
             }
         }.toString()
 
+        val url = PATHFINDER_URL.toHttpUrl().newBuilder()
+            .addQueryParameter("operationName", "searchTracks")
+            .addQueryParameter("variables", variables)
+            .addQueryParameter("extensions", extensions)
+            .build()
+            .toString()
+
+        val headers = mapOf(
+            "Authorization" to "Bearer $token",
+            "Client-Token" to clientToken,
+            "App-platform" to "WebPlayer",
+            "Accept" to "application/json",
+            "User-Agent" to CANVAS_UA,
+        )
+        val (code, body) = canvasGetWithStatus(url, headers)
+        if (body == null) {
+            Log.w(TAG, "pathfinder search failed, http $code")
+            return null
+        }
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
