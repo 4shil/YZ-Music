@@ -56,3 +56,28 @@ object CommunityCanvas {
                 (wantTitle.contains(song) || song.contains(wantTitle))
             val artistOk = credited.isNotBlank() &&
                 (wantArtist.contains(credited) || credited.contains(wantArtist))
+            val albumOk = listed.isBlank() || wantAlbum.isNullOrBlank() || listed == wantAlbum
+            titleOk && artistOk && albumOk
+        } ?: return null
+
+        Log.d(TAG, "manifest hit for '${hit.song}' by '${hit.artist}'")
+        return CanvasArtwork(
+            url = hit.url,
+            title = hit.song,
+            artist = hit.artist,
+            album = hit.album.takeIf { it.isNotBlank() },
+        )
+    }
+
+    /**
+     * Any clip contributed for this release, for the album page. The index is
+     * keyed by song, so this takes the first track of the album someone has
+     * covered — every clip on a release is usually the same loop anyway.
+     */
+    fun searchAlbum(album: String, artist: String): CanvasArtwork? {
+        val index = manifest().ifEmpty { return null }
+
+        val wantAlbum = album.normalizeForMatch()
+        val wantArtist = artist.normalizeForMatch()
+        if (wantAlbum.isBlank()) return null
+
