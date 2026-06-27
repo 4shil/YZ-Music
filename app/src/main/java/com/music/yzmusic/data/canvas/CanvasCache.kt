@@ -39,3 +39,9 @@ object CanvasCache {
      * a library. [SimpleCache]'s own evictor reclaims the rest.
      */
     private const val CACHE_LIMIT_BYTES = 150L * 1024 * 1024
+
+    private lateinit var cache: SimpleCache
+
+    /** Opened once per process, alongside [com.music.yzmusic.playback.AudioCache.init]. */
+    fun init(context: Context) {
+        cache = SimpleCache(
