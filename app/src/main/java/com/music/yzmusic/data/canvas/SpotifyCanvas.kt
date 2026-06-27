@@ -235,3 +235,23 @@ object SpotifyCanvas {
 
             val albumId = record["id"]?.jsonPrimitive?.contentOrNull ?: continue
             val trackUri = firstTrackUri(albumId, token) ?: continue
+            val canvasUrl = fetchCanvasUrl(trackUri, token) ?: continue
+
+            Log.d(TAG, "canvas for album '$recordTitle' by ${artists.joinToString()}")
+            return CanvasArtwork(
+                url = canvasUrl,
+                title = recordTitle,
+                artist = artists.joinToString(", ").ifBlank { null },
+                album = recordTitle,
+                source = CanvasSource.SPOTIFY,
+            )
+        }
+        return null
+    }
+
+    private fun firstTrackUri(albumId: String, token: String): String? {
+        val url = "$ALBUM_TRACKS_URL/$albumId/tracks".toHttpUrl().newBuilder()
+            .addQueryParameter("limit", "1")
+            .build()
+            .toString()
+        val body = canvasGet(url, authHeaders(token)) ?: return null
