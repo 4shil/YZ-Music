@@ -42,3 +42,13 @@ object CommunityCanvas {
 
         val wantTitle = title.normalizeForMatch()
         val wantArtist = artist.normalizeForMatch()
+        val wantAlbum = album?.normalizeForMatch()
+
+        // Contributors write titles as they please — "Song" against "Song
+        // (Official Video)" — so this side matches on containment rather than
+        // equality. That is looser than the catalogue providers get, and the
+        // album check is what keeps it honest when we know one.
+        val hit = index.firstOrNull { entry ->
+            val song = entry.song.normalizeForMatch()
+            val credited = entry.artist.normalizeForMatch()
+            val listed = entry.album.normalizeForMatch()
