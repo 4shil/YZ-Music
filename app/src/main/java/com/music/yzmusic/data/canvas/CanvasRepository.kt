@@ -99,3 +99,16 @@ object CanvasRepository {
      * reopening the player on a track resolved a minute ago should not go
      * through the settling delay again to arrive back at the same clip.
      */
+    fun cached(song: Song): CanvasArtwork? =
+        synchronized(cache) { cache["song|${song.videoId}"]?.artwork }
+
+    /**
+     * The canvas for a release, for the album page's header artwork.
+     *
+     * A separate lookup rather than the first track's: the services hang
+     * motion artwork off the album, so asking for it directly is both fewer
+     * requests and a better match than picking a song and hoping it sits on
+     * the right edition.
+     */
+    suspend fun canvasForAlbum(album: String, artist: String): CanvasArtwork? {
+        val name = album.cleaned()
