@@ -112,3 +112,26 @@ object CanvasRepository {
      */
     suspend fun canvasForAlbum(album: String, artist: String): CanvasArtwork? {
         val name = album.cleaned()
+        val credit = artist.cleaned()
+        if (name.isBlank() || credit.isBlank()) return null
+
+        return resolve("album|$name|$credit", withAlbum = true) {
+            firstHit(
+                { AppleMusicCanvas.searchAlbum(name, credit) },
+                { TidalCanvas.searchAlbum(name, credit) },
+                { CommunityCanvas.searchAlbum(name, credit) },
+                { SpotifyCanvas.searchAlbum(name, credit) },
+                // Album artwork names itself in both fields, so this is the
+                // same check the track path makes.
+            ) { it.matches(name, credit, name) }
+        }
+    }
+
+    private suspend fun resolve(
+        key: String,
+        withAlbum: Boolean,
+        lookUp: suspend () -> CanvasArtwork?,
+    ): CanvasArtwork? = lock.withLock {
+        synchronized(cache) {
+            cache[key]?.let { if (it.reusable(withAlbum)) return@withLock it.artwork }
+        }
