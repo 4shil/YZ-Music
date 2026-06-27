@@ -214,3 +214,15 @@ object SpotifyCanvas {
      */
     suspend fun searchAlbum(album: String, artist: String): CanvasArtwork? {
         val token = SpotifyToken.accessToken() ?: return null
+        val url = SEARCH_URL.toHttpUrl().newBuilder()
+            .addQueryParameter("q", "$album $artist")
+            .addQueryParameter("type", "album")
+            .addQueryParameter("limit", "10")
+            .build()
+            .toString()
+
+        val body = canvasGet(url, authHeaders(token)) ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        val items = root["albums"]?.jsonObject?.get("items")?.jsonArray ?: return null
+
+        for (item in items) {
