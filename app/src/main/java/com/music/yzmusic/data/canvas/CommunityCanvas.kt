@@ -98,3 +98,7 @@ object CommunityCanvas {
     }
 
     @Synchronized
+    private fun manifest(): List<Entry> {
+        val now = System.currentTimeMillis()
+        if (entries.isNotEmpty() && now - fetchedAtMs < TTL_MS) return entries
+
