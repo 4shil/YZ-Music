@@ -80,3 +80,22 @@ object CanvasRepository {
         // a second time. [reusable] decides when the earlier answer still
         // stands instead.
         val album = song.albumName
+        val key = "song|${song.videoId}"
+
+        return resolve(key, album != null) {
+            firstHit(
+                { AppleMusicCanvas.search(title, artist, album) },
+                { TidalCanvas.search(title, artist, album) },
+                { CommunityCanvas.search(title, artist, album) },
+                { SpotifyCanvas.search(title, artist, album) },
+            ) { it.matches(title, artist, album) }
+        }
+    }
+
+    /**
+     * A canvas already worked out for [song], without going near the network.
+     *
+     * Lets a caller paint what it knows before it starts waiting on anything —
+     * reopening the player on a track resolved a minute ago should not go
+     * through the settling delay again to arrive back at the same clip.
+     */
