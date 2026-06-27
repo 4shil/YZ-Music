@@ -255,3 +255,25 @@ object SpotifyCanvas {
             .build()
             .toString()
         val body = canvasGet(url, authHeaders(token)) ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        return root["items"]?.jsonArray?.firstOrNull()
+            ?.jsonObject?.get("uri")?.jsonPrimitive?.contentOrNull
+    }
+
+    /**
+     * [SpotifyToken.clientToken] on top of the bearer — api.spotify.com and
+     * spclient both turn away a request carrying only the bearer with a 429,
+     * which reads exactly like rate limiting on the very first request of a
+     * session until you notice that's what it always says. Sent whenever
+     * minting one succeeds; omitted otherwise rather than failing the call,
+     * since some of these endpoints still answer without it.
+     */
+    private fun authHeaders(token: String): Map<String, String> {
+        val headers = mutableMapOf("Authorization" to "Bearer $token", "User-Agent" to CANVAS_UA)
+        SpotifyToken.clientToken()?.let { headers["Client-Token"] = it }
+        return headers
+    }
+
+    private fun isMatch(gotName: String, gotArtists: List<String>, wantName: String, wantArtist: String): Boolean {
+        if (gotName.normalizeForMatch() != wantName.normalizeForMatch()) return false
+        val wanted = splitArtists(wantArtist)
