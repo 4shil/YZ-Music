@@ -31,3 +31,12 @@ object CommunityCanvas {
         val song: String,
         val artist: String,
         val album: String,
+        val url: String,
+    )
+
+    @Volatile private var entries: List<Entry> = emptyList()
+    @Volatile private var fetchedAtMs = 0L
+
+    fun search(title: String, artist: String, album: String?): CanvasArtwork? {
+        val index = manifest().ifEmpty { return null }
+
