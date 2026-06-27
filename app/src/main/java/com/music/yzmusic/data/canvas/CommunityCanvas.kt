@@ -81,3 +81,20 @@ object CommunityCanvas {
         val wantArtist = artist.normalizeForMatch()
         if (wantAlbum.isBlank()) return null
 
+        val hit = index.firstOrNull { entry ->
+            val listed = entry.album.normalizeForMatch()
+            val credited = entry.artist.normalizeForMatch()
+            listed == wantAlbum && credited.isNotBlank() &&
+                (wantArtist.contains(credited) || credited.contains(wantArtist))
+        } ?: return null
+
+        Log.d(TAG, "manifest hit for album '${hit.album}' by '${hit.artist}'")
+        return CanvasArtwork(
+            url = hit.url,
+            title = hit.album,
+            artist = hit.artist,
+            album = hit.album,
+        )
+    }
+
+    @Synchronized
