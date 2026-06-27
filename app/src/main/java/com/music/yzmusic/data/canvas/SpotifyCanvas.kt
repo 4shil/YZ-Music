@@ -176,3 +176,41 @@ object SpotifyCanvas {
             .build()
             .toString()
 
+        val (code, body) = canvasGetWithStatus(url, authHeaders(token))
+        if (body == null) {
+            Log.w(TAG, "search request failed, http $code")
+            return null
+        }
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+        if (root == null) {
+            Log.w(TAG, "search response wasn't JSON (http $code)")
+            return null
+        }
+        val items = root["tracks"]?.jsonObject?.get("items")?.jsonArray
+        if (items == null) {
+            Log.w(TAG, "search response had no tracks.items (http $code): ${body.take(200)}")
+            return null
+        }
+
+        for (item in items) {
+            val track = item as? JsonObject ?: continue
+            val trackTitle = track["name"]?.jsonPrimitive?.contentOrNull ?: continue
+            val artists = track["artists"]?.jsonArray
+                ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }
+                .orEmpty()
+            if (!isMatch(trackTitle, artists, title, artist)) continue
+
+            val uri = track["uri"]?.jsonPrimitive?.contentOrNull ?: continue
+            val albumName = track["album"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
+            return TrackHit(uri, trackTitle, artists.joinToString(", ").ifBlank { artist }, albumName)
+        }
+        return null
+    }
+
+    /**
+     * A release's canvas, read off its first track — Spotify hangs Canvas off
+     * individual tracks, not the release itself, so there is no album-level
+     * lookup to make directly.
+     */
+    suspend fun searchAlbum(album: String, artist: String): CanvasArtwork? {
+        val token = SpotifyToken.accessToken() ?: return null
