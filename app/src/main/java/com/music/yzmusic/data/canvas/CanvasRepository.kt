@@ -135,3 +135,31 @@ object CanvasRepository {
         synchronized(cache) {
             cache[key]?.let { if (it.reusable(withAlbum)) return@withLock it.artwork }
         }
+        val found = withContext(Dispatchers.IO) { lookUp() }
+        synchronized(cache) { cache[key] = Entry(found, withAlbum) }
+        found
+    }
+
+    /**
+     * Whether this answer can stand in for a lookup that now knows [withAlbum].
+     *
+     * A hit is a hit — the album could only have confirmed it. A miss stands
+     * too, unless it was reached blind and there is now an album name to try,
+     * which is the one case worth spending a second round of requests on.
+     */
+    private fun Entry.reusable(withAlbum: Boolean): Boolean =
+        artwork != null || this.withAlbum || !withAlbum
+
+    /**
+     * The first source that answers with something that survives [accept].
+     *
+     * Sources are passed unevaluated so each is only reached — and only paid
+     * for — if the ones before it came up empty. One that throws is treated as
+     * one that found nothing: none of these hosts are ours, and a missing
+     * canvas is not worth surfacing as an error.
+     */
+    private suspend fun firstHit(
+        vararg sources: suspend () -> CanvasArtwork?,
+        accept: (CanvasArtwork) -> Boolean,
+    ): CanvasArtwork? {
+        for (source in sources) {
