@@ -70,3 +70,12 @@ object CanvasRepository {
     suspend fun canvasFor(song: Song): CanvasArtwork? {
         if (song.localUri != null || song.localPath != null) return null
 
+        val title = song.title.cleaned()
+        val artist = song.artist.cleaned()
+        if (title.isBlank() || artist.isBlank()) return null
+
+        // Keyed on the track alone. The album is deliberately not part of
+        // this: it arrives after the player opens, and keying on it made the
+        // late arrival look like a different question and run the whole chain
+        // a second time. [reusable] decides when the earlier answer still
+        // stands instead.
