@@ -79,3 +79,4 @@ object CanvasRepository {
         // late arrival look like a different question and run the whole chain
         // a second time. [reusable] decides when the earlier answer still
         // stands instead.
+        val album = song.albumName
