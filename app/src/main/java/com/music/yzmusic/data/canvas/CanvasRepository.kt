@@ -70,3 +70,4 @@ object CanvasRepository {
     suspend fun canvasFor(song: Song): CanvasArtwork? {
         if (song.localUri != null || song.localPath != null) return null
 
+        val title = song.title.cleaned()
