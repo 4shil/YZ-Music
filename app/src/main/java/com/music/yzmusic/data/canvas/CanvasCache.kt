@@ -1,0 +1,35 @@
+﻿package com.music.yzmusic.data.canvas
+
+import android.content.Context
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import java.io.File
+
+/**
+ * Disk cache for canvas clips — the looping video some releases publish
+ * alongside a track, played over the cover art by
+ * [CanvasArtworkPlayer][com.music.yzmusic.ui.player.CanvasArtworkPlayer].
+ *
+ * Without this, that player fetched a clip straight off the network through
+ * a bare OkHttp data source, repeating for as long as the track playing over
+ * it does ([androidx.media3.common.Player.REPEAT_MODE_ONE]). ExoPlayer frees
+ * a sample's buffer as soon as the renderer has consumed it — there is no
+ * back buffer configured, nor should there be one sized for an entire clip —
+ * so once a loop finishes, nothing of it is left in memory to loop back to,
+ * and reaching position zero again means the data source is asked for those
+ * bytes again. A five-second clip behind a four-minute track loops around
+ * fifty times, which without this cache was fifty downloads of the same few
+ * seconds of video rather than one: the "40MB for one song" and multi-
+ * gigabyte-day reports trace to exactly this repeat, not to audio bitrate.
+ *
+ * Wrapping the upstream in [CacheDataSource] means only the first loop of a
+ * clip ever reaches the network; every loop after it, and every replay of
+ * the same track later in the session, is served from disk instead.
+ */
+@UnstableApi
+object CanvasCache {
+
