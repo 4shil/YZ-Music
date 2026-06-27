@@ -1,0 +1,31 @@
+﻿package com.music.yzmusic.data.canvas
+
+import com.music.yzmusic.data.DebugLog as Log
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+/**
+ * A community-curated `song + artist -> looping video` index, published as one
+ * JSON file and mirrored by whoever maintains it.
+ *
+ * The catalogue services only have motion artwork where a label paid to make
+ * some, which is a thin slice of anything outside current chart releases. This
+ * fills the gaps by hand: small, hit-or-miss, and the only source here that
+ * ever covers back catalogue.
+ *
+ * One file for the whole index means one request and then local lookups, so
+ * the manifest is held for [TTL_MS] rather than re-fetched per track.
+ */
+object CommunityCanvas {
+
+    private const val TAG = "CommunityCanvas"
+    private const val MANIFEST = "https://vivimusicanvas.mkmdevilmi.workers.dev/canvas.json"
+    private const val TTL_MS = 30L * 60 * 1000
+
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private data class Entry(
+        val song: String,
