@@ -40,3 +40,5 @@ object CommunityCanvas {
     fun search(title: String, artist: String, album: String?): CanvasArtwork? {
         val index = manifest().ifEmpty { return null }
 
+        val wantTitle = title.normalizeForMatch()
+        val wantArtist = artist.normalizeForMatch()
