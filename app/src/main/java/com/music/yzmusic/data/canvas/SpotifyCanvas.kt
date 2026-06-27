@@ -277,3 +277,24 @@ object SpotifyCanvas {
     private fun isMatch(gotName: String, gotArtists: List<String>, wantName: String, wantArtist: String): Boolean {
         if (gotName.normalizeForMatch() != wantName.normalizeForMatch()) return false
         val wanted = splitArtists(wantArtist)
+        val credited = gotArtists.map { it.normalizeForMatch() }.filter { it.isNotBlank() }
+        if (wanted.isEmpty() || credited.isEmpty()) return false
+        return wanted.all { want -> credited.any { it == want } }
+    }
+
+    // ---- canvaz-cache: protobuf request/response -----------------------
+
+    private data class CanvasHit(val id: String?, val url: String, val trackUri: String?)
+
+    private fun fetchCanvasUrl(trackUri: String, token: String): String? {
+        val requestBody = encodeCanvasRequest(trackUri)
+            .toRequestBody("application/protobuf".toMediaType())
+        val request = Request.Builder()
+            .url(CANVAS_URL)
+            .post(requestBody)
+            .apply { authHeaders(token).forEach { (name, value) -> header(name, value) } }
+            .header("Accept", "application/protobuf")
+            .header("Accept-Language", "en")
+            .header("User-Agent", SPOTIFY_APP_UA)
+            .build()
+
