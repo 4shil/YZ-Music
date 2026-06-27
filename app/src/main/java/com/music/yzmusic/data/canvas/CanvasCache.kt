@@ -48,3 +48,9 @@ object CanvasCache {
             File(context.cacheDir, "canvas"),
             LeastRecentlyUsedCacheEvictor(CACHE_LIMIT_BYTES),
             StandaloneDatabaseProvider(context),
+        )
+    }
+
+    /**
+     * [upstream] wrapped so a clip already on disk never touches the
+     * network again — see the class doc for why that is the whole point.
