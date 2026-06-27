@@ -52,3 +52,7 @@ object CommunityCanvas {
             val song = entry.song.normalizeForMatch()
             val credited = entry.artist.normalizeForMatch()
             val listed = entry.album.normalizeForMatch()
+            val titleOk = song.isNotBlank() &&
+                (wantTitle.contains(song) || song.contains(wantTitle))
+            val artistOk = credited.isNotBlank() &&
+                (wantArtist.contains(credited) || credited.contains(wantArtist))
