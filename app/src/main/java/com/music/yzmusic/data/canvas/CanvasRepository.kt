@@ -163,3 +163,34 @@ object CanvasRepository {
         accept: (CanvasArtwork) -> Boolean,
     ): CanvasArtwork? {
         for (source in sources) {
+            val found = runCatching { source() }
+                .onFailure { Log.d(TAG, "source failed: ${it.message}") }
+                .getOrNull()
+                ?: continue
+            if (!accept(found)) {
+                Log.d(TAG, "rejected '${found.title}' by '${found.artist}'")
+                continue
+            }
+            return found
+        }
+        return null
+    }
+
+    /**
+     * YouTube Music titles carry packaging the catalogue services never see —
+     * "| Official Video", bracketed tags, "(Lyrical)". Searching with it finds
+     * nothing and matching against it rejects everything, so it comes off
+     * before either. Same treatment as the lyrics lookup gives it.
+     */
+    private fun String.cleaned(): String = replace(NOISE, " ")
+        .substringBefore(" | ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .ifBlank { this }
+
+    private val NOISE = Regex(
+        """\((?:from|official|lyrical|video|audio)[^)]*\)|\[[^]]*]|""" +
+            """\b(?:official (?:video|audio|music video)|lyrical|full song|4k video)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+}
