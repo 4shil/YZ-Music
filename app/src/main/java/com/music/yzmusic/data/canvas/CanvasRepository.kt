@@ -50,3 +50,23 @@ object CanvasRepository {
     private class Entry(val artwork: CanvasArtwork?, val withAlbum: Boolean)
 
     private val cache = object : LinkedHashMap<String, Entry>(CACHE_SIZE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>) =
+            size > CACHE_SIZE
+    }
+
+    // Skipping through a queue fires a lookup per track. Serialising them
+    // keeps three providers' worth of requests off the wire at once, and means
+    // a track that was already resolved by the time its turn comes up is
+    // answered from the cache instead of fetched again.
+    private val lock = Mutex()
+
+    /**
+     * The canvas for [song], or null when there isn't one. Never throws.
+     *
+     * A local file has no catalogue identity worth searching on and no network
+     * expectation attached to playing it, so it is answered as a miss without
+     * a request.
+     */
+    suspend fun canvasFor(song: Song): CanvasArtwork? {
+        if (song.localUri != null || song.localPath != null) return null
+
