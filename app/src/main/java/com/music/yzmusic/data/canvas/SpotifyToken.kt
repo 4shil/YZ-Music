@@ -291,3 +291,20 @@ internal object SpotifyToken {
             .header("User-Agent", CANVAS_UA)
             .build()
 
+        var lastCode = -1
+        val body = runCatching {
+            Http.client.newCall(request).execute().use { response ->
+                lastCode = response.code
+                if (response.isSuccessful) response.body?.string() else null
+            }
+        }.onFailure { Log.w(TAG, "client-token request threw: ${it.message}") }.getOrNull()
+        if (body == null) {
+            Log.w(TAG, "client-token request failed, http $lastCode")
+            return null
+        }
+
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+        if (root == null) {
+            Log.w(TAG, "client-token response wasn't JSON")
+            return null
+        }
