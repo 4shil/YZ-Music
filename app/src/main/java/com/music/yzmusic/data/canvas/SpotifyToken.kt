@@ -213,3 +213,52 @@ internal object SpotifyToken {
           if (origFetch) {
             window.fetch = function (input, init) {
               var url = (input && input.url) ? input.url : input;
+              var result = origFetch.apply(this, arguments);
+              if (isToken(url)) {
+                try {
+                  result.then(function (res) {
+                    res.clone().text().then(report).catch(function () {});
+                  }).catch(function () {});
+                } catch (e) {}
+              }
+              return result;
+            };
+          }
+          var origOpen = XMLHttpRequest.prototype.open;
+          XMLHttpRequest.prototype.open = function (method, url) {
+            this.__bitchordUrl = url;
+            return origOpen.apply(this, arguments);
+          };
+          var origSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.send = function () {
+            var xhr = this;
+            try {
+              xhr.addEventListener('load', function () {
+                if (isToken(xhr.__bitchordUrl)) {
+                  try { report(xhr.responseText); } catch (e) {}
+                }
+              });
+            } catch (e) {}
+            return origSend.apply(this, arguments);
+          };
+        })();
+    """.trimIndent()
+
+    /**
+     * The second header these endpoints have started demanding alongside the
+     * bearer token — api.spotify.com and spclient both turn away a request
+     * that only carries [accessToken] with a 429. Best-effort: a caller with
+     * no client token just sends the bearer alone and takes whatever the
+     * endpoint does with that. Requires [accessToken] to have already
+     * succeeded once, since the client id it needs comes off that response.
+     */
+    @Synchronized
+    fun clientToken(): String? {
+        val now = System.currentTimeMillis()
+        cachedClientToken?.let { if (now < clientTokenExpiresAtMs - 30_000) return it }
+
+        val clientId = cachedClientId
+        if (clientId == null) {
+            Log.w(TAG, "no client id yet (access token not minted); skipping client token")
+            return null
+        }
