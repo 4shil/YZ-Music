@@ -72,3 +72,36 @@ object TidalCanvas {
             if (!isMatch(trackTitle, artists, title, artist)) continue
 
             val albumObj = track["album"]?.jsonObject
+            val videoCover = albumObj?.get("videoCover")?.jsonPrimitive?.contentOrNull
+            if (videoCover.isNullOrBlank()) continue
+            val videoUrl = coverUrl(videoCover) ?: continue
+
+            Log.d(TAG, "video cover for '$trackTitle' by ${artists.joinToString()}")
+            return CanvasArtwork(
+                url = videoUrl,
+                title = trackTitle,
+                artist = artists.joinToString(", ").ifBlank { null },
+                album = albumObj["title"]?.jsonPrimitive?.contentOrNull,
+            )
+        }
+        return null
+    }
+
+    /**
+     * The album's own video cover, for a release page rather than a track.
+     *
+     * Cheaper and more reliable than going via a track: the cover belongs to
+     * the album in Tidal's model, so this asks for it directly instead of
+     * finding a song that happens to sit on the right record.
+     */
+    fun searchAlbum(album: String, artist: String): CanvasArtwork? {
+        val url = SEARCH.toHttpUrl().newBuilder()
+            .addQueryParameter("query", "$album $artist")
+            .addQueryParameter("limit", "10")
+            .addQueryParameter("types", "ALBUMS")
+            .addQueryParameter("countryCode", countryCode)
+            .build()
+            .toString()
+
+        val body = canvasGet(url, mapOf("X-Tidal-Token" to EMBED_TOKEN, "User-Agent" to CANVAS_UA))
+            ?: return null
