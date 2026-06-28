@@ -56,3 +56,8 @@ object TidalCanvas {
         val items = root["tracks"]?.jsonObject?.get("items")?.jsonArray ?: return null
 
         for (item in items) {
+            val track = item as? JsonObject ?: continue
+            val trackTitle = track["title"]?.jsonPrimitive?.contentOrNull ?: continue
+
+            // Tidal credits artists as separate objects, so this is the one
+            // service we don't have to guess a separator for.
