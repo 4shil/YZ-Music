@@ -176,3 +176,21 @@ object SpotifyCanvas {
             .build()
             .toString()
 
+        val (code, body) = canvasGetWithStatus(url, authHeaders(token))
+        if (body == null) {
+            Log.w(TAG, "search request failed, http $code")
+            return null
+        }
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+        if (root == null) {
+            Log.w(TAG, "search response wasn't JSON (http $code)")
+            return null
+        }
+        val items = root["tracks"]?.jsonObject?.get("items")?.jsonArray
+        if (items == null) {
+            Log.w(TAG, "search response had no tracks.items (http $code): ${body.take(200)}")
+            return null
+        }
+
+        for (item in items) {
+            val track = item as? JsonObject ?: continue
