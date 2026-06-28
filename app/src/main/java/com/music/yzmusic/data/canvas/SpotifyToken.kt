@@ -124,3 +124,61 @@ internal object SpotifyToken {
      */
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun harvestViaWebView(context: Context, cookie: String): HarvestedToken? {
+        val deferred = CompletableDeferred<HarvestedToken?>()
+
+        val cookieManager = CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setCookie("https://open.spotify.com/", "sp_dc=$cookie; Domain=.spotify.com; Path=/; Secure")
+            setCookie("https://accounts.spotify.com/", "sp_dc=$cookie; Domain=.spotify.com; Path=/; Secure")
+            flush()
+        }
+        // The player caches its token in web storage and skips a fresh
+        // /api/token request if a live one is already sitting there, leaving
+        // the hook with nothing to see — wipe storage so every harvest forces
+        // a real mint.
+        runCatching { WebStorage.getInstance().deleteAllData() }
+
+        var webView: WebView? = null
+        return try {
+            webView = WebView(context).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.userAgentString = CANVAS_UA
+                cookieManager.setAcceptThirdPartyCookies(this, true)
+                addJavascriptInterface(TokenBridge(deferred), BRIDGE_NAME)
+
+                webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        view.evaluateJavascript(HOOK_SCRIPT, null)
+                    }
+
+                    override fun onPageFinished(view: WebView, url: String?) {
+                        super.onPageFinished(view, url)
+                        // Re-assert in case the player navigated client-side
+                        // after the onPageStarted injection ran.
+                        view.evaluateJavascript(HOOK_SCRIPT, null)
+                    }
+                }
+                loadUrl("https://open.spotify.com/")
+            }
+
+            withTimeoutOrNull(HARVEST_TIMEOUT_MS) { deferred.await() }
+        } catch (e: Exception) {
+            Log.w(TAG, "token harvest threw: ${e.message}")
+            null
+        } finally {
+            runCatching {
+                webView?.removeJavascriptInterface(BRIDGE_NAME)
+                webView?.stopLoading()
+                webView?.destroy()
+            }
+        }
+    }
+
+    /** Receives raw `/api/token` response bodies from the hooked page. */
+    private class TokenBridge(private val deferred: CompletableDeferred<HarvestedToken?>) {
+        @JavascriptInterface
+        fun onTokenPayload(payload: String?) {
+            if (payload.isNullOrBlank() || deferred.isCompleted) return
+            runCatching {
