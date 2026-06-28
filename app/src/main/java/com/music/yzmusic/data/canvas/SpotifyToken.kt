@@ -262,3 +262,32 @@ internal object SpotifyToken {
             Log.w(TAG, "no client id yet (access token not minted); skipping client token")
             return null
         }
+        val session = session() ?: return null
+
+        val payload = buildJsonObject {
+            putJsonObject("client_data") {
+                put("client_version", session.clientVersion)
+                put("client_id", clientId)
+                putJsonObject("js_sdk_data") {
+                    put("device_brand", "unknown")
+                    put("device_model", "unknown")
+                    put("os", "android")
+                    put("os_version", android.os.Build.VERSION.RELEASE.orEmpty())
+                    put("device_id", session.deviceId)
+                    put("device_type", "smartphone")
+                }
+            }
+        }
+
+        // The ByteArray overload, deliberately: the String overload of
+        // toRequestBody rewrites a charset-less MediaType to
+        // "application/json; charset=utf-8", and clienttoken 400s on that
+        // exact header rather than the bare "application/json" the real web
+        // player sends.
+        val request = Request.Builder()
+            .url("https://clienttoken.spotify.com/v1/clienttoken")
+            .post(payload.toString().toByteArray(Charsets.UTF_8).toRequestBody("application/json".toMediaType()))
+            .header("Accept", "application/json")
+            .header("User-Agent", CANVAS_UA)
+            .build()
+
