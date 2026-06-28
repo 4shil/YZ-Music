@@ -56,3 +56,19 @@ object TidalCanvas {
         val items = root["tracks"]?.jsonObject?.get("items")?.jsonArray ?: return null
 
         for (item in items) {
+            val track = item as? JsonObject ?: continue
+            val trackTitle = track["title"]?.jsonPrimitive?.contentOrNull ?: continue
+
+            // Tidal credits artists as separate objects, so this is the one
+            // service we don't have to guess a separator for.
+            val artists = track["artists"]?.jsonArray
+                ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }
+                .orEmpty()
+
+            // Checked here rather than left to the caller's validation: a
+            // search for one song returns ten, and taking the first that has
+            // a cover would settle on the wrong track and stop looking — the
+            // right one is often further down the list.
+            if (!isMatch(trackTitle, artists, title, artist)) continue
+
+            val albumObj = track["album"]?.jsonObject
