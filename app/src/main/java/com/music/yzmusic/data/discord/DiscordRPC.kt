@@ -30,3 +30,39 @@ import java.util.Locale
  * ```
  */
 class DiscordRPC(
+    val context: Context,
+    token: String,
+) : KizzyRPC(
+    token = token,
+    os = "Android",
+    browser = "Discord Android",
+    device = android.os.Build.DEVICE,
+    userAgent = SuperProperties.userAgent,
+    superPropertiesBase64 = SuperProperties.superPropertiesBase64,
+) {
+    /**
+     * Pushes [song] to Discord as the current activity.
+     *
+     * [currentPlaybackTimeMillis] and [durationMillis] are turned into a
+     * start/end timestamp pair rather than a progress value, because Discord
+     * counts the bar down on its own clock from those two instants. So a
+     * presence set once stays correct for the rest of the track, and the only
+     * reason to send another is that something about the track *changed* —
+     * which is also why [playbackSpeed] has to be divided out of both: at 1.5x
+     * the wall-clock time left is not the media time left, and a presence that
+     * ignored it would finish its countdown while the song was still playing.
+     */
+    suspend fun updateSong(
+        song: Song,
+        currentPlaybackTimeMillis: Long,
+        durationMillis: Long,
+        playbackSpeed: Float = 1.0f,
+        useDetails: Boolean = false,
+        status: String = "online",
+        button1Text: String = "",
+        button1Visible: Boolean = true,
+        button2Text: String = "",
+        button2Visible: Boolean = true,
+        activityType: String = "listening",
+        activityName: String = "",
+    ) = runCatching {
