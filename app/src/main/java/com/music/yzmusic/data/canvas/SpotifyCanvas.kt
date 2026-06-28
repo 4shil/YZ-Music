@@ -226,3 +226,12 @@ object SpotifyCanvas {
         val items = root["albums"]?.jsonObject?.get("items")?.jsonArray ?: return null
 
         for (item in items) {
+            val record = item as? JsonObject ?: continue
+            val recordTitle = record["name"]?.jsonPrimitive?.contentOrNull ?: continue
+            val artists = record["artists"]?.jsonArray
+                ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }
+                .orEmpty()
+            if (!isMatch(recordTitle, artists, album, artist)) continue
+
+            val albumId = record["id"]?.jsonPrimitive?.contentOrNull ?: continue
+            val trackUri = firstTrackUri(albumId, token) ?: continue
