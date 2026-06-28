@@ -277,3 +277,54 @@ object SpotifyCanvas {
     private fun isMatch(gotName: String, gotArtists: List<String>, wantName: String, wantArtist: String): Boolean {
         if (gotName.normalizeForMatch() != wantName.normalizeForMatch()) return false
         val wanted = splitArtists(wantArtist)
+        val credited = gotArtists.map { it.normalizeForMatch() }.filter { it.isNotBlank() }
+        if (wanted.isEmpty() || credited.isEmpty()) return false
+        return wanted.all { want -> credited.any { it == want } }
+    }
+
+    // ---- canvaz-cache: protobuf request/response -----------------------
+
+    private data class CanvasHit(val id: String?, val url: String, val trackUri: String?)
+
+    private fun fetchCanvasUrl(trackUri: String, token: String): String? {
+        val requestBody = encodeCanvasRequest(trackUri)
+            .toRequestBody("application/protobuf".toMediaType())
+        val request = Request.Builder()
+            .url(CANVAS_URL)
+            .post(requestBody)
+            .apply { authHeaders(token).forEach { (name, value) -> header(name, value) } }
+            .header("Accept", "application/protobuf")
+            .header("Accept-Language", "en")
+            .header("User-Agent", SPOTIFY_APP_UA)
+            .build()
+
+        val bytes = runCatching {
+            Http.client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "canvaz-cache http ${response.code} for $trackUri")
+                }
+                if (response.isSuccessful) response.body?.bytes() else null
+            }
+        }.onFailure { Log.w(TAG, "canvaz-cache request threw: ${it.message}") }.getOrNull() ?: return null
+
+        // The structured parse first — it can tell this track's own clip apart
+        // from another one Spotify bundled in the same response. The regex is
+        // the fallback: it only needs a *.cnvs.mp4 URL to be sitting somewhere
+        // in the bytes as a plain UTF-8 string, so it still finds a clip if a
+        // field number above turns out to be stale even though the search
+        // above already picked the right track.
+        val hits = decodeCanvasResponse(bytes)
+        val structured = hits.firstOrNull { it.trackUri == trackUri }?.url ?: hits.firstOrNull()?.url
+        if (structured != null) return structured
+
+        val fallback = CANVAS_URL_REGEX.find(String(bytes, Charsets.ISO_8859_1))?.value
+        if (fallback == null) {
+            Log.d(TAG, "canvaz-cache had nothing for $trackUri")
+        } else {
+            Log.d(TAG, "canvaz-cache url recovered by regex fallback for $trackUri")
+        }
+        return fallback
+    }
+
+    /** `CanvasRequest { repeated Track tracks = 1; Track { string track_uri = 1; } }` */
+    private fun encodeCanvasRequest(trackUri: String): ByteArray {
