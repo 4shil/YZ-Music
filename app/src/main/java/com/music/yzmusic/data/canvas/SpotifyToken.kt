@@ -190,3 +190,26 @@ internal object SpotifyToken {
                 // takes effect; that one can't read canvases, so keep waiting
                 // for the logged-in one.
                 if (token.isNullOrBlank() || anonymous) return
+                val expiresAt = root["accessTokenExpirationTimestampMs"]?.jsonPrimitive?.contentOrNull
+                    ?.toLongOrNull()?.takeIf { it > System.currentTimeMillis() }
+                    ?: (System.currentTimeMillis() + DEFAULT_TOKEN_LIFETIME_MS)
+                val clientId = root["clientId"]?.jsonPrimitive?.contentOrNull
+                deferred.complete(HarvestedToken(token, expiresAt, clientId))
+            }
+        }
+    }
+
+    private val HOOK_SCRIPT = """
+        (function () {
+          if (window.__bitchordTokenHook) return;
+          window.__bitchordTokenHook = true;
+          var report = function (body) {
+            try { $BRIDGE_NAME.onTokenPayload(body); } catch (e) {}
+          };
+          var isToken = function (u) {
+            try { return String(u).indexOf('/api/token') !== -1; } catch (e) { return false; }
+          };
+          var origFetch = window.fetch;
+          if (origFetch) {
+            window.fetch = function (input, init) {
+              var url = (input && input.url) ? input.url : input;
