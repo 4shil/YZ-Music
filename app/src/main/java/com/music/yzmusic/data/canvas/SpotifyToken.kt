@@ -85,3 +85,42 @@ internal object SpotifyToken {
         cachedAccessToken?.let { if (now < accessTokenExpiresAtMs - 30_000) return it }
 
         return harvestMutex.withLock {
+            val stillNow = System.currentTimeMillis()
+            cachedAccessToken?.let { if (stillNow < accessTokenExpiresAtMs - 30_000) return@withLock it }
+
+            val context = appContext
+            if (context == null) {
+                Log.w(TAG, "SpotifyToken.init was never called; no context for the harvest")
+                return@withLock null
+            }
+
+            val harvested = withContext(Dispatchers.Main) { harvestViaWebView(context, cookie) }
+            if (harvested == null) {
+                Log.w(TAG, "token harvest failed or timed out")
+                return@withLock null
+            }
+
+            cachedAccessToken = harvested.token
+            accessTokenExpiresAtMs = harvested.expiresAt
+            harvested.clientId?.let { cachedClientId = it }
+            Log.d(TAG, "harvested access token, good until ${java.util.Date(harvested.expiresAt)}")
+            harvested.token
+        }
+    }
+
+    /**
+     * Spotify retired the endpoint this used to hit directly with a signed
+     * request; its replacement (`/api/token`) checks a TOTP the web player
+     * computes from a secret buried in its own JS bundle. That part is
+     * reproducible — the secret is short-lived but published — and doing so
+     * does get a 200 back with a token. What it doesn't get back is a token
+     * anything downstream honours: api.spotify.com and spclient both turn a
+     * forged one away with a 429 that reads exactly like rate limiting, right
+     * up until it fires on the very first request of a session. So rather
+     * than sign the request ourselves, this loads open.spotify.com for real
+     * in an offscreen WebView with the cookie applied, and reads the token
+     * the page mints for itself by hooking fetch/XHR before its own bundle
+     * runs.
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    private suspend fun harvestViaWebView(context: Context, cookie: String): HarvestedToken? {
