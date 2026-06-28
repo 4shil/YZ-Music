@@ -308,3 +308,14 @@ internal object SpotifyToken {
             Log.w(TAG, "client-token response wasn't JSON")
             return null
         }
+        val responseType = root["response_type"]?.jsonPrimitive?.contentOrNull
+        if (responseType != "RESPONSE_GRANTED_TOKEN_RESPONSE") {
+            Log.w(TAG, "client-token request rejected: $responseType")
+            return null
+        }
+        val granted = root["granted_token"]?.jsonObject
+        val token = granted?.get("token")?.jsonPrimitive?.contentOrNull
+        if (token == null) {
+            Log.w(TAG, "client-token response had no granted_token.token")
+            return null
+        }
