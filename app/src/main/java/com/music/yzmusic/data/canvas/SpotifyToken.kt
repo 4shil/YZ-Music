@@ -182,3 +182,27 @@ internal object SpotifyToken {
         fun onTokenPayload(payload: String?) {
             if (payload.isNullOrBlank() || deferred.isCompleted) return
             runCatching {
+                val root = json.parseToJsonElement(payload).jsonObject
+                val token = root["accessToken"]?.jsonPrimitive?.contentOrNull
+                val anonymous = root["isAnonymous"]?.jsonPrimitive?.contentOrNull
+                    ?.toBooleanStrictOrNull() ?: false
+                // The player also mints an anonymous token before the cookie
+                // takes effect; that one can't read canvases, so keep waiting
+                // for the logged-in one.
+                if (token.isNullOrBlank() || anonymous) return
+                val expiresAt = root["accessTokenExpirationTimestampMs"]?.jsonPrimitive?.contentOrNull
+                    ?.toLongOrNull()?.takeIf { it > System.currentTimeMillis() }
+                    ?: (System.currentTimeMillis() + DEFAULT_TOKEN_LIFETIME_MS)
+                val clientId = root["clientId"]?.jsonPrimitive?.contentOrNull
+                deferred.complete(HarvestedToken(token, expiresAt, clientId))
+            }
+        }
+    }
+
+    private val HOOK_SCRIPT = """
+        (function () {
+          if (window.__bitchordTokenHook) return;
+          window.__bitchordTokenHook = true;
+          var report = function (body) {
+            try { $BRIDGE_NAME.onTokenPayload(body); } catch (e) {}
+          };
