@@ -105,3 +105,25 @@ object SpotifyCanvas {
      * the same way [firstTrackUri] trusts an album's own track listing rather
      * than re-checking it.
      */
+    private fun searchViaPathfinder(title: String, artist: String, album: String?, token: String): TrackHit? {
+        val clientToken = SpotifyToken.clientToken()
+        if (clientToken == null) {
+            Log.d(TAG, "no client token; skipping pathfinder search")
+            return null
+        }
+        val searchTerm = listOfNotNull(title, artist, album).joinToString(" ")
+        val variables = buildJsonObject {
+            put("searchTerm", searchTerm)
+            put("offset", 0)
+            put("limit", 10)
+            put("numberOfTopResults", 5)
+            put("includeAudiobooks", false)
+            put("includePreReleases", false)
+        }.toString()
+        val extensions = buildJsonObject {
+            putJsonObject("persistedQuery") {
+                put("version", 1)
+                put("sha256Hash", PATHFINDER_SEARCH_HASH)
+            }
+        }.toString()
+
