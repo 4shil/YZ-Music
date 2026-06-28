@@ -102,3 +102,32 @@ object CommunityCanvas {
         val now = System.currentTimeMillis()
         if (entries.isNotEmpty() && now - fetchedAtMs < TTL_MS) return entries
 
+        val body = canvasGet(MANIFEST, mapOf("User-Agent" to CANVAS_UA))
+        if (body == null) {
+            // Serve whatever we already have rather than losing canvas
+            // entirely for the next half hour because one fetch failed.
+            fetchedAtMs = now
+            return entries
+        }
+
+        val parsed = runCatching {
+            json.parseToJsonElement(body).jsonObject["items"]?.jsonArray
+                ?.mapNotNull { item ->
+                    val obj = item.jsonObject
+                    Entry(
+                        song = obj["song"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                        artist = obj["artist"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                        album = obj["album"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                    )
+                }
+        }.getOrNull().orEmpty()
+
+        if (parsed.isNotEmpty()) {
+            Log.d(TAG, "manifest holds ${parsed.size} entries")
+            entries = parsed
+        }
+        fetchedAtMs = now
+        return entries
+    }
+}
