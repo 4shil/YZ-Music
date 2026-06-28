@@ -346,3 +346,19 @@ object SpotifyCanvas {
      * canvas_url = 2; ...; track_uri = 5; ... }` — only the fields this needs
      * are read, everything else is skipped rather than modelled.
      */
+    private fun decodeCanvasResponse(bytes: ByteArray): List<CanvasHit> = runCatching {
+        val hits = mutableListOf<CanvasHit>()
+        val input = CodedInputStream.newInstance(bytes)
+        while (!input.isAtEnd) {
+            val tag = input.readTag()
+            if (tag == 0) break
+            if (tag ushr 3 == 1) {
+                decodeCanvas(input.readByteArray())?.let(hits::add)
+            } else {
+                input.skipField(tag)
+            }
+        }
+        hits
+    }.getOrElse { emptyList() }
+
+    private fun decodeCanvas(bytes: ByteArray): CanvasHit? = runCatching {
