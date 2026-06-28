@@ -147,3 +147,32 @@ object SpotifyCanvas {
             return null
         }
         val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+        val firstItem = root?.get("data")?.jsonObject
+            ?.get("searchV2")?.jsonObject
+            ?.get("tracksV2")?.jsonObject
+            ?.get("items")?.jsonArray
+            ?.firstOrNull()
+            ?.jsonObject?.get("item")?.jsonObject
+            ?.get("data")?.jsonObject
+        if (firstItem == null) {
+            Log.w(TAG, "pathfinder response had no hit (http $code): ${body.take(200)}")
+            return null
+        }
+        val uri = firstItem["uri"]?.jsonPrimitive?.contentOrNull
+            ?: firstItem["id"]?.jsonPrimitive?.contentOrNull?.let { "spotify:track:$it" }
+        if (uri == null) {
+            Log.w(TAG, "pathfinder hit had neither uri nor id")
+            return null
+        }
+        return TrackHit(uri, title, artist, album)
+    }
+
+    private fun searchViaRest(title: String, artist: String, album: String?, token: String): TrackHit? {
+        val query = listOfNotNull(title, artist, album).joinToString(" ")
+        val url = SEARCH_URL.toHttpUrl().newBuilder()
+            .addQueryParameter("q", query)
+            .addQueryParameter("type", "track")
+            .addQueryParameter("limit", "10")
+            .build()
+            .toString()
+
