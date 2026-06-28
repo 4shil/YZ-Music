@@ -328,3 +328,21 @@ object SpotifyCanvas {
 
     /** `CanvasRequest { repeated Track tracks = 1; Track { string track_uri = 1; } }` */
     private fun encodeCanvasRequest(trackUri: String): ByteArray {
+        val track = ByteArrayOutputStream().let { buffer ->
+            val out = CodedOutputStream.newInstance(buffer)
+            out.writeString(1, trackUri)
+            out.flush()
+            buffer.toByteArray()
+        }
+        val request = ByteArrayOutputStream()
+        val out = CodedOutputStream.newInstance(request)
+        out.writeByteArray(1, track)
+        out.flush()
+        return request.toByteArray()
+    }
+
+    /**
+     * `CanvasResponse { repeated Canvas canvases = 1; }`, `Canvas { id = 1;
+     * canvas_url = 2; ...; track_uri = 5; ... }` — only the fields this needs
+     * are read, everything else is skipped rather than modelled.
+     */
