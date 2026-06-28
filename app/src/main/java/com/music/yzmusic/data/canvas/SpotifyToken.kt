@@ -356,3 +356,23 @@ internal object SpotifyToken {
             return null
         }
 
+        val configB64 = Regex("""<script id="appServerConfig" type="text/plain">([^<]+)</script>""")
+            .find(html)?.groupValues?.get(1)
+        if (configB64 == null) {
+            Log.w(TAG, "web player page had no appServerConfig block")
+            return null
+        }
+        val clientVersion = runCatching {
+            val configJson = String(Base64.getDecoder().decode(configB64), Charsets.UTF_8)
+            json.parseToJsonElement(configJson).jsonObject["clientVersion"]?.jsonPrimitive?.contentOrNull
+        }.getOrNull()
+        if (clientVersion == null) {
+            Log.w(TAG, "appServerConfig had no clientVersion")
+            return null
+        }
+
+        val session = SessionInfo(clientVersion, deviceId ?: java.util.UUID.randomUUID().toString())
+        cachedSession = session
+        return session
+    }
+}
