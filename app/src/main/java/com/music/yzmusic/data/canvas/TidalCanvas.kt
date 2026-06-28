@@ -109,3 +109,29 @@ object TidalCanvas {
         val items = root["albums"]?.jsonObject?.get("items")?.jsonArray ?: return null
 
         for (item in items) {
+            val record = item as? JsonObject ?: continue
+            val recordTitle = record["title"]?.jsonPrimitive?.contentOrNull ?: continue
+            val artists = record["artists"]?.jsonArray
+                ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }
+                .orEmpty()
+
+            // Without this a search for "SOS" settles on "Ctrl", which also
+            // has a cover and is also by SZA.
+            if (!isMatch(recordTitle, artists, album, artist)) continue
+
+            val videoCover = record["videoCover"]?.jsonPrimitive?.contentOrNull
+            if (videoCover.isNullOrBlank()) continue
+            val videoUrl = coverUrl(videoCover) ?: continue
+
+            Log.d(TAG, "video cover for album '$recordTitle' by ${artists.joinToString()}")
+            return CanvasArtwork(
+                url = videoUrl,
+                title = recordTitle,
+                artist = artists.joinToString(", ").ifBlank { null },
+                album = recordTitle,
+            )
+        }
+        return null
+    }
+
+    /** Exact on the name, and every credited artist we asked for present. */
