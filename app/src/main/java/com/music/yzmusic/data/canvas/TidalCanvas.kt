@@ -105,3 +105,7 @@ object TidalCanvas {
 
         val body = canvasGet(url, mapOf("X-Tidal-Token" to EMBED_TOKEN, "User-Agent" to CANVAS_UA))
             ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        val items = root["albums"]?.jsonObject?.get("items")?.jsonArray ?: return null
+
+        for (item in items) {
