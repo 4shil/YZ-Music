@@ -182,3 +182,11 @@ internal object SpotifyToken {
         fun onTokenPayload(payload: String?) {
             if (payload.isNullOrBlank() || deferred.isCompleted) return
             runCatching {
+                val root = json.parseToJsonElement(payload).jsonObject
+                val token = root["accessToken"]?.jsonPrimitive?.contentOrNull
+                val anonymous = root["isAnonymous"]?.jsonPrimitive?.contentOrNull
+                    ?.toBooleanStrictOrNull() ?: false
+                // The player also mints an anonymous token before the cookie
+                // takes effect; that one can't read canvases, so keep waiting
+                // for the logged-in one.
+                if (token.isNullOrBlank() || anonymous) return
