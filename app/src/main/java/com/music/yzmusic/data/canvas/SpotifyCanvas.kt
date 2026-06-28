@@ -362,3 +362,20 @@ object SpotifyCanvas {
     }.getOrElse { emptyList() }
 
     private fun decodeCanvas(bytes: ByteArray): CanvasHit? = runCatching {
+        var id: String? = null
+        var url: String? = null
+        var trackUri: String? = null
+        val input = CodedInputStream.newInstance(bytes)
+        while (!input.isAtEnd) {
+            val tag = input.readTag()
+            if (tag == 0) break
+            when (tag ushr 3) {
+                1 -> id = input.readString()
+                2 -> url = input.readString()
+                5 -> trackUri = input.readString()
+                else -> input.skipField(tag)
+            }
+        }
+        url?.let { CanvasHit(id, it, trackUri) }
+    }.getOrNull()
+}
