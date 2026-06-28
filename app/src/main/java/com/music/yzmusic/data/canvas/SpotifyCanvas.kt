@@ -194,3 +194,35 @@ object SpotifyCanvas {
 
         for (item in items) {
             val track = item as? JsonObject ?: continue
+            val trackTitle = track["name"]?.jsonPrimitive?.contentOrNull ?: continue
+            val artists = track["artists"]?.jsonArray
+                ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }
+                .orEmpty()
+            if (!isMatch(trackTitle, artists, title, artist)) continue
+
+            val uri = track["uri"]?.jsonPrimitive?.contentOrNull ?: continue
+            val albumName = track["album"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
+            return TrackHit(uri, trackTitle, artists.joinToString(", ").ifBlank { artist }, albumName)
+        }
+        return null
+    }
+
+    /**
+     * A release's canvas, read off its first track — Spotify hangs Canvas off
+     * individual tracks, not the release itself, so there is no album-level
+     * lookup to make directly.
+     */
+    suspend fun searchAlbum(album: String, artist: String): CanvasArtwork? {
+        val token = SpotifyToken.accessToken() ?: return null
+        val url = SEARCH_URL.toHttpUrl().newBuilder()
+            .addQueryParameter("q", "$album $artist")
+            .addQueryParameter("type", "album")
+            .addQueryParameter("limit", "10")
+            .build()
+            .toString()
+
+        val body = canvasGet(url, authHeaders(token)) ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        val items = root["albums"]?.jsonObject?.get("items")?.jsonArray ?: return null
+
+        for (item in items) {
