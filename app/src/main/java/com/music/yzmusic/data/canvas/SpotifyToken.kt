@@ -206,3 +206,10 @@ internal object SpotifyToken {
           var report = function (body) {
             try { $BRIDGE_NAME.onTokenPayload(body); } catch (e) {}
           };
+          var isToken = function (u) {
+            try { return String(u).indexOf('/api/token') !== -1; } catch (e) { return false; }
+          };
+          var origFetch = window.fetch;
+          if (origFetch) {
+            window.fetch = function (input, init) {
+              var url = (input && input.url) ? input.url : input;
