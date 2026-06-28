@@ -235,3 +235,45 @@ object SpotifyCanvas {
 
             val albumId = record["id"]?.jsonPrimitive?.contentOrNull ?: continue
             val trackUri = firstTrackUri(albumId, token) ?: continue
+            val canvasUrl = fetchCanvasUrl(trackUri, token) ?: continue
+
+            Log.d(TAG, "canvas for album '$recordTitle' by ${artists.joinToString()}")
+            return CanvasArtwork(
+                url = canvasUrl,
+                title = recordTitle,
+                artist = artists.joinToString(", ").ifBlank { null },
+                album = recordTitle,
+                source = CanvasSource.SPOTIFY,
+            )
+        }
+        return null
+    }
+
+    private fun firstTrackUri(albumId: String, token: String): String? {
+        val url = "$ALBUM_TRACKS_URL/$albumId/tracks".toHttpUrl().newBuilder()
+            .addQueryParameter("limit", "1")
+            .build()
+            .toString()
+        val body = canvasGet(url, authHeaders(token)) ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        return root["items"]?.jsonArray?.firstOrNull()
+            ?.jsonObject?.get("uri")?.jsonPrimitive?.contentOrNull
+    }
+
+    /**
+     * [SpotifyToken.clientToken] on top of the bearer — api.spotify.com and
+     * spclient both turn away a request carrying only the bearer with a 429,
+     * which reads exactly like rate limiting on the very first request of a
+     * session until you notice that's what it always says. Sent whenever
+     * minting one succeeds; omitted otherwise rather than failing the call,
+     * since some of these endpoints still answer without it.
+     */
+    private fun authHeaders(token: String): Map<String, String> {
+        val headers = mutableMapOf("Authorization" to "Bearer $token", "User-Agent" to CANVAS_UA)
+        SpotifyToken.clientToken()?.let { headers["Client-Token"] = it }
+        return headers
+    }
+
+    private fun isMatch(gotName: String, gotArtists: List<String>, wantName: String, wantArtist: String): Boolean {
+        if (gotName.normalizeForMatch() != wantName.normalizeForMatch()) return false
+        val wanted = splitArtists(wantArtist)
