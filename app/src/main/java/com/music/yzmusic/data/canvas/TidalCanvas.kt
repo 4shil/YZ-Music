@@ -36,3 +36,23 @@ object TidalCanvas {
     }
 
     fun search(title: String, artist: String, album: String?): CanvasArtwork? {
+        val query = if (album.isNullOrBlank()) "$artist $title" else "$album $artist $title"
+        val url = SEARCH.toHttpUrl().newBuilder()
+            .addQueryParameter("query", query)
+            .addQueryParameter("limit", "10")
+            .addQueryParameter("types", "TRACKS")
+            .addQueryParameter("countryCode", countryCode)
+            .build()
+            .toString()
+
+        val body = canvasGet(url, mapOf("X-Tidal-Token" to EMBED_TOKEN, "User-Agent" to CANVAS_UA))
+            ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+
+        // The response carries a section per result type even when only one
+        // was asked for — artists, albums and playlists all come back with an
+        // empty `items`, so this has to name the section rather than hunt for
+        // the first array that fits.
+        val items = root["tracks"]?.jsonObject?.get("items")?.jsonArray ?: return null
+
+        for (item in items) {
