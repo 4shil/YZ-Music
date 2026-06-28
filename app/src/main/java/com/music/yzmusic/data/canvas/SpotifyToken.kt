@@ -319,3 +319,40 @@ internal object SpotifyToken {
             Log.w(TAG, "client-token response had no granted_token.token")
             return null
         }
+        val ttlSeconds = granted["expires_after_seconds"]?.jsonPrimitive?.contentOrNull
+            ?.toLongOrNull() ?: 3600L
+
+        cachedClientToken = token
+        clientTokenExpiresAtMs = now + ttlSeconds * 1000
+        Log.d(TAG, "minted client token, good for ${ttlSeconds}s")
+        return token
+    }
+
+    /**
+     * [SessionInfo.clientVersion] and [SessionInfo.deviceId] both come off the
+     * plain, unauthenticated web player page — the client version from a JSON
+     * blob it embeds for itself, the device id from the `sp_t` cookie it hands
+     * out to every visitor. Fetched once and held for the process: neither
+     * changes inside a session.
+     */
+    private fun session(): SessionInfo? {
+        cachedSession?.let { return it }
+
+        val request = Request.Builder()
+            .url("https://open.spotify.com")
+            .header("User-Agent", CANVAS_UA)
+            .build()
+        val (html, deviceId) = runCatching {
+            Http.client.newCall(request).execute().use { response ->
+                val body = response.body?.string()
+                val spT = response.headers("Set-Cookie").firstNotNullOfOrNull { header ->
+                    Regex("""sp_t=([^;]+)""").find(header)?.groupValues?.get(1)
+                }
+                body to spT
+            }
+        }.getOrNull() ?: (null to null)
+        if (html == null) {
+            Log.w(TAG, "couldn't load the web player page for session info")
+            return null
+        }
+
