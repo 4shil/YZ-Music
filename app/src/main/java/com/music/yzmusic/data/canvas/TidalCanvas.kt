@@ -95,3 +95,13 @@ object TidalCanvas {
      * finding a song that happens to sit on the right record.
      */
     fun searchAlbum(album: String, artist: String): CanvasArtwork? {
+        val url = SEARCH.toHttpUrl().newBuilder()
+            .addQueryParameter("query", "$album $artist")
+            .addQueryParameter("limit", "10")
+            .addQueryParameter("types", "ALBUMS")
+            .addQueryParameter("countryCode", countryCode)
+            .build()
+            .toString()
+
+        val body = canvasGet(url, mapOf("X-Tidal-Token" to EMBED_TOKEN, "User-Agent" to CANVAS_UA))
+            ?: return null
