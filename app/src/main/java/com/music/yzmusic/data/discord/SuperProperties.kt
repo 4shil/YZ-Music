@@ -41,3 +41,9 @@ object SuperProperties {
             put("os_version", Build.VERSION.RELEASE)
             put("os_sdk_version", Build.VERSION.SDK_INT.toString())
             put("client_build_number", CLIENT_BUILD_NUMBER)
+            put("client_event_source", JSONObject.NULL)
+            put("design_id", 0)
+        }
+    }
+
+    val superPropertiesBase64: String by lazy {
