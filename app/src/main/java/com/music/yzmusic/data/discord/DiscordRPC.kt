@@ -89,3 +89,17 @@ class DiscordRPC(
             buttonsList.add(resolvedText to watchUrl(song))
         }
         if (button2Visible) {
+            val resolvedText = resolveVariables(
+                button2Text.ifEmpty { DEFAULT_BUTTON_2 },
+                song,
+            )
+            buttonsList.add(resolvedText to PROJECT_URL)
+        }
+
+        val type = when (activityType) {
+            "playing" -> Type.PLAYING
+            "watching" -> Type.WATCHING
+            "competing" -> Type.COMPETING
+            else -> Type.LISTENING
+        }
+
