@@ -80,3 +80,5 @@ class DiscordRPC(
         val remainingDuration = durationMillis - currentPlaybackTimeMillis
         val adjustedRemainingDuration = (remainingDuration / playbackSpeed).toLong()
 
+        val buttonsList = mutableListOf<Pair<String, String>>()
+        if (button1Visible) {
