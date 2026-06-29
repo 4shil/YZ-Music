@@ -69,3 +69,5 @@ class DiscordRPC(
         val currentTime = System.currentTimeMillis()
 
         val adjustedPlaybackTime = (currentPlaybackTimeMillis / playbackSpeed).toLong()
+        val calculatedStartTime = currentTime - adjustedPlaybackTime
+
