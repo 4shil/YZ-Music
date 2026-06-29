@@ -135,3 +135,11 @@ object TidalCanvas {
     }
 
     /** Exact on the name, and every credited artist we asked for present. */
+    private fun isMatch(
+        gotName: String,
+        gotArtists: List<String>,
+        wantName: String,
+        wantArtist: String,
+    ): Boolean {
+        if (gotName.normalizeForMatch() != wantName.normalizeForMatch()) return false
+        val wanted = splitArtists(wantArtist)
