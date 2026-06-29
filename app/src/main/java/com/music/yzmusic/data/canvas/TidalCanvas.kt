@@ -143,3 +143,19 @@ object TidalCanvas {
     ): Boolean {
         if (gotName.normalizeForMatch() != wantName.normalizeForMatch()) return false
         val wanted = splitArtists(wantArtist)
+        val credited = gotArtists.map { it.normalizeForMatch() }.filter { it.isNotBlank() }
+        if (wanted.isEmpty() || credited.isEmpty()) return false
+        return wanted.all { want -> credited.any { it == want } }
+    }
+
+    /**
+     * A cover id is five dash-separated segments that spell out its path on
+     * the CDN. Anything shaped differently is a format we don't know how to
+     * address, so treat it as no cover at all rather than build a 404.
+     */
+    internal fun coverUrl(id: String): String? {
+        val parts = id.split("-")
+        if (parts.size != 5) return null
+        return "https://resources.tidal.com/videos/${parts.joinToString("/")}/1280x1280.mp4"
+    }
+}
