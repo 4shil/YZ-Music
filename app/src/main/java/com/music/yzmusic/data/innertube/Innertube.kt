@@ -281,3 +281,206 @@ object Innertube {
             ?.substringBefore("||")
             ?.takeIf { it.isNotBlank() }
         val pageId = CONFIG_PAGE_ID.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+        val authUser = CONFIG_SESSION_INDEX.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+
+        // The shell's own visitor id, which is bound to this session. Strictly
+        // better than the anonymous one [fetchVisitorData] mints: the stats
+        // pings are attributed against the visitor the player response was
+        // issued to, so a signed-in play reported under an anonymous id is a
+        // play reported about nobody.
+        CONFIG_VISITOR_DATA.find(html)?.groupValues?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+                visitorData = it
+                visitorDataIsSessionBound = true
+            }
+
+        return SessionScope(dataSyncId, pageId, authUser ?: "0", clientVersion)
+    }
+
+    private val CONFIG_LOGGED_IN = Regex(""""LOGGED_IN"\s*:\s*(true|false)""")
+    private val CONFIG_DATASYNC_ID = Regex(""""DATASYNC_ID"\s*:\s*"([^"]+)"""")
+    private val CONFIG_PAGE_ID = Regex(""""DELEGATED_SESSION_ID"\s*:\s*"([^"]+)"""")
+    private val CONFIG_SESSION_INDEX = Regex(""""SESSION_INDEX"\s*:\s*"?(\d+)""")
+    private val CONFIG_VISITOR_DATA = Regex(""""VISITOR_DATA"\s*:\s*"([^"]+)"""")
+    private val CONFIG_CLIENT_VERSION = Regex(""""INNERTUBE_CLIENT_VERSION"\s*:\s*"([^"]+)"""")
+
+    private const val WEB_USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    /** See [postPlayer] — the per-request ceiling on the walk's hot path. */
+    private const val PLAYER_TIMEOUT_MS = 6_000L
+
+    private val client = HttpClient(OkHttp) {
+        // Same OkHttp instance ExoPlayer streams through — see Http.
+        engine { preconfigured = com.music.yzmusic.data.Http.client }
+        install(ContentNegotiation) { json(json) }
+        // Without this the only bound is OkHttp's own read timeout, and the
+        // failure it raises reads as "Socket timeout has expired […]
+        // socket_timeout=unknown" — Ktor reporting a limit it was never told.
+        install(HttpTimeout) {
+            requestTimeoutMillis = 30_000
+            connectTimeoutMillis = 15_000
+            socketTimeoutMillis = 20_000
+        }
+        expectSuccess = true
+    }
+
+    /**
+     * Runs [block], giving transport failures another go before letting them
+     * reach the caller.
+     *
+     * A connection reset on mobile data is weather, not information: the
+     * request was fine and asking again generally answers. That matters most
+     * on a shared connection pool, where a socket torn down under one request
+     * — an abandoned search, a network handover — surfaces as
+     * "Software caused connection abort" on whichever request picked that
+     * connection up next, which had nothing to do with it.
+     *
+     * Only transport failures. An HTTP error status is an answer, and
+     * repeating the question won't change it. Cancellation isn't caught at
+     * all: [delay] throws when the coroutine is cancelled, so a search the
+     * user has typed past stops here instead of retrying on behalf of a query
+     * nobody is waiting for.
+     */
+    private suspend fun <T> withRetry(attempts: Int = 3, block: suspend () -> T): T {
+        var backoff = 500L
+        repeat(attempts - 1) {
+            try {
+                return block()
+            } catch (e: HttpRequestTimeoutException) {
+                // Not weather, and not worth repeating. A timeout is this app's
+                // own decision that the request had long enough — so trying it
+                // again cannot learn anything the first attempt didn't, and the
+                // cost is multiplied rather than shared: [HttpRequestTimeoutException]
+                // is an [IOException], so before this branch existed every timed-out
+                // `player` call was quietly attempted three times. That turned a
+                // six-second ceiling into a nineteen-second one on a walk of
+                // seven clients, which is worse than the unbounded call the
+                // ceiling was added to prevent. Give up on this client and let
+                // the caller move to the next one.
+                Log.d(TAG, "not retrying, request timed out: ${e.message}")
+                throw e
+            } catch (e: IOException) {
+                Log.d(TAG, "retrying: ${e.message}")
+            }
+            delay(backoff)
+            backoff *= 2
+        }
+        return block()
+    }
+
+    // ---- Public API ---------------------------------------------------------
+
+    suspend fun browse(browseId: String, params: String? = null): JsonObject =
+        postMusic("browse") {
+            put("browseId", browseId)
+            params?.let { put("params", it) }
+        }
+
+    /**
+     * The next page of a paged browse response — playlists and library feeds
+     * come back roughly 100 rows at a time. YouTube Music takes the token as
+     * query parameters rather than in the body, and answers with a bare
+     * continuation envelope carrying the same row renderers.
+     */
+    suspend fun browseContinuation(token: String): JsonObject = postMusic(
+        endpoint = "browse",
+        // The web client passes the token in the body and the older query-string
+        // form is still honoured; both are sent so either is enough.
+        query = mapOf("ctoken" to token, "continuation" to token, "type" to "next"),
+    ) {
+        put("continuation", token)
+    }
+
+    /** Signed-in profile: display name, email/handle and avatar. */
+    suspend fun accountMenu(): JsonObject = postMusic("account/account_menu") {}
+
+    /**
+     * The watch queue that YouTube Music would play after [videoId] — the
+     * "RDAMVM" radio mix. Used to keep AutoPlay going past the last track.
+     */
+    suspend fun next(videoId: String): JsonObject = postMusic("next") {
+        put("videoId", videoId)
+        put("playlistId", "RDAMVM$videoId")
+        put("isAudioOnly", true)
+    }
+
+    suspend fun search(query: String, params: String? = null): JsonObject =
+        postMusic("search") {
+            put("query", query)
+            params?.let { put("params", it) }
+        }
+
+    /**
+     * The typeahead list YouTube Music's own search box shows for a
+     * half-typed query — query strings, not results.
+     *
+     * A different endpoint from [search] rather than a cheap mode of it, and
+     * far cheaper than one: the response is a few hundred bytes of text with
+     * no shelves, thumbnails or playback endpoints in it, which is what makes
+     * it affordable per keystroke where a search is not.
+     */
+    suspend fun searchSuggestions(input: String): JsonObject =
+        postMusic("music/get_search_suggestions") {
+            put("input", input)
+        }
+
+    /**
+     * The `player` response for [videoId] as seen by [client] — the audio
+     * formats and whatever it takes to unlock them.
+     *
+     * The single cheapest thing this app does to start a track: one POST,
+     * answered in a few hundred milliseconds, against an endpoint that carries
+     * no HTML and is not rate-shaped the way the watch page is.
+     *
+     * [signatureTimestamp] is required by the clients whose formats come back
+     * ciphered ([PlayerClient.needsSignatureTimestamp]) and ignored by the
+     * rest; it is read out of YouTube's own player JavaScript.
+     *
+     * @throws UnplayableException when the track is refused rather than
+     *   missing — a region block, a takedown, or the client being turned away.
+     *   Callers walk on to the next client on the strength of that distinction.
+     */
+    suspend fun player(
+        videoId: String,
+        client: PlayerClient,
+        signatureTimestamp: Int? = null,
+        authenticated: Boolean = false,
+    ): JsonObject {
+        val response = postPlayer(videoId, client, signatureTimestamp, authenticated)
+
+        val status = response["playabilityStatus"]?.jsonObject
+            ?.get("status")?.jsonPrimitive?.content
+        if (status != null && status != "OK") {
+            val reason = response["playabilityStatus"]?.jsonObject
+                ?.get("reason")?.jsonPrimitive?.content
+            throw UnplayableException(reason ?: status)
+        }
+        return response
+    }
+
+    class UnplayableException(private val reason: String) :
+        IllegalStateException("Track unavailable: $reason") {
+
+        /**
+         * Whether this is Google doubting the client rather than the track
+         * being unavailable. Worth a fresh visitor id and another go; a real
+         * region block or takedown is not.
+         *
+         * [isAgeGate] is excluded, and that exclusion is the whole reason this
+         * is not a one-line substring test. YouTube words its age gate "Sign in
+         * to confirm your age", which contains "sign in" — so every
+         * age-restricted track read as a session-level refusal, and
+         * [StreamResolver][com.music.yzmusic.data.innertube.StreamResolver]
+         * answered it by standing the client down *app-wide* for ten minutes
+         * and burning a fresh visitor id. One age-restricted song in a queue
+         * therefore took three of the seven clients out of service for
+         * everything after it, which is the "it works, then it stops working"
+         * report. An age gate is a verdict about one track and one identity; a
+         * bot check is a verdict about the session, and only the second one is
+         * worth acting on session-wide.
+         */
