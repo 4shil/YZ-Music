@@ -47,3 +47,9 @@ object SuperProperties {
     }
 
     val superPropertiesBase64: String by lazy {
+        Base64.encodeToString(superProperties.toString().toByteArray(), Base64.NO_WRAP)
+    }
+
+    val userAgent: String by lazy {
+        "Discord-Android/$CLIENT_BUILD_NUMBER;RNA"
+    }
