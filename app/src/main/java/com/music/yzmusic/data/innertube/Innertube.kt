@@ -149,3 +149,50 @@ object Innertube {
      * so the id is found by shape rather than by a path that would rot.
      */
     private suspend fun fetchVisitorData(): String? {
+        val body = client.get("https://www.youtube.com/sw.js_data") {
+            header("User-Agent", WEB_USER_AGENT)
+        }.bodyAsText()
+        val payload = Json.parseToJsonElement(body.substringAfter("\n", body.drop(5)))
+        return findVisitorData(payload)
+    }
+
+    private fun findVisitorData(element: JsonElement): String? = when (element) {
+        is JsonArray -> element.firstNotNullOfOrNull { findVisitorData(it) }
+        is JsonPrimitive -> element.contentOrNull?.takeIf { VISITOR_DATA.matches(it) }
+        else -> null
+    }
+
+    /** Protobuf-in-base64; always this shape, and nothing else in there is. */
+    private val VISITOR_DATA = Regex("""Cg[A-Za-z0-9_%-]{40,}""")
+
+    // ---- Which account is this, exactly -------------------------------------
+
+    /**
+     * Who the session cookie actually acts as, and which client version it acts
+     * with — read out of the signed-in music.youtube.com shell.
+     *
+     * A cookie is not an account. One Google login carries every account the
+     * browser has ever signed into, plus every brand channel hanging off them,
+     * and *nothing in the cookie says which one is meant*. The web client
+     * resolves that from its page config and then says so on every request. An
+     * app that skips this step is not making an ambiguous request — it is
+     * making a request about the first account in the jar, whoever that is.
+     *
+     * That is the whole of "history works for me and not for them": for a
+     * listener whose YouTube Music account *is* the first one, guessing is
+     * indistinguishable from asking. For anyone with two Google accounts, or a
+     * brand channel — the account YouTube Music itself pushes you onto when you
+     * have one — every play was being credited to the wrong identity, so their
+     * own history stayed empty no matter how many pings went out successfully.
+     *
+     * @param dataSyncId the account, as `context.user.onBehalfOfUser`. Only
+     *   ever taken from a shell that reported itself signed in: Google answers
+     *   an `onBehalfOfUser` it cannot tie to a session with 401, so a guessed
+     *   value would break every request in the app rather than just history.
+     * @param pageId the brand channel, as `X-Goog-PageId` — the header the
+     *   stats endpoints ask for by name as `PLUS_PAGE_ID`. Absent for a plain
+     *   personal account, which is why it is nullable rather than defaulted.
+     * @param authUser which entry in the cookie jar, as `X-Goog-AuthUser`.
+     *   Hardcoded `0` before this, which is the same guess by another name.
+     */
+    private class SessionScope(
