@@ -103,3 +103,34 @@ class DiscordRPC(
             else -> Type.LISTENING
         }
 
+        val name = activityName.ifEmpty { appName() }
+
+        setActivity(
+            name = name,
+            details = songTitleWithRate,
+            state = song.artist,
+            detailsUrl = watchUrl(song),
+            // Asked for at a size Discord's own card actually draws — the row
+            // thumbnail our lists use is 160px and reads soft blown up to the
+            // 96dp sleeve in a presence card.
+            largeImage = song.artworkAt(ART_PX)?.let { RpcImage.ExternalImage(it) },
+            smallImage = null,
+            largeText = song.albumName,
+            smallText = null,
+            buttons = if (buttonsList.isNotEmpty()) buttonsList else null,
+            type = type,
+            statusDisplayType = if (useDetails) StatusDisplayType.DETAILS else StatusDisplayType.STATE,
+            since = currentTime,
+            startTime = calculatedStartTime,
+            endTime = currentTime + adjustedRemainingDuration,
+            applicationId = APPLICATION_ID,
+            status = status,
+        )
+    }
+
+    /**
+     * The name Discord puts after "Listening to". Taken from the app's own
+     * label so it tracks a rename, with the dev flavor's suffix dropped —
+     * a side-by-side dev install should still look like bitchord to everyone
+     * else on Discord.
+     */
