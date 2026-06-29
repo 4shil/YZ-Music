@@ -32,3 +32,6 @@ object SuperProperties {
             put("os", "Android")
             put("browser", "Discord Android")
             put("device", Build.DEVICE)
+            put("system_locale", Locale.getDefault().toString())
+            put("client_version", CLIENT_VERSION)
+            put("release_channel", RELEASE_CHANNEL)
