@@ -66,3 +66,6 @@ class DiscordRPC(
         activityType: String = "listening",
         activityName: String = "",
     ) = runCatching {
+        val currentTime = System.currentTimeMillis()
+
+        val adjustedPlaybackTime = (currentPlaybackTimeMillis / playbackSpeed).toLong()
