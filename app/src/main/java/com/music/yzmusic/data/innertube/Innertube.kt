@@ -196,3 +196,5 @@ object Innertube {
      *   Hardcoded `0` before this, which is the same guess by another name.
      */
     private class SessionScope(
+        val dataSyncId: String?,
+        val pageId: String?,
