@@ -198,3 +198,61 @@ object Innertube {
     private class SessionScope(
         val dataSyncId: String?,
         val pageId: String?,
+        val authUser: String,
+        val clientVersion: String?,
+    )
+
+    @Volatile
+    private var scope: SessionScope? = null
+
+    private val scopeLock = Mutex()
+
+    /**
+     * The WEB_REMIX version to claim, live if the shell has been read.
+     *
+     * Worth taking from the shell rather than pinning: the stats pings carry it
+     * as `cver`, and a version Google has never shipped is a standing invitation
+     * to be treated as something other than a music client.
+     */
+    private val webRemixVersion: String
+        get() = scope?.clientVersion ?: WEB_REMIX_VERSION
+
+    /**
+     * Reads the session scope, once per cookie, before anything that depends on
+     * being the right account.
+     *
+     * Cheap to be wrong about and expensive to skip, so it fails open: a shell
+     * that cannot be fetched or parsed leaves [scope] null and every request
+     * behaves exactly as it did before. What it must never do is invent a
+     * [SessionScope.dataSyncId] — see that field.
+     */
+    suspend fun ensureSessionScope() {
+        val session = cookie ?: return
+        if (scope != null) return
+        scopeLock.withLock {
+            if (scope != null || cookie != session) return
+            runCatching { fetchSessionScope(session) }
+                .onFailure { Log.w(TAG, "could not read the session scope: ${it.message}") }
+                .getOrNull()
+                ?.let { fresh ->
+                    scope = fresh
+                    Log.d(
+                        TAG,
+                        "session scope: authUser=${fresh.authUser} " +
+                            "pageId=${fresh.pageId ?: "none"} " +
+                            "dataSyncId=${if (fresh.dataSyncId != null) "present" else "none"} " +
+                            "cver=${fresh.clientVersion ?: WEB_REMIX_VERSION}",
+                    )
+                }
+        }
+    }
+
+    /**
+     * The music.youtube.com shell, fetched with the session, for its `ytcfg`.
+     *
+     * Read by regex rather than by evaluating the config blob: it is one script
+     * assignment among hundreds of kilobytes of app JavaScript, and the four
+     * values wanted are flat strings in it. A key that moves reads as absent,
+     * which is the same as not having asked.
+     */
+    private suspend fun fetchSessionScope(session: String): SessionScope? {
