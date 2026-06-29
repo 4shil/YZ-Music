@@ -134,3 +134,46 @@ class DiscordRPC(
      * a side-by-side dev install should still look like bitchord to everyone
      * else on Discord.
      */
+    private fun appName(): String =
+        context.getString(R.string.app_name).removeSuffix(" Dev")
+
+    companion object {
+        /**
+         * The Discord application this presence is attributed to.
+         *
+         * Two things need it: the endpoint that mirrors an arbitrary artwork
+         * URL onto Discord's CDN (Discord will not render a `large_image` it
+         * does not host), and the buttons, which it drops entirely from an
+         * activity with no application id.
+         *
+         * It does *not* decide the name shown on the profile — that is
+         * `name` in the activity payload, which [appName] fills in. Register
+         * an application at https://discord.com/developers/applications and
+         * paste its id here to have the artwork proxied and the buttons
+         * attributed under your own app rather than the upstream project's.
+         */
+        private const val APPLICATION_ID = "1411019391843172514"
+
+        const val PROJECT_URL = "https://github.com/4shil/YZ-Music"
+
+        const val DEFAULT_BUTTON_1 = "Listen on YouTube Music"
+        const val DEFAULT_BUTTON_2 = "Visit YZ Music"
+
+        /** Discord draws the sleeve at roughly 96dp; 480px covers it on any density. */
+        private const val ART_PX = 480
+
+        fun watchUrl(song: Song): String =
+            "https://music.youtube.com/watch?v=${song.videoId}"
+
+        /**
+         * Resolves template variables in text.
+         * Supported: {song_name}, {artist_name}, {album_name}
+         */
+        fun resolveVariables(text: String, song: Song): String {
+            return text
+                .replace("{song_name}", song.title)
+                .replace("{artist_name}", song.artist)
+                .replace("{album_name}", song.albumName ?: "")
+        }
+    }
+}
