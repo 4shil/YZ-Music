@@ -44,3 +44,6 @@ object SuperProperties {
             put("client_event_source", JSONObject.NULL)
             put("design_id", 0)
         }
+    }
+
+    val superPropertiesBase64: String by lazy {
