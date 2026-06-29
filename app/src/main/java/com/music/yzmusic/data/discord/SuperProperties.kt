@@ -35,3 +35,6 @@ object SuperProperties {
             put("system_locale", Locale.getDefault().toString())
             put("client_version", CLIENT_VERSION)
             put("release_channel", RELEASE_CHANNEL)
+            put("device_vendor_id", UUID.randomUUID().toString())
+            put("client_uuid", UUID.randomUUID().toString())
+            put("client_launch_id", UUID.randomUUID().toString())
