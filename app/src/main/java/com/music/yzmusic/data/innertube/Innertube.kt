@@ -256,3 +256,28 @@ object Innertube {
      * which is the same as not having asked.
      */
     private suspend fun fetchSessionScope(session: String): SessionScope? {
+        val html = client.get("$MUSIC_ORIGIN/") {
+            header("User-Agent", WEB_USER_AGENT)
+            header("Accept-Language", "en-US,en;q=0.9")
+            header("Cookie", session)
+            sapisidFrom(session)?.let { header("Authorization", sapisidHash(it)) }
+        }.bodyAsText()
+
+        // The one value that must not be guessed. A shell that says it is
+        // signed out either has a dead cookie or was served to nobody in
+        // particular; either way its DATASYNC_ID belongs to no account, and
+        // sending it would 401 every request in the app.
+        val signedIn = CONFIG_LOGGED_IN.find(html)?.groupValues?.get(1) == "true"
+        val clientVersion = CONFIG_CLIENT_VERSION.find(html)?.groupValues?.get(1)
+        if (!signedIn) {
+            Log.w(TAG, "music.youtube.com served a signed-out shell; not scoping requests")
+            // Still worth the client version — that part is true either way.
+            return clientVersion?.let { SessionScope(null, null, "0", it) }
+        }
+
+        // `<accountSyncId>||<sessionSyncId>`; only the first half identifies
+        // the account, and the second changes on its own schedule.
+        val dataSyncId = CONFIG_DATASYNC_ID.find(html)?.groupValues?.get(1)
+            ?.substringBefore("||")
+            ?.takeIf { it.isNotBlank() }
+        val pageId = CONFIG_PAGE_ID.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
