@@ -53,3 +53,4 @@ object SuperProperties {
     val userAgent: String by lazy {
         "Discord-Android/$CLIENT_BUILD_NUMBER;RNA"
     }
+}
