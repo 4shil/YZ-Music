@@ -77,3 +77,6 @@ class DiscordRPC(
             song.title
         }
 
+        val remainingDuration = durationMillis - currentPlaybackTimeMillis
+        val adjustedRemainingDuration = (remainingDuration / playbackSpeed).toLong()
+
