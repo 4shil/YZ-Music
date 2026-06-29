@@ -29,3 +29,6 @@ object SuperProperties {
     // Lazy loaded properties to avoid re-generating UUIDs
     val superProperties: JSONObject by lazy {
         JSONObject().apply {
+            put("os", "Android")
+            put("browser", "Discord Android")
+            put("device", Build.DEVICE)
