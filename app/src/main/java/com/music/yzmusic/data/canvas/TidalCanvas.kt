@@ -119,3 +119,19 @@ object TidalCanvas {
             // has a cover and is also by SZA.
             if (!isMatch(recordTitle, artists, album, artist)) continue
 
+            val videoCover = record["videoCover"]?.jsonPrimitive?.contentOrNull
+            if (videoCover.isNullOrBlank()) continue
+            val videoUrl = coverUrl(videoCover) ?: continue
+
+            Log.d(TAG, "video cover for album '$recordTitle' by ${artists.joinToString()}")
+            return CanvasArtwork(
+                url = videoUrl,
+                title = recordTitle,
+                artist = artists.joinToString(", ").ifBlank { null },
+                album = recordTitle,
+            )
+        }
+        return null
+    }
+
+    /** Exact on the name, and every credited artist we asked for present. */
