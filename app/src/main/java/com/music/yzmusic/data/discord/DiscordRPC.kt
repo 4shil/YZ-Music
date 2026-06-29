@@ -71,3 +71,12 @@ class DiscordRPC(
         val adjustedPlaybackTime = (currentPlaybackTimeMillis / playbackSpeed).toLong()
         val calculatedStartTime = currentTime - adjustedPlaybackTime
 
+        val songTitleWithRate = if (playbackSpeed != 1.0f) {
+            "${song.title} [${String.format(Locale.ROOT, "%.2fx", playbackSpeed)}]"
+        } else {
+            song.title
+        }
+
+        val remainingDuration = durationMillis - currentPlaybackTimeMillis
+        val adjustedRemainingDuration = (remainingDuration / playbackSpeed).toLong()
+
