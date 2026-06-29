@@ -38,3 +38,6 @@ object SuperProperties {
             put("device_vendor_id", UUID.randomUUID().toString())
             put("client_uuid", UUID.randomUUID().toString())
             put("client_launch_id", UUID.randomUUID().toString())
+            put("os_version", Build.VERSION.RELEASE)
+            put("os_sdk_version", Build.VERSION.SDK_INT.toString())
+            put("client_build_number", CLIENT_BUILD_NUMBER)
