@@ -82,3 +82,10 @@ class DiscordRPC(
 
         val buttonsList = mutableListOf<Pair<String, String>>()
         if (button1Visible) {
+            val resolvedText = resolveVariables(
+                button1Text.ifEmpty { DEFAULT_BUTTON_1 },
+                song,
+            )
+            buttonsList.add(resolvedText to watchUrl(song))
+        }
+        if (button2Visible) {
