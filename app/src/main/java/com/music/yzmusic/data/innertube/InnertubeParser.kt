@@ -330,3 +330,66 @@ object InnertubeParser {
     fun collectSongsDeep(root: JsonElement): List<Song> {
         val out = LinkedHashMap<String, Song>()
         // A release's own rows are credited by its header, not one by one.
+        val pageCredit = pageCredit(root)
+        fun walk(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    node["musicResponsiveListItemRenderer"]?.let { renderer ->
+                        parseResponsiveListItem(renderer as? JsonObject, pageCredit)
+                            ?.let { out[it.videoId] = it }
+                    }
+                    node.values.forEach(::walk)
+                }
+                is JsonArray -> node.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(root)
+        return out.values.toList()
+    }
+
+    /** A playlist page's own tracks, the ones YouTube suggests adding, and the token for the rest. */
+    data class PlaylistShelfPage(val songs: List<Song>, val suggested: List<Song>, val continuation: String?)
+
+    /**
+     * A playlist page's own track list, scoped rather than walked — plus
+     * whatever YouTube offers alongside it to round the playlist out.
+     *
+     * A playlist the account owns can carry a "Suggestions" shelf below the
+     * list actually built by hand — even a two-song playlist's own shelf
+     * comes back with a continuation token that, followed, serves it rather
+     * than running dry. That continuation is not another
+     * `musicPlaylistShelfContinuation` page, though: it lands as a plain
+     * `sectionListContinuation` carrying a `musicShelfRenderer` titled
+     * "Suggestions", structurally unrelated to the shelf the real tracks
+     * came from. Scoping only to the playlist shelf itself — as an earlier
+     * version of this function did — reads that continuation as belonging
+     * to nothing and drops it, suggestions included. So the scope here is
+     * the whole secondary column (or, for a continuation response, the
+     * whole `continuationContents`), and what tells a suggested row from a
+     * real one is `playlistItemData` — present on every row either way, but
+     * only a row actually in the playlist carries a `playlistSetVideoId`
+     * inside it, the id "remove from playlist" needs. [collectSongsDeep]
+     * has no notion of any of this, so a plain walk reads suggestions as
+     * songs the user added. Returns null off a page with nothing
+     * playlist-shaped in scope (an album, say), so callers fall back to the
+     * generic walk.
+     */
+    fun parsePlaylistShelf(root: JsonElement): PlaylistShelfPage? {
+        val scope: JsonElement = root.o("continuationContents")
+            ?: root.o("contents").o("twoColumnBrowseResultsRenderer").o("secondaryContents")
+            ?: return null
+        val looksLikePlaylist = collectRenderers(scope, "musicPlaylistShelfRenderer").isNotEmpty() ||
+            scope.o("musicPlaylistShelfContinuation") != null ||
+            collectRenderers(scope, "musicShelfRenderer").any { it.o("title").runs() == "Suggestions" }
+        if (!looksLikePlaylist) return null
+
+        val pageCredit = pageCredit(root)
+        val (songs, suggested) = collectRenderers(scope, "musicResponsiveListItemRenderer")
+            .mapNotNull { parseResponsiveListItem(it, pageCredit) }
+            .distinctBy { it.videoId }
+            .partition { it.setVideoId != null }
+        // The "Suggestions" shelf's own continuation reloads it with a fresh
+        // batch rather than paging it (see its "Refresh" button, wired to a
+        // `reloadContinuationData` token) — only the real `nextContinuationData`
+        // / `continuationItemRenderer` found in scope means more to fetch.
