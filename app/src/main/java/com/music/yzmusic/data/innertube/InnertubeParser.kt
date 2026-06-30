@@ -164,3 +164,66 @@ object InnertubeParser {
      * found in, since a carousel and a plain shelf never share a parent node.
      */
     fun parseHomeContinuation(root: JsonElement): List<HomeShelf> {
+        val out = mutableListOf<HomeShelf>()
+        fun walk(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    (node["musicCarouselShelfRenderer"] as? JsonObject)
+                        ?.let(::carouselShelf)?.let(out::add)
+                    (node["musicShelfRenderer"] as? JsonObject)
+                        ?.let(::plainShelf)?.let(out::add)
+                    node.values.forEach(::walk)
+                }
+                is JsonArray -> node.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(root)
+        return out
+    }
+
+    private fun carouselShelf(carousel: JsonObject): HomeShelf? {
+        val header = carousel.o("header").o("musicCarouselShelfBasicHeaderRenderer")
+        val title = header.o("title").runs()
+        val strapline = header.o("strapline").runs()
+        // Whole shelves like "Video charts" carry nothing but video
+        // compilations — each card would fail its own video check on the
+        // way to a dead-end page, so the shelf is dropped outright.
+        if (VIDEO_WORD.containsMatchIn(title)) return null
+        val items = carousel.a("contents").orEmpty().mapNotNull { item ->
+            parseTwoRowItem(item.o("musicTwoRowItemRenderer"))
+                ?: parseResponsiveListItem(item.o("musicResponsiveListItemRenderer"))
+                    ?.takeUnless { it.isVideo }
+                    ?.let { song ->
+                        ShelfItem(song.title, song.artist, song.thumbnailUrl, song.videoId, null)
+                    }
+                // A chart row with nothing to play — "Top artists" lists the
+                // artist alone, no track — falls through parseResponsiveListItem
+                // (it demands a videoId) and used to drop the whole shelf.
+                ?: parseArtistRow(item.o("musicResponsiveListItemRenderer"))
+        }
+        return if (items.isEmpty()) null else HomeShelf(title.ifBlank { "For you" }, items, strapline)
+    }
+
+    private fun plainShelf(shelf: JsonObject): HomeShelf? {
+        val title = shelf.o("title").runs()
+        if (VIDEO_WORD.containsMatchIn(title)) return null
+        val items = shelf.a("contents").orEmpty().mapNotNull {
+            parseResponsiveListItem(it.o("musicResponsiveListItemRenderer"))
+        }.filterNot { it.isVideo }
+            .map { ShelfItem(it.title, it.artist, it.thumbnailUrl, it.videoId, null) }
+        return if (items.isEmpty()) null else HomeShelf(title.ifBlank { "For you" }, items)
+    }
+
+    /**
+     * Artist landing page: a "Top songs" shelf (only ~5 rows, but its header
+     * links to a playlist with the full list) plus carousels for Albums,
+     * Singles & EPs and friends.
+     */
+    fun parseArtistPage(response: JsonObject): ArtistPage {
+        val sections = response.o("contents")
+            .o("singleColumnBrowseResultsRenderer").a("tabs")?.firstOrNull()
+            .o("tabRenderer").o("content").o("sectionListRenderer").a("contents")
+            .orEmpty()
+
+        val songs = mutableListOf<Song>()
