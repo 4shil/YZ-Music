@@ -1129,3 +1129,11 @@ object Innertube {
     private val SAPISID_NAMES =
         listOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID")
 
+    private fun sapisidHash(sapisid: String, origin: String = MUSIC_ORIGIN): String {
+        val timestamp = System.currentTimeMillis() / 1000
+        val digest = MessageDigest.getInstance("SHA-1")
+            .digest("$timestamp $sapisid $origin".toByteArray())
+            .joinToString("") { "%02x".format(Locale.ROOT, it) }
+        return "SAPISIDHASH ${timestamp}_$digest"
+    }
+}
