@@ -572,3 +572,29 @@ object Innertube {
     suspend fun playbackTracking(videoId: String, signatureTimestamp: Int?): PlaybackTracking? {
         if (cookie == null) return null
         ensureSessionScope()
+        val response = postMusic("player") {
+            put("videoId", videoId)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+            // Real clients always describe where playback is happening; the
+            // response's tracking block is scoped to it.
+            putJsonObject("playbackContext") {
+                putJsonObject("contentPlaybackContext") {
+                    put("html5Preference", "HTML5_PREF_WANTS")
+                    put("referer", "$MUSIC_ORIGIN/watch?v=$videoId")
+                    signatureTimestamp?.let { put("signatureTimestamp", it) }
+                }
+            }
+        }
+        val tracking = response["playbackTracking"]?.jsonObject
+        if (tracking == null) {
+            val playability = response["playabilityStatus"]?.jsonObject
+            Log.w(
+                TAG,
+                "player response has no playbackTracking for $videoId " +
+                    "(status=${playability?.get("status")?.jsonPrimitive?.content}, " +
+                    "reason=${playability?.get("reason")?.jsonPrimitive?.content}, " +
+                    "sts=${signatureTimestamp ?: "none"})",
+            )
+            return null
+        }
