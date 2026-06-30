@@ -540,3 +540,61 @@ object Innertube {
         val playbackUrl: String,
         val watchtimeUrl: String?,
         /** The ad-tracking ping real clients fire a few seconds in. */
+        val atrUrl: String?,
+        /** How far in [atrUrl] is due, per the response's own schedule. */
+        val atrAfterSeconds: Long,
+    )
+
+    /**
+     * Player response fetched *with* the session cookie, purely to read back
+     * `playbackTracking` — [player] deliberately skips auth so its device
+     * clients are answered at all, so it never sees this block. Null for
+     * guests: there's no account history to update.
+     *
+     * [signatureTimestamp] is not optional in practice, and that is the bug
+     * this whole file was reported for.
+     *
+     * WEB_REMIX is a browser identity, and a browser proves it is running
+     * YouTube's current player by quoting that player's timestamp. Without one
+     * — or with a stale one — Google does not refuse the request in any way a
+     * caller would notice: it answers HTTP 200, `playabilityStatus` `UNPLAYABLE`,
+     * reason "Video unavailable", subreason "The page needs to be reloaded",
+     * and simply omits `playbackTracking` entirely. So every play registration
+     * this app made returned null here, logged one line, and stopped. No ping
+     * was ever sent; no history was ever written. Nothing failed loudly enough
+     * to notice, which is why it read as working.
+     *
+     * It is the *only* gate. Verified against the live endpoint: with a current
+     * timestamp and nothing else — no visitor id, no referer, no
+     * `html5Preference` — the block comes back. With every one of those and a
+     * timestamp one revision old, it does not.
+     */
+    suspend fun playbackTracking(videoId: String, signatureTimestamp: Int?): PlaybackTracking? {
+        if (cookie == null) return null
+        ensureSessionScope()
+        val response = postMusic("player") {
+            put("videoId", videoId)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+            // Real clients always describe where playback is happening; the
+            // response's tracking block is scoped to it.
+            putJsonObject("playbackContext") {
+                putJsonObject("contentPlaybackContext") {
+                    put("html5Preference", "HTML5_PREF_WANTS")
+                    put("referer", "$MUSIC_ORIGIN/watch?v=$videoId")
+                    signatureTimestamp?.let { put("signatureTimestamp", it) }
+                }
+            }
+        }
+        val tracking = response["playbackTracking"]?.jsonObject
+        if (tracking == null) {
+            val playability = response["playabilityStatus"]?.jsonObject
+            Log.w(
+                TAG,
+                "player response has no playbackTracking for $videoId " +
+                    "(status=${playability?.get("status")?.jsonPrimitive?.content}, " +
+                    "reason=${playability?.get("reason")?.jsonPrimitive?.content}, " +
+                    "sts=${signatureTimestamp ?: "none"})",
+            )
+            return null
+        }
