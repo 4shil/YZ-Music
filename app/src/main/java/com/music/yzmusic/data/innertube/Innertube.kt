@@ -1116,3 +1116,16 @@ object Innertube {
      * the first-party one.
      */
     private fun sapisidFrom(cookieHeader: String): String? {
+        val jar = cookieHeader.split(';')
+            .mapNotNull { entry ->
+                val name = entry.substringBefore('=').trim()
+                val value = entry.substringAfter('=', "").trim()
+                if (name.isEmpty() || value.isEmpty()) null else name to value
+            }
+            .toMap()
+        return SAPISID_NAMES.firstNotNullOfOrNull { jar[it] }
+    }
+
+    private val SAPISID_NAMES =
+        listOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID")
+
