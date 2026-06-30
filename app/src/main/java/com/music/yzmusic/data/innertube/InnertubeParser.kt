@@ -292,3 +292,41 @@ object InnertubeParser {
      * says which of them is actually open.
      */
     private fun artistName(header: JsonElement?): String? {
+        val renderer = header.o("musicImmersiveHeaderRenderer")
+            ?: header.o("musicVisualHeaderRenderer")
+            ?: return null
+        return renderer.o("title").runs().takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * The artist's own picture, off whichever header shape came back — the
+     * immersive header serves it as `thumbnail`, the visual header as
+     * `foregroundThumbnail` over a banner. Callers that arrive from a track
+     * only know that track's cover art, so this is what a page is meant to
+     * show instead.
+     */
+    private fun artistThumbnail(header: JsonElement?): String? {
+        if (header == null) return null
+        val immersive = header.o("musicImmersiveHeaderRenderer")
+        val visual = header.o("musicVisualHeaderRenderer")
+        val renderer = (
+            immersive.o("thumbnail")
+                ?: visual.o("foregroundThumbnail")
+                ?: visual.o("thumbnail")
+            ).o("musicThumbnailRenderer")
+            // Header shapes drift; fall back to the first image anywhere under
+            // the header rather than to the caller's album art.
+            ?: collectRenderers(header, "musicThumbnailRenderer").firstOrNull()
+        return renderer.o("thumbnail").a("thumbnails").best()
+    }
+
+    // ---- Generic / robust ---------------------------------------------------
+
+    /**
+     * Walks the whole response collecting any `musicResponsiveListItemRenderer`
+     * that carries a videoId. Layout-agnostic, so it survives the differences
+     * between playlist, album, library and history pages.
+     */
+    fun collectSongsDeep(root: JsonElement): List<Song> {
+        val out = LinkedHashMap<String, Song>()
+        // A release's own rows are credited by its header, not one by one.
