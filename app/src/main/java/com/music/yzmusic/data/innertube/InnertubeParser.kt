@@ -108,3 +108,85 @@ object InnertubeParser {
     private fun parseBrowseItem(renderer: JsonObject): BrowseItem? {
         val endpoint = renderer.o("navigationEndpoint").o("browseEndpoint") ?: return null
         val browseId = endpoint.s("browseId") ?: return null
+        val pageType = endpoint.o("browseEndpointContextSupportedConfigs")
+            .o("browseEndpointContextMusicConfig").s("pageType").orEmpty()
+
+        val columns = renderer.a("flexColumns").orEmpty()
+        val title = columns.getOrNull(0)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        if (title.isBlank()) return null
+
+        val subtitle = columns.getOrNull(1)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        // A playlist/album billed as a video chart/compilation — "N videos"
+        // in the subtitle, or "video" right in the title, e.g. "Daily Top
+        // Music Videos" — would have every row dropped by
+        // parseResponsiveListItem anyway, so skip the dead-end card rather
+        // than link to an empty page.
+        if (VIDEO_WORD.containsMatchIn(title) || VIDEO_WORD.containsMatchIn(subtitle)) return null
+
+        return BrowseItem(
+            browseId = browseId,
+            title = title,
+            subtitle = subtitle,
+            thumbnailUrl = renderer.o("thumbnail").o("musicThumbnailRenderer")
+                .o("thumbnail").a("thumbnails").best(),
+            type = when {
+                "ALBUM" in pageType -> BrowseType.ALBUM
+                "ARTIST" in pageType -> BrowseType.ARTIST
+                "PLAYLIST" in pageType -> BrowseType.PLAYLIST
+                else -> BrowseType.OTHER
+            },
+        )
+    }
+
+    // ---- Home feed ----------------------------------------------------------
+
+    fun parseHome(response: JsonObject): List<HomeShelf> {
+        val sections = response.o("contents")
+            .o("singleColumnBrowseResultsRenderer").a("tabs")?.firstOrNull()
+            .o("tabRenderer").o("content").o("sectionListRenderer").a("contents")
+            .orEmpty()
+
+        return sections.mapNotNull { section ->
+            section.o("musicCarouselShelfRenderer")?.let(::carouselShelf)
+                ?: section.o("musicShelfRenderer")?.let(::plainShelf)
+        }
+    }
+
+    /**
+     * More Home shelves off a continuation response.
+     *
+     * Unlike the first page, a continuation envelope doesn't repeat the
+     * tabs/section-list wrapper [parseHome] reads off a fixed path — so the
+     * shelves are walked out wherever they land instead, the same tradeoff
+     * [collectSongsDeep] makes for song rows. Preserves the order they were
+     * found in, since a carousel and a plain shelf never share a parent node.
+     */
+    fun parseHomeContinuation(root: JsonElement): List<HomeShelf> {
+        val out = mutableListOf<HomeShelf>()
+        fun walk(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    (node["musicCarouselShelfRenderer"] as? JsonObject)
+                        ?.let(::carouselShelf)?.let(out::add)
+                    (node["musicShelfRenderer"] as? JsonObject)
+                        ?.let(::plainShelf)?.let(out::add)
+                    node.values.forEach(::walk)
+                }
+                is JsonArray -> node.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(root)
+        return out
+    }
+
+    private fun carouselShelf(carousel: JsonObject): HomeShelf? {
+        val header = carousel.o("header").o("musicCarouselShelfBasicHeaderRenderer")
+        val title = header.o("title").runs()
+        val strapline = header.o("strapline").runs()
+        // Whole shelves like "Video charts" carry nothing but video
+        // compilations — each card would fail its own video check on the
+        // way to a dead-end page, so the shelf is dropped outright.
+        if (VIDEO_WORD.containsMatchIn(title)) return null
