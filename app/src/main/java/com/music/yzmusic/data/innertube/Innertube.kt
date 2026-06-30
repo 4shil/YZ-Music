@@ -762,3 +762,41 @@ object Innertube {
      */
     suspend fun ratePlaylist(playlistId: String, saved: Boolean) {
         requireSession()
+        val endpoint = if (saved) "like/like" else "like/removelike"
+        val response = postMusic(endpoint) {
+            putJsonObject("target") { put("playlistId", playlistId) }
+        }
+        // As in [rate]: a refusal arrives as HTTP 200 with an error in the body.
+        response["error"]?.let { error ->
+            val message = error.jsonObject["message"]?.jsonPrimitive?.contentOrNull
+            error("YouTube Music refused the change: ${message ?: error}")
+        }
+        Log.d(TAG, "$endpoint $playlistId -> ${findString(response, "text") ?: "no confirmation"}")
+    }
+
+    /**
+     * Adds or removes a track from the library, using a token minted by
+     * YouTube for exactly that transition — see [com.music.yzmusic.data.model.SongMenu].
+     * There is no video-id form of this call; the token *is* the request.
+     */
+    suspend fun sendFeedback(token: String) {
+        requireSession()
+        postMusic("feedback") {
+            putJsonArray("feedbackTokens") { add(token) }
+        }
+    }
+
+    /**
+     * Creates a playlist and returns its id.
+     *
+     * [videoIds] seeds it in the same request, which is what "add to a new
+     * playlist" is: one round trip rather than a create followed by an edit
+     * that could half-succeed.
+     */
+    suspend fun createPlaylist(
+        title: String,
+        privacy: PlaylistPrivacy,
+        description: String? = null,
+        videoIds: List<String> = emptyList(),
+    ): String {
+        requireSession()
