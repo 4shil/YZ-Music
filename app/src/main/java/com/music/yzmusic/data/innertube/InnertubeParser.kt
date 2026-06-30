@@ -393,3 +393,73 @@ object InnertubeParser {
         // batch rather than paging it (see its "Refresh" button, wired to a
         // `reloadContinuationData` token) — only the real `nextContinuationData`
         // / `continuationItemRenderer` found in scope means more to fetch.
+        val token = collectRenderers(scope, "continuationItemRenderer").firstOrNull()
+            .o("continuationEndpoint").o("continuationCommand").s("token")
+            ?: collectRenderers(scope, "nextContinuationData").firstOrNull().s("continuation")
+        return PlaylistShelfPage(songs, suggested, token)
+    }
+
+    /**
+     * The cards on a library feed — saved playlists, albums, artists, podcasts.
+     *
+     * Library pages remember whether the account last used the grid or the list
+     * view, and serve `musicTwoRowItemRenderer` cards for one and
+     * `musicResponsiveListItemRenderer` rows for the other, so both are read.
+     */
+    fun parseLibraryItems(root: JsonElement): List<ShelfItem> {
+        val out = LinkedHashMap<String, ShelfItem>()
+        collectRenderers(root, "musicTwoRowItemRenderer").forEach { renderer ->
+            val item = parseTwoRowItem(renderer) ?: return@forEach
+            item.browseId?.let { out.putIfAbsent(it, item) }
+        }
+        collectRenderers(root, "musicResponsiveListItemRenderer").forEach { renderer ->
+            val item = parseBrowseItem(renderer) ?: return@forEach
+            out.putIfAbsent(
+                item.browseId,
+                ShelfItem(item.title, item.subtitle, item.thumbnailUrl, null, item.browseId),
+            )
+        }
+        return out.values.toList()
+    }
+
+    /**
+     * Token for the next page of a paged response, or null once it has run out.
+     * Both the modern `continuationItemRenderer` and the older `continuations`
+     * array are in circulation, sometimes within the same account.
+     */
+    fun continuationToken(root: JsonElement): String? {
+        collectRenderers(root, "continuationItemRenderer").firstOrNull()
+            .o("continuationEndpoint").o("continuationCommand").s("token")
+            ?.let { return it }
+        return collectRenderers(root, "nextContinuationData").firstOrNull().s("continuation")
+    }
+
+    // ---- Renderers ----------------------------------------------------------
+
+    /**
+     * One track row. [fallback] is what the page it came from is billed to —
+     * see [pageCredit] — and is used only where the row itself says nothing.
+     */
+    private fun parseResponsiveListItem(
+        renderer: JsonObject?,
+        fallback: Credits = Credits(),
+    ): Song? {
+        if (renderer == null) return null
+        val videoId = renderer.o("playlistItemData").s("videoId")
+            ?: renderer.o("overlay")
+                .o("musicItemThumbnailOverlayRenderer").o("content")
+                .o("musicPlayButtonRenderer").o("playNavigationEndpoint")
+                .o("watchEndpoint").s("videoId")
+            ?: return null
+
+        val columns = renderer.a("flexColumns").orEmpty()
+        val title = columns.getOrNull(0)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        if (title.isBlank()) return null
+
+        val subtitle = columns.getOrNull(1)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        val parts = subtitle.split(" • ").filter { it.isNotBlank() }
+        val duration = parts.lastOrNull()?.takeIf { it.matches(DURATION) }
+        // On the "All" tab the first segment is the row type ("Song", "Video"),
+        // not the artist — skip those so the subtitle reads like a credit.
