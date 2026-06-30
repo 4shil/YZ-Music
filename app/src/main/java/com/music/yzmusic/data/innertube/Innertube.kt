@@ -800,3 +800,77 @@ object Innertube {
         videoIds: List<String> = emptyList(),
     ): String {
         requireSession()
+        val response = postMusic("playlist/create") {
+            put("title", title)
+            put("description", description.orEmpty())
+            put("privacyStatus", privacy.apiValue)
+            if (videoIds.isNotEmpty()) {
+                putJsonArray("videoIds") { videoIds.forEach { add(it) } }
+            }
+        }
+        // Normally a bare top-level id; occasionally only inside the command
+        // that would navigate the web client to the new page, so fall back to
+        // finding it by name rather than by a path that would rot.
+        return response["playlistId"]?.jsonPrimitive?.contentOrNull
+            ?: findString(response, "playlistId")
+            ?: error("playlist created but no id came back")
+    }
+
+    suspend fun deletePlaylist(playlistId: String) {
+        requireSession()
+        postMusic("playlist/delete") { put("playlistId", playlistId.removePrefix("VL")) }
+    }
+
+    /**
+     * One or more edits to a playlist, applied together.
+     *
+     * The endpoint answers `STATUS_SUCCEEDED` rather than an HTTP error when
+     * it refuses — a playlist the account merely saved rather than owns is
+     * the usual reason — so the body is checked as well as the status line.
+     */
+    private suspend fun editPlaylist(
+        playlistId: String,
+        actions: JsonArrayBuilder.() -> Unit,
+    ): JsonObject {
+        requireSession()
+        val response = postMusic("browse/edit_playlist") {
+            // The edit endpoint takes the raw id; `VL` is the browse prefix.
+            put("playlistId", playlistId.removePrefix("VL"))
+            putJsonArray("actions", actions)
+        }
+        val status = response["status"]?.jsonPrimitive?.contentOrNull
+        if (status != null && status != "STATUS_SUCCEEDED") {
+            error("YouTube Music refused the edit ($status)")
+        }
+        return response
+    }
+
+    /**
+     * Adds tracks to a playlist, and reports the per-entry id each one landed
+     * under — video id to set-video-id, for the tracks the response named.
+     *
+     * Worth reading rather than discarding, because it is the only chance to
+     * learn it without re-fetching the whole playlist: a set-video-id is minted
+     * by this call, and it is what a later removal has to be expressed in (see
+     * [removeFromPlaylist]). A row added to a playlist already on screen is
+     * otherwise one the user can see but not take back out until the page is
+     * reopened.
+     *
+     * Absences are normal and not an error — the add still happened; only the
+     * id for undoing it is unknown.
+     */
+    suspend fun addToPlaylist(playlistId: String, videoIds: List<String>): Map<String, String> {
+        val response = editPlaylist(playlistId) {
+            videoIds.forEach { videoId ->
+                addJsonObject {
+                    put("action", "ACTION_ADD_VIDEO")
+                    put("addedVideoId", videoId)
+                }
+            }
+        }
+        return (response["playlistEditResults"] as? JsonArray)
+            .orEmpty()
+            .mapNotNull { result ->
+                val added = (result as? JsonObject)
+                    ?.get("playlistEditVideoAddedResultData") as? JsonObject
+                    ?: return@mapNotNull null
