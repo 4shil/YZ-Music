@@ -924,3 +924,195 @@ object Innertube {
     ): JsonObject {
         val session = scope
         val clientVersion = webRemixVersion
+        val response = withRetry {
+            client.post("$MUSIC_BASE/$endpoint") {
+                contentType(ContentType.Application.Json)
+                parameter("prettyPrint", "false")
+                query.forEach { (key, value) -> parameter(key, value) }
+                header("X-Origin", MUSIC_ORIGIN)
+                header("Origin", MUSIC_ORIGIN)
+                header("Referer", "$MUSIC_ORIGIN/")
+                // Stats pings are only honoured for a session Google recognises
+                // as a real client, so identify as one here too — the visitor
+                // id is minted on the first call and reused for the session.
+                header("X-YouTube-Client-Name", WEB_REMIX_CLIENT_ID)
+                header("X-YouTube-Client-Version", clientVersion)
+                visitorData?.let { header("X-Goog-Visitor-Id", it) }
+                cookie?.let { c ->
+                    header("Cookie", c)
+                    // Which account in the jar, and which brand channel of it.
+                    // Both were fixed at "the first one" before — see
+                    // [SessionScope].
+                    header("X-Goog-AuthUser", session?.authUser ?: "0")
+                    session?.pageId?.let { header("X-Goog-PageId", it) }
+                    sapisidFrom(c)?.let { header("Authorization", sapisidHash(it)) }
+                }
+                setBody(
+                    buildJsonObject {
+                        putJsonObject("context") {
+                            putJsonObject("client") {
+                                put("clientName", "WEB_REMIX")
+                                put("clientVersion", clientVersion)
+                                put("hl", "en")
+                                put("gl", "US")
+                                visitorData?.let { put("visitorData", it) }
+                            }
+                            putJsonObject("user") {
+                                put("lockedSafetyMode", false)
+                                // Only ever a value read back from a shell that
+                                // said it was signed in: Google answers an
+                                // `onBehalfOfUser` it cannot tie to the cookie
+                                // with 401, so a guess here would take the
+                                // whole app down rather than just history.
+                                session?.dataSyncId?.let { put("onBehalfOfUser", it) }
+                            }
+                            putJsonObject("request") { put("useSsl", true) }
+                        }
+                        bodyExtras()
+                    },
+                )
+            }.body<JsonObject>()
+        }
+
+        if (visitorData == null) {
+            visitorData = response["responseContext"]?.jsonObject
+                ?.get("visitorData")?.jsonPrimitive?.content
+        }
+        return response
+    }
+
+    /**
+     * Unauthenticated by default.
+     *
+     * The app clients [StreamResolver] walks through are answered *because*
+     * they look like anonymous devices; attaching the session cookie to one
+     * of those is what gets it turned away with `LOGIN_REQUIRED`. Nothing
+     * about the account is needed to fetch audio through them — history is
+     * credited separately, by [playbackTracking] and the stats pings, which
+     * do carry the session.
+     *
+     * [authenticated] is the deliberate exception, and there are two callers of
+     * it. [PlayerClient.WEB_REMIX] is a browser identity, and a browser without
+     * the session cookie a signed-in listener actually has is the thing that
+     * reads as suspicious, not the other way around.
+     *
+     * The second is an age gate. A device client refused with "Sign in to
+     * confirm your age" has already told us the anonymous request will not be
+     * answered, so there is nothing left to protect by withholding the session
+     * — and everything to gain, because the device clients return *unciphered*
+     * `url` fields. That is the only route to an age-restricted track that does
+     * not depend on solving a signature. See [StreamResolver.playerStream].
+     *
+     * Only meaningful with [cookie] set — a caller asking for it while signed
+     * out gets the same unauthenticated request as everything else.
+     */
+    private suspend fun postPlayer(
+        videoId: String,
+        playerClient: PlayerClient,
+        signatureTimestamp: Int?,
+        authenticated: Boolean = false,
+    ): JsonObject =
+        client.post("${playerClient.apiBase()}/player") {
+            // A much tighter budget than the shared 30 seconds, because this is
+            // the one request on a loop. A player call that is going to answer
+            // answers in 120-330ms; one that is going to hang is indifferent to
+            // how long it is given, and there are up to seven clients walked
+            // per track, each of which may be retried. At the shared ceiling a
+            // single unlucky client turned a walk that normally costs two
+            // seconds into forty-nine, which the listener spends staring at a
+            // track that will in the end be served by extraction anyway. Six
+            // seconds is twenty times a healthy answer and cheap to give up on.
+            //
+            // Set here rather than on the shared client on purpose: browse and
+            // search return payloads orders of magnitude larger over the same
+            // connection, and a ceiling right for this would truncate those.
+            timeout { requestTimeoutMillis = PLAYER_TIMEOUT_MS }
+            contentType(ContentType.Application.Json)
+            parameter("prettyPrint", "false")
+            header("User-Agent", playerClient.userAgent)
+            header("X-YouTube-Client-Name", playerClient.clientId)
+            header("X-YouTube-Client-Version", playerClient.clientVersion)
+            playerClient.origin?.let { header("Origin", it) }
+            playerClient.referer?.let { header("Referer", it) }
+            // Shared with browse/search so one session is seen throughout,
+            // rather than a device that mints a new identity per request.
+            visitorData?.let { header("X-Goog-Visitor-Id", it) }
+            if (authenticated) {
+                cookie?.let { c ->
+                    header("Cookie", c)
+                    header("X-Goog-AuthUser", scope?.authUser ?: "0")
+                    scope?.pageId?.let { header("X-Goog-PageId", it) }
+                    // Hashed against the host this request is actually going
+                    // to, not against music.youtube.com unconditionally. Google
+                    // recomputes the digest over the origin it sees and rejects
+                    // a mismatch with 401, so an app client posting to
+                    // www.youtube.com signed for the music origin is not a
+                    // weaker request — it is a refused one, which would have
+                    // made the age-gate retry below look like a dead end.
+                    val origin = playerClient.origin
+                        ?: if (playerClient.usesMusicHost) MUSIC_ORIGIN else YOUTUBE_ORIGIN
+                    sapisidFrom(c)?.let { header("Authorization", sapisidHash(it, origin)) }
+                }
+            }
+            setBody(
+                buildJsonObject {
+                    putJsonObject("context") {
+                        putJsonObject("client") {
+                            put("clientName", playerClient.clientName)
+                            put("clientVersion", playerClient.clientVersion)
+                            playerClient.osName?.let { put("osName", it) }
+                            playerClient.osVersion?.let { put("osVersion", it) }
+                            playerClient.deviceMake?.let { put("deviceMake", it) }
+                            playerClient.deviceModel?.let { put("deviceModel", it) }
+                            playerClient.androidSdkVersion?.let { put("androidSdkVersion", it.toInt()) }
+                            put("hl", "en")
+                            put("gl", "US")
+                            visitorData?.let { put("visitorData", it) }
+                        }
+                    }
+                    if (playerClient.needsSignatureTimestamp && signatureTimestamp != null) {
+                        putJsonObject("playbackContext") {
+                            putJsonObject("contentPlaybackContext") {
+                                put("signatureTimestamp", signatureTimestamp)
+                            }
+                        }
+                    }
+                    put("videoId", videoId)
+                    put("contentCheckOk", true)
+                    put("racyCheckOk", true)
+                },
+            )
+        }.body<JsonObject>()
+
+    /** Browser-shaped clients are served from the Music host; app clients from YouTube proper. */
+    private fun PlayerClient.apiBase(): String = if (usesMusicHost) MUSIC_BASE else YT_BASE
+
+    /** First string value under [key] anywhere in [element], depth-first. */
+    private fun findString(element: JsonElement, key: String): String? = when (element) {
+        is JsonObject -> (element[key] as? JsonPrimitive)?.contentOrNull
+            ?: element.values.firstNotNullOfOrNull { findString(it, key) }
+        is JsonArray -> element.firstNotNullOfOrNull { findString(it, key) }
+        else -> null
+    }
+
+    /**
+     * The API-signing secret out of a cookie header.
+     *
+     * Three names for one value, and all three have to be looked for. `SAPISID`
+     * is the one everybody documents, and it is also the one a cookie jar can
+     * be missing: on a third-party-cookie-partitioned or `__Host`-prefixed
+     * login, Google sets only the `__Secure-` forms. Any of them signs a
+     * request; the digest does not care which it came from.
+     *
+     * The cost of not looking was invisible and total. `AuthStore.isSignedIn`
+     * tests the cookie for the *substring* `SAPISID`, which `__Secure-3PAPISID`
+     * satisfies — so the app knew it was signed in, sent the cookie, and sent
+     * no `Authorization` header, which Google reads as a request from nobody.
+     * Every write and every history ping was silently anonymous for those
+     * users, while the UI showed them signed in.
+     *
+     * Order matters: the plain form first because it is what Google's own
+     * origin-scoped hash is documented against, then the third-party form, then
+     * the first-party one.
+     */
+    private fun sapisidFrom(cookieHeader: String): String? {
