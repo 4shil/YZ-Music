@@ -484,3 +484,59 @@ object Innertube {
          * bot check is a verdict about the session, and only the second one is
          * worth acting on session-wide.
          */
+        val looksLikeBotCheck: Boolean
+            get() = !isAgeGate && (
+                reason.contains("bot", ignoreCase = true) ||
+                    reason.contains("unusual traffic", ignoreCase = true) ||
+                    reason.contains("sign in", ignoreCase = true) ||
+                    reason.contains("login_required", ignoreCase = true)
+                )
+
+        /**
+         * Whether the track is gated on the viewer's age rather than refused.
+         *
+         * Worth naming because it is the one refusal a signed-in listener can
+         * actually get past: the same client asked again *with* the session
+         * cookie is answered `OK` — see [StreamResolver.playerStream]. Both
+         * wordings appear on the same track from different clients, which is
+         * why both are matched: the TV and VR clients say "Sign in to confirm
+         * your age", the iOS and Android ones say "This video may be
+         * inappropriate for some users."
+         */
+        val isAgeGate: Boolean
+            get() = reason.contains("confirm your age", ignoreCase = true) ||
+                reason.contains("age-restricted", ignoreCase = true) ||
+                reason.contains("age restricted", ignoreCase = true) ||
+                reason.contains("inappropriate for some users", ignoreCase = true)
+
+        /**
+         * Whether asking again can only ever get the same answer — a takedown,
+         * a region block, a private or paid video.
+         *
+         * Deliberately short, and every entry a phrase Google uses for one
+         * verdict only. A loose match here is worse than no match: it makes a
+         * track that would have played on the next client unplayable for ten
+         * minutes (see [StreamResolver]'s verdict cache), so "unavailable" —
+         * which Google says while bot-checking as readily as while refusing —
+         * is not in the list and is not going to be.
+         */
+        val isPermanent: Boolean
+            get() = PERMANENT_REASONS.any { reason.contains(it, ignoreCase = true) }
+
+        private companion object {
+            private val PERMANENT_REASONS = listOf(
+                "not available in your country",
+                "who has blocked it in your country",
+                "removed by the uploader",
+                "account associated with this video has been terminated",
+                "private video",
+                "members-only",
+            )
+        }
+    }
+
+    /** The stats endpoints a player response nominates for one playback. */
+    data class PlaybackTracking(
+        val playbackUrl: String,
+        val watchtimeUrl: String?,
+        /** The ad-tracking ping real clients fire a few seconds in. */
