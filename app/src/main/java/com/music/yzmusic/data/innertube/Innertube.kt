@@ -1088,3 +1088,44 @@ object Innertube {
     private fun PlayerClient.apiBase(): String = if (usesMusicHost) MUSIC_BASE else YT_BASE
 
     /** First string value under [key] anywhere in [element], depth-first. */
+    private fun findString(element: JsonElement, key: String): String? = when (element) {
+        is JsonObject -> (element[key] as? JsonPrimitive)?.contentOrNull
+            ?: element.values.firstNotNullOfOrNull { findString(it, key) }
+        is JsonArray -> element.firstNotNullOfOrNull { findString(it, key) }
+        else -> null
+    }
+
+    /**
+     * The API-signing secret out of a cookie header.
+     *
+     * Three names for one value, and all three have to be looked for. `SAPISID`
+     * is the one everybody documents, and it is also the one a cookie jar can
+     * be missing: on a third-party-cookie-partitioned or `__Host`-prefixed
+     * login, Google sets only the `__Secure-` forms. Any of them signs a
+     * request; the digest does not care which it came from.
+     *
+     * The cost of not looking was invisible and total. `AuthStore.isSignedIn`
+     * tests the cookie for the *substring* `SAPISID`, which `__Secure-3PAPISID`
+     * satisfies — so the app knew it was signed in, sent the cookie, and sent
+     * no `Authorization` header, which Google reads as a request from nobody.
+     * Every write and every history ping was silently anonymous for those
+     * users, while the UI showed them signed in.
+     *
+     * Order matters: the plain form first because it is what Google's own
+     * origin-scoped hash is documented against, then the third-party form, then
+     * the first-party one.
+     */
+    private fun sapisidFrom(cookieHeader: String): String? {
+        val jar = cookieHeader.split(';')
+            .mapNotNull { entry ->
+                val name = entry.substringBefore('=').trim()
+                val value = entry.substringAfter('=', "").trim()
+                if (name.isEmpty() || value.isEmpty()) null else name to value
+            }
+            .toMap()
+        return SAPISID_NAMES.firstNotNullOfOrNull { jar[it] }
+    }
+
+    private val SAPISID_NAMES =
+        listOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID")
+
