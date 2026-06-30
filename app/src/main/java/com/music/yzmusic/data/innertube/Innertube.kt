@@ -800,3 +800,41 @@ object Innertube {
         videoIds: List<String> = emptyList(),
     ): String {
         requireSession()
+        val response = postMusic("playlist/create") {
+            put("title", title)
+            put("description", description.orEmpty())
+            put("privacyStatus", privacy.apiValue)
+            if (videoIds.isNotEmpty()) {
+                putJsonArray("videoIds") { videoIds.forEach { add(it) } }
+            }
+        }
+        // Normally a bare top-level id; occasionally only inside the command
+        // that would navigate the web client to the new page, so fall back to
+        // finding it by name rather than by a path that would rot.
+        return response["playlistId"]?.jsonPrimitive?.contentOrNull
+            ?: findString(response, "playlistId")
+            ?: error("playlist created but no id came back")
+    }
+
+    suspend fun deletePlaylist(playlistId: String) {
+        requireSession()
+        postMusic("playlist/delete") { put("playlistId", playlistId.removePrefix("VL")) }
+    }
+
+    /**
+     * One or more edits to a playlist, applied together.
+     *
+     * The endpoint answers `STATUS_SUCCEEDED` rather than an HTTP error when
+     * it refuses — a playlist the account merely saved rather than owns is
+     * the usual reason — so the body is checked as well as the status line.
+     */
+    private suspend fun editPlaylist(
+        playlistId: String,
+        actions: JsonArrayBuilder.() -> Unit,
+    ): JsonObject {
+        requireSession()
+        val response = postMusic("browse/edit_playlist") {
+            // The edit endpoint takes the raw id; `VL` is the browse prefix.
+            put("playlistId", playlistId.removePrefix("VL"))
+            putJsonArray("actions", actions)
+        }
