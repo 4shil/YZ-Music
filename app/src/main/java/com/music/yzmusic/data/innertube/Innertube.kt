@@ -598,3 +598,133 @@ object Innertube {
             )
             return null
         }
+        val playbackUrl = tracking.trackingUrl("videostatsPlaybackUrl") ?: return null
+        return PlaybackTracking(
+            playbackUrl = playbackUrl,
+            watchtimeUrl = tracking.trackingUrl("videostatsWatchtimeUrl"),
+            atrUrl = tracking.trackingUrl("atrUrl"),
+            atrAfterSeconds = tracking["atrUrl"]?.jsonObject
+                ?.get("elapsedMediaTimeSeconds")?.jsonPrimitive?.contentOrNull
+                ?.toLongOrNull() ?: DEFAULT_ATR_SECONDS,
+        )
+    }
+
+    /** What YouTube Music itself schedules `atr` for, when it doesn't say. */
+    private const val DEFAULT_ATR_SECONDS = 5L
+
+    private fun JsonObject.trackingUrl(key: String): String? =
+        this[key]?.jsonObject?.get("baseUrl")?.jsonPrimitive?.content
+
+    /**
+     * The "playback started" ping real YouTube Music clients send once a track
+     * becomes audible. This is what creates the history entry the home feed
+     * feeds off. [cpn] is the client-playback-nonce identifying this one play:
+     * it must be the same value used for every [pingWatchtime] that follows.
+     *
+     * No `el` here. The base URL already carries `el=detailpage` — Google puts
+     * it there — and a repeated query parameter is not a stronger statement of
+     * the same thing, it is an ambiguous request whose resolution is Google's
+     * to decide.
+     */
+    suspend fun pingPlayback(baseUrl: String, cpn: String) = pingStats(baseUrl, cpn) {}
+
+    /**
+     * The follow-up ping reporting how much of the track was actually heard.
+     * A history entry with no watchtime behind it reads as a skip, so it
+     * carries little weight in recommendations — [seconds] is what makes the
+     * play count. `st`/`et` are the watched segment's bounds, in seconds.
+     *
+     * @param final whether this is the last report for the play, which is what
+     *   lets Google close the play out rather than leave it looking abandoned.
+     */
+    suspend fun pingWatchtime(baseUrl: String, cpn: String, seconds: Long, final: Boolean = false) =
+        pingStats(baseUrl, cpn) {
+            parameter("st", "0")
+            parameter("et", seconds.toString())
+            // Where the playhead is, as distinct from how much was watched.
+            // The web client sends both and they are not redundant: `et` bounds
+            // a segment, `cmt` is a position.
+            parameter("cmt", seconds.toString())
+            parameter("state", if (final) "paused" else "playing")
+            if (final) parameter("final", "1")
+        }
+
+    /**
+     * The `atr` ping, fired a few seconds into a play.
+     *
+     * Not analytics garnish. It is the third leg of the sequence a real client
+     * performs — playback, atr, watchtime — and the one that distinguishes a
+     * play that started from a play that happened. Its base URL already carries
+     * `ver`, `c` and `cver`, so unlike the others it is sent as-is.
+     */
+    suspend fun pingAtr(baseUrl: String, cpn: String): Int = client.get(baseUrl) {
+        parameter("cpn", cpn)
+        statsHeaders()
+    }.status.value
+
+    /** Shared shape of the s.youtube.com stats pings, including session auth. */
+    private suspend fun pingStats(
+        baseUrl: String,
+        cpn: String,
+        extras: HttpRequestBuilder.() -> Unit,
+    ): Int = client.get(baseUrl) {
+        parameter("ver", "2")
+        parameter("c", "WEB_REMIX")
+        parameter("cver", webRemixVersion)
+        parameter("cpn", cpn)
+        // What the web client says about itself. Cheap, and the pings are
+        // weighted by how much they look like a real session.
+        parameter("cplayer", "UNIPLAYER")
+        parameter("cbr", "Chrome")
+        parameter("cbrver", "141.0.0.0")
+        parameter("cos", "Windows")
+        parameter("cosver", "10.0")
+        parameter("hl", "en_US")
+        parameter("cr", "US")
+        extras()
+        statsHeaders()
+    }.status.value
+
+    /**
+     * The three headers the tracking block asks for by name — `USER_AUTH`,
+     * `VISITOR_ID` and `PLUS_PAGE_ID`. Google lists them per ping URL in the
+     * player response; sending fewer is what makes a ping land somewhere other
+     * than the listener's own history.
+     */
+    private fun HttpRequestBuilder.statsHeaders() {
+        header("X-Origin", MUSIC_ORIGIN)
+        header("Origin", MUSIC_ORIGIN)
+        header("Referer", "$MUSIC_ORIGIN/")
+        header("User-Agent", WEB_USER_AGENT)
+        visitorData?.let { header("X-Goog-Visitor-Id", it) }
+        cookie?.let { c ->
+            header("Cookie", c)
+            header("X-Goog-AuthUser", scope?.authUser ?: "0")
+            scope?.pageId?.let { header("X-Goog-PageId", it) }
+            sapisidFrom(c)?.let { header("Authorization", sapisidHash(it)) }
+        }
+    }
+
+    // ---- Writes -------------------------------------------------------------
+    //
+    // Everything below changes something on the account, so all of it needs
+    // the session cookie [postMusic] already signs with. None of it needs a
+    // new credential or a different client — the same WEB_REMIX identity that
+    // reads the library is the one allowed to edit it.
+
+    /** A write attempted without a session; the caller has a sign-in prompt to show. */
+    class NotSignedInException : IllegalStateException("Sign in to YouTube Music to do that")
+
+    private fun requireSession() {
+        if (cookie == null) throw NotSignedInException()
+    }
+
+    /**
+     * Thumbs up / down / neither, for [videoId].
+     *
+     * The response is inspected rather than discarded. Innertube answers a
+     * refused write with HTTP 200 and an `error` object in the body, so the
+     * status line alone will happily report a rating that never happened.
+     */
+    suspend fun rate(videoId: String, status: LikeStatus) {
+        requireSession()
