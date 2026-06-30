@@ -453,3 +453,34 @@ object Innertube {
     ): JsonObject {
         val response = postPlayer(videoId, client, signatureTimestamp, authenticated)
 
+        val status = response["playabilityStatus"]?.jsonObject
+            ?.get("status")?.jsonPrimitive?.content
+        if (status != null && status != "OK") {
+            val reason = response["playabilityStatus"]?.jsonObject
+                ?.get("reason")?.jsonPrimitive?.content
+            throw UnplayableException(reason ?: status)
+        }
+        return response
+    }
+
+    class UnplayableException(private val reason: String) :
+        IllegalStateException("Track unavailable: $reason") {
+
+        /**
+         * Whether this is Google doubting the client rather than the track
+         * being unavailable. Worth a fresh visitor id and another go; a real
+         * region block or takedown is not.
+         *
+         * [isAgeGate] is excluded, and that exclusion is the whole reason this
+         * is not a one-line substring test. YouTube words its age gate "Sign in
+         * to confirm your age", which contains "sign in" — so every
+         * age-restricted track read as a session-level refusal, and
+         * [StreamResolver][com.music.yzmusic.data.innertube.StreamResolver]
+         * answered it by standing the client down *app-wide* for ten minutes
+         * and burning a fresh visitor id. One age-restricted song in a queue
+         * therefore took three of the seven clients out of service for
+         * everything after it, which is the "it works, then it stops working"
+         * report. An age gate is a verdict about one track and one identity; a
+         * bot check is a verdict about the session, and only the second one is
+         * worth acting on session-wide.
+         */
