@@ -227,3 +227,68 @@ object InnertubeParser {
             .orEmpty()
 
         val songs = mutableListOf<Song>()
+        var moreSongs: String? = null
+        val shelves = mutableListOf<HomeShelf>()
+        val header = response["header"]
+        // "Top songs" rows are billed by the page they sit on: the subtitle
+        // beside them counts plays where a search row names the artist.
+        val credit = Credits(artistName = artistName(header))
+
+        sections.forEach { section ->
+            section.o("musicShelfRenderer")?.let { shelf ->
+                shelf.a("contents").orEmpty().forEach { row ->
+                    parseResponsiveListItem(row.o("musicResponsiveListItemRenderer"), credit)
+                        ?.let(songs::add)
+                }
+                if (moreSongs == null) {
+                    moreSongs = shelf.o("title").a("runs")?.firstOrNull()
+                        .o("navigationEndpoint").o("browseEndpoint").s("browseId")
+                }
+            }
+            section.o("musicCarouselShelfRenderer")?.let { carousel ->
+                val header = carousel.o("header").o("musicCarouselShelfBasicHeaderRenderer")
+                val title = header.o("title").runs()
+                if (VIDEO_WORD.containsMatchIn(title)) return@let
+                val items = carousel.a("contents").orEmpty().mapNotNull {
+                    parseTwoRowItem(it.o("musicTwoRowItemRenderer"))
+                }.filter { it.browseId != null }
+                if (title.isNotBlank() && items.isNotEmpty()) {
+                    shelves += HomeShelf(title, items)
+                }
+            }
+        }
+        return ArtistPage(
+            songs, moreSongs, shelves,
+            thumbnailUrl = artistThumbnail(header),
+            name = credit.artistName,
+            description = parseDescription(response),
+            subscriberCountText = subscriberCount(header),
+            monthlyListenerCount = monthlyListeners(header),
+        )
+    }
+
+    /**
+     * "1.2M subscribers" off the artist header's subscribe button — YouTube
+     * ships two shapes of it depending on how the page was served, and the
+     * button itself carries the count under one of three different keys
+     * across those shapes.
+     */
+    private fun subscriberCount(header: JsonElement?): String? {
+        val immersive = header.o("musicImmersiveHeaderRenderer") ?: return null
+        val button2 = immersive.o("subscriptionButton2").o("subscribeButtonRenderer")
+        val button1 = immersive.o("subscriptionButton").o("subscribeButtonRenderer")
+        return button2.o("subscriberCountWithSubscribeText").firstRunText()
+            ?: button1.o("longSubscriberCountText").firstRunText()
+            ?: button1.o("shortSubscriberCountText").firstRunText()
+    }
+
+    /** "3.4M monthly listeners", off the same header as [subscriberCount]. */
+    private fun monthlyListeners(header: JsonElement?): String? =
+        header.o("musicImmersiveHeaderRenderer").o("monthlyListenerCount").firstRunText()
+
+    /**
+     * The name the page bills itself under. A track credited to a trio hands
+     * its callers all three names at once, so the page's own header is what
+     * says which of them is actually open.
+     */
+    private fun artistName(header: JsonElement?): String? {
