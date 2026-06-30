@@ -838,3 +838,39 @@ object Innertube {
             put("playlistId", playlistId.removePrefix("VL"))
             putJsonArray("actions", actions)
         }
+        val status = response["status"]?.jsonPrimitive?.contentOrNull
+        if (status != null && status != "STATUS_SUCCEEDED") {
+            error("YouTube Music refused the edit ($status)")
+        }
+        return response
+    }
+
+    /**
+     * Adds tracks to a playlist, and reports the per-entry id each one landed
+     * under — video id to set-video-id, for the tracks the response named.
+     *
+     * Worth reading rather than discarding, because it is the only chance to
+     * learn it without re-fetching the whole playlist: a set-video-id is minted
+     * by this call, and it is what a later removal has to be expressed in (see
+     * [removeFromPlaylist]). A row added to a playlist already on screen is
+     * otherwise one the user can see but not take back out until the page is
+     * reopened.
+     *
+     * Absences are normal and not an error — the add still happened; only the
+     * id for undoing it is unknown.
+     */
+    suspend fun addToPlaylist(playlistId: String, videoIds: List<String>): Map<String, String> {
+        val response = editPlaylist(playlistId) {
+            videoIds.forEach { videoId ->
+                addJsonObject {
+                    put("action", "ACTION_ADD_VIDEO")
+                    put("addedVideoId", videoId)
+                }
+            }
+        }
+        return (response["playlistEditResults"] as? JsonArray)
+            .orEmpty()
+            .mapNotNull { result ->
+                val added = (result as? JsonObject)
+                    ?.get("playlistEditVideoAddedResultData") as? JsonObject
+                    ?: return@mapNotNull null
