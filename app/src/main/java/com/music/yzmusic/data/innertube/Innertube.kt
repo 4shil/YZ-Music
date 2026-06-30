@@ -874,3 +874,53 @@ object Innertube {
                 val added = (result as? JsonObject)
                     ?.get("playlistEditVideoAddedResultData") as? JsonObject
                     ?: return@mapNotNull null
+                val videoId = (added["videoId"] as? JsonPrimitive)?.contentOrNull
+                    ?: return@mapNotNull null
+                val setVideoId = (added["setVideoId"] as? JsonPrimitive)?.contentOrNull
+                    ?: return@mapNotNull null
+                videoId to setVideoId
+            }
+            .toMap()
+    }
+
+    /**
+     * Removes entries from a playlist. Keyed by set-video-id as well as video
+     * id: the same track added twice is two entries, and only the pair says
+     * which of them to drop.
+     */
+    suspend fun removeFromPlaylist(playlistId: String, entries: List<Pair<String, String>>) {
+        editPlaylist(playlistId) {
+            entries.forEach { (setVideoId, videoId) ->
+                addJsonObject {
+                    put("action", "ACTION_REMOVE_VIDEO")
+                    put("setVideoId", setVideoId)
+                    put("removedVideoId", videoId)
+                }
+            }
+        }
+    }
+
+    suspend fun renamePlaylist(playlistId: String, title: String) {
+        editPlaylist(playlistId) {
+            addJsonObject {
+                put("action", "ACTION_SET_PLAYLIST_NAME")
+                put("playlistName", title)
+            }
+        }
+    }
+
+    /** A fresh client-playback-nonce, identifying one play of one track. */
+    fun newCpn(): String = (1..16).map { CPN_ALPHABET.random() }.joinToString("")
+
+    private const val CPN_ALPHABET =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+
+    // ---- Request plumbing ---------------------------------------------------
+
+    private suspend fun postMusic(
+        endpoint: String,
+        query: Map<String, String> = emptyMap(),
+        bodyExtras: JsonObjectBuilder.() -> Unit,
+    ): JsonObject {
+        val session = scope
+        val clientVersion = webRemixVersion
