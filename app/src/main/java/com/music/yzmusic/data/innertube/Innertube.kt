@@ -713,3 +713,52 @@ object Innertube {
     // reads the library is the one allowed to edit it.
 
     /** A write attempted without a session; the caller has a sign-in prompt to show. */
+    class NotSignedInException : IllegalStateException("Sign in to YouTube Music to do that")
+
+    private fun requireSession() {
+        if (cookie == null) throw NotSignedInException()
+    }
+
+    /**
+     * Thumbs up / down / neither, for [videoId].
+     *
+     * The response is inspected rather than discarded. Innertube answers a
+     * refused write with HTTP 200 and an `error` object in the body, so the
+     * status line alone will happily report a rating that never happened.
+     */
+    suspend fun rate(videoId: String, status: LikeStatus) {
+        requireSession()
+        val endpoint = when (status) {
+            LikeStatus.LIKE -> "like/like"
+            LikeStatus.DISLIKE -> "like/dislike"
+            LikeStatus.INDIFFERENT -> "like/removelike"
+        }
+        val response = postMusic(endpoint) {
+            putJsonObject("target") { put("videoId", videoId) }
+        }
+        response["error"]?.let { error ->
+            val message = error.jsonObject["message"]?.jsonPrimitive?.contentOrNull
+            error("YouTube Music refused the rating: ${message ?: error}")
+        }
+        // YouTube states what it did in the toast it would have shown. Worth
+        // keeping: a rating it declines to act on still answers 200, and this
+        // one line is the difference between "the call was made" and "the
+        // call did something".
+        Log.d(TAG, "$endpoint $videoId -> ${findString(response, "text") ?: "no confirmation"}")
+    }
+
+    /**
+     * Saves an album or playlist to the library, or takes it back out.
+     *
+     * The same endpoints [rate] uses, aimed at a playlist instead of a video:
+     * YouTube has no separate "save" verb for a release — a saved album *is* a
+     * liked one, which is why the Library tab's Albums and Playlists shelves and
+     * the account's likes are the same list. [playlistId] is the id the page
+     * itself named, not its browse id; see
+     * [com.music.yzmusic.data.model.LibraryState].
+     *
+     * No dislike half, unlike [rate]: nothing in YouTube Music reads a disliked
+     * release, so the only two states worth expressing are saved and not.
+     */
+    suspend fun ratePlaylist(playlistId: String, saved: Boolean) {
+        requireSession()
