@@ -555,3 +555,105 @@ object InnertubeParser {
         runs.forEach { run ->
             val browse = run.o("navigationEndpoint").o("browseEndpoint")
             val id = browse.s("browseId") ?: return@forEach
+            val pageType = browse.o("browseEndpointContextSupportedConfigs")
+                .o("browseEndpointContextMusicConfig").s("pageType").orEmpty()
+            credits = when {
+                "ARTIST" in pageType && credits.artistId == null ->
+                    credits.copy(artistId = id, artistName = run.s("text"))
+                "ALBUM" in pageType && credits.albumId == null ->
+                    credits.copy(albumId = id, albumName = run.s("text"))
+                else -> credits
+            }
+        }
+        return credits
+    }
+
+    /**
+     * Who a release page is billed to, off its own header.
+     *
+     * An album or single doesn't repeat the credit on every track — it says
+     * "Single • Dhanda Nyoliwala" once at the top and then lists bare titles,
+     * so every row read on its own comes back as "Unknown artist". The header
+     * is that missing credit, and carries the artist's browse id with it, so
+     * the long-press menu can still open the artist page from those rows.
+     *
+     * Only releases, never playlists: a playlist's header names whoever put
+     * it together, which is not what its tracks are by. Playlist rows carry
+     * their own credits anyway.
+     */
+    private fun pageCredit(root: JsonElement): Credits {
+        val header = HEADER_RENDERERS.firstNotNullOfOrNull {
+            collectRenderers(root, it).firstOrNull()
+        } ?: return Credits()
+        // The current header hangs the artist off a strapline above the title;
+        // the older one packs it into the subtitle, "Album • Artist • 2024".
+        val lines = HEADER_CREDIT_LINES.map { header.o(it).a("runs").orEmpty() }
+        // Split per line, not across them: the strapline and the subtitle are
+        // separate sentences, and running them together would weld the artist
+        // onto the word that says this is a release at all.
+        val parts = lines.flatMap { line ->
+            line.joinToString("") { it.s("text").orEmpty() }.split(" • ").map(String::trim)
+        }
+        if (parts.none { it.lowercase(Locale.ROOT) in RELEASE_WORDS }) return Credits()
+
+        val credits = creditsOf(lines.flatten())
+        if (credits.artistName?.isNotBlank() == true) return credits
+        // An artist YouTube has no page for is named in the same line without
+        // a link to follow, leaving the name as the only thing to go on.
+        val name = parts.firstOrNull {
+            it.isNotBlank() && it.lowercase(Locale.ROOT) !in TYPE_WORDS && !it.matches(TALLY) &&
+                !it.matches(YEAR) && !it.matches(DURATION)
+        }
+        return credits.copy(artistName = name)
+    }
+
+    /** How an album or playlist page bills itself, off its own header. */
+    data class BrowseHeader(
+        val title: String,
+        /** The line under it — "Album • Artist • 2024", or a playlist's blurb. */
+        val subtitle: String,
+        val thumbnailUrl: String?,
+    )
+
+    /**
+     * What a release or playlist page calls itself.
+     *
+     * Every other way into a detail page comes from a card that already carried
+     * the name and the cover, so nothing used to have to ask. A YouTube Music
+     * link tapped outside the app carries a browse id and nothing else — see
+     * [com.music.yzmusic.playback.MusicLink] — and a page with a blank title
+     * over a track list reads as the app having half-loaded.
+     */
+    fun parseBrowseHeader(root: JsonElement): BrowseHeader? {
+        val header = HEADER_RENDERERS.firstNotNullOfOrNull {
+            collectRenderers(root, it).firstOrNull()
+        } ?: return null
+        val title = header.o("title").runs()
+        if (title.isBlank()) return null
+        // Same two header shapes as pageCredit: the current one straplines the
+        // kind of release above the title, the older one packs it into the
+        // subtitle. Either is a fair second line, so take whichever is there.
+        val subtitle = header.o("straplineTextOne").runs()
+            .ifBlank { header.o("subtitle").runs() }
+        return BrowseHeader(
+            title = title,
+            subtitle = subtitle,
+            // Header shapes drift — a cropped square here, a plain thumbnail
+            // there — so the first image under the header is the cover.
+            thumbnailUrl = collectRenderers(header, "musicThumbnailRenderer").firstOrNull()
+                .o("thumbnail").a("thumbnails").best(),
+        )
+    }
+
+    /**
+     * The editorial blurb YouTube Music writes for a release or an artist —
+     * "About the album" / "About the artist" on the web player.
+     *
+     * It arrives as its own shelf (`musicDescriptionShelfRenderer`) on a
+     * current-layout page, but the field also turns up directly on the
+     * header itself on some responses, so both are tried. Absent from a
+     * playlist page — YouTube writes these for its own catalogue, not for
+     * something a user put together — which is why callers only surface it
+     * for [com.music.yzmusic.data.model.BrowseType.ALBUM] and
+     * [com.music.yzmusic.data.model.BrowseType.ARTIST].
+     */
