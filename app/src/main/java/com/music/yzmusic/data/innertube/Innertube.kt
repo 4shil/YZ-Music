@@ -520,3 +520,23 @@ object Innertube {
          * which Google says while bot-checking as readily as while refusing —
          * is not in the list and is not going to be.
          */
+        val isPermanent: Boolean
+            get() = PERMANENT_REASONS.any { reason.contains(it, ignoreCase = true) }
+
+        private companion object {
+            private val PERMANENT_REASONS = listOf(
+                "not available in your country",
+                "who has blocked it in your country",
+                "removed by the uploader",
+                "account associated with this video has been terminated",
+                "private video",
+                "members-only",
+            )
+        }
+    }
+
+    /** The stats endpoints a player response nominates for one playback. */
+    data class PlaybackTracking(
+        val playbackUrl: String,
+        val watchtimeUrl: String?,
+        /** The ad-tracking ping real clients fire a few seconds in. */
