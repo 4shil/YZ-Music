@@ -728,3 +728,75 @@ object Innertube {
      */
     suspend fun rate(videoId: String, status: LikeStatus) {
         requireSession()
+        val endpoint = when (status) {
+            LikeStatus.LIKE -> "like/like"
+            LikeStatus.DISLIKE -> "like/dislike"
+            LikeStatus.INDIFFERENT -> "like/removelike"
+        }
+        val response = postMusic(endpoint) {
+            putJsonObject("target") { put("videoId", videoId) }
+        }
+        response["error"]?.let { error ->
+            val message = error.jsonObject["message"]?.jsonPrimitive?.contentOrNull
+            error("YouTube Music refused the rating: ${message ?: error}")
+        }
+        // YouTube states what it did in the toast it would have shown. Worth
+        // keeping: a rating it declines to act on still answers 200, and this
+        // one line is the difference between "the call was made" and "the
+        // call did something".
+        Log.d(TAG, "$endpoint $videoId -> ${findString(response, "text") ?: "no confirmation"}")
+    }
+
+    /**
+     * Saves an album or playlist to the library, or takes it back out.
+     *
+     * The same endpoints [rate] uses, aimed at a playlist instead of a video:
+     * YouTube has no separate "save" verb for a release — a saved album *is* a
+     * liked one, which is why the Library tab's Albums and Playlists shelves and
+     * the account's likes are the same list. [playlistId] is the id the page
+     * itself named, not its browse id; see
+     * [com.music.yzmusic.data.model.LibraryState].
+     *
+     * No dislike half, unlike [rate]: nothing in YouTube Music reads a disliked
+     * release, so the only two states worth expressing are saved and not.
+     */
+    suspend fun ratePlaylist(playlistId: String, saved: Boolean) {
+        requireSession()
+        val endpoint = if (saved) "like/like" else "like/removelike"
+        val response = postMusic(endpoint) {
+            putJsonObject("target") { put("playlistId", playlistId) }
+        }
+        // As in [rate]: a refusal arrives as HTTP 200 with an error in the body.
+        response["error"]?.let { error ->
+            val message = error.jsonObject["message"]?.jsonPrimitive?.contentOrNull
+            error("YouTube Music refused the change: ${message ?: error}")
+        }
+        Log.d(TAG, "$endpoint $playlistId -> ${findString(response, "text") ?: "no confirmation"}")
+    }
+
+    /**
+     * Adds or removes a track from the library, using a token minted by
+     * YouTube for exactly that transition — see [com.music.yzmusic.data.model.SongMenu].
+     * There is no video-id form of this call; the token *is* the request.
+     */
+    suspend fun sendFeedback(token: String) {
+        requireSession()
+        postMusic("feedback") {
+            putJsonArray("feedbackTokens") { add(token) }
+        }
+    }
+
+    /**
+     * Creates a playlist and returns its id.
+     *
+     * [videoIds] seeds it in the same request, which is what "add to a new
+     * playlist" is: one round trip rather than a create followed by an edit
+     * that could half-succeed.
+     */
+    suspend fun createPlaylist(
+        title: String,
+        privacy: PlaylistPrivacy,
+        description: String? = null,
+        videoIds: List<String> = emptyList(),
+    ): String {
+        requireSession()
