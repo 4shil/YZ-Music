@@ -657,3 +657,36 @@ object InnertubeParser {
      * for [com.music.yzmusic.data.model.BrowseType.ALBUM] and
      * [com.music.yzmusic.data.model.BrowseType.ARTIST].
      */
+    fun parseDescription(root: JsonElement): String? {
+        val shelf = collectRenderers(root, "musicDescriptionShelfRenderer")
+            .firstOrNull()?.o("description").runs()
+        if (shelf.isNotBlank()) return shelf
+        val onHeader = (HEADER_RENDERERS + "musicImmersiveHeaderRenderer")
+            .firstNotNullOfOrNull { name ->
+                collectRenderers(root, name).firstOrNull()
+                    ?.o("description").runs().takeIf { it.isNotBlank() }
+            }
+        return onHeader
+    }
+
+    /**
+     * The account header buried in the `account_menu` popup. Not every client
+     * gets an `email` back — some return only the @handle — so whichever is
+     * present is used as the secondary line.
+     */
+    fun parseAccount(response: JsonElement): Account? {
+        val header = collectRenderers(response, "activeAccountHeaderRenderer").firstOrNull()
+            ?: return null
+        val name = header.o("accountName").runs()
+        if (name.isBlank()) return null
+        val email = header.o("email").runs()
+            .ifBlank { header.o("email").s("simpleText").orEmpty() }
+            .ifBlank { header.o("channelHandle").runs() }
+        return Account(
+            name = name,
+            email = email,
+            thumbnailUrl = header.o("accountPhoto").a("thumbnails").best(),
+        )
+    }
+
+    /** Tracks of a watch queue (`next` response) — the AutoPlay radio mix. */
