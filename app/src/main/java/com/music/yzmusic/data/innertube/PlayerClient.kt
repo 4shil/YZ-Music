@@ -166,3 +166,54 @@ data class PlayerClient(
         )
 
         /** An older build of the same app; refused on a different schedule. */
+        val ANDROID_VR_LEGACY = ANDROID_VR.copy(
+            clientVersion = "1.43.32",
+            userAgent = "com.google.android.apps.youtube.vr.oculus/1.43.32 " +
+                "(Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/107.0.5284.2)",
+        )
+
+        /**
+         * Identities we never mint with, but may still have to fetch for:
+         * [forStreamUrl] dresses a URL however that URL says it was made, and
+         * the extraction failsafe picks its own client without asking.
+         *
+         * [WEB_REMIX] sits here rather than in [StreamResolver]'s walk on
+         * purpose. As a source of streams it earned its keep only in theory:
+         * every format it returns is ciphered, so reaching it costs a download
+         * of YouTube's player JavaScript and a signature to solve, and after
+         * all that it is refused far more often than not. What it did reliably
+         * do was sit at the end of the list absorbing the time budget of tracks
+         * that were already failing. The failsafe below is the better last
+         * resort. Kept here so a URL minted elsewhere that names it can still
+         * be dressed correctly.
+         */
+        /**
+         * The browser identity music.youtube.com itself runs as. Not part of
+         * [StreamResolver]'s anonymous walk — sent bare, it is ciphered and
+         * refused about as often as it works. Worth reaching for on its own,
+         * ahead of anything else, when there is a signed-in session to send
+         * with it: a session cookie is what a browser-shaped client is
+         * supposed to carry, and Google answers a plausible one very
+         * differently to a device client with none at all.
+         */
+        val WEB_REMIX = PlayerClient(
+            clientName = "WEB_REMIX",
+            clientVersion = "1.20260707.12.00",
+            clientId = "67",
+            userAgent = WEB_USER_AGENT,
+            origin = MUSIC_ORIGIN,
+            needsSignatureTimestamp = true,
+        )
+
+        private val WEB = PlayerClient(
+            clientName = "WEB",
+            clientVersion = "2.20260708.00.00",
+            clientId = "1",
+            userAgent = WEB_USER_AGENT,
+            origin = YOUTUBE_ORIGIN,
+        )
+
+        /**
+         * TV Cobalt v7 — the most reliable client for flagged IPs. No PO Token
+         * needed, no login required. Uses cookie-based auth when available.
+         */
