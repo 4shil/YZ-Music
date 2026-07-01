@@ -32,3 +32,7 @@ data class PlayerClient(
     val clientVersion: String,
     val clientId: String,
     val userAgent: String,
+    val osName: String? = null,
+    val osVersion: String? = null,
+    val deviceMake: String? = null,
+    val deviceModel: String? = null,
