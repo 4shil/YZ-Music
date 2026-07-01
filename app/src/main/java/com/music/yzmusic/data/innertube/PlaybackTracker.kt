@@ -73,3 +73,23 @@ object PlaybackTracker {
     private class Session(
         val videoId: String,
         val cpn: String,
+        val tracking: Innertube.PlaybackTracking,
+    ) {
+        var reportedSeconds = 0L
+
+        /** Set before the network call, so a slow flush can't stack up behind itself. */
+        var flushingTo = 0L
+
+        var atrSent = false
+    }
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val _registeredPlays = MutableStateFlow(0)
+
+    /**
+     * Bumped each time a play lands in the account's history. The home feed's
+     * lead shelf is built from that history, so it has gone stale whenever this
+     * moves — the counter is the signal to re-fetch, and carries no meaning
+     * beyond having changed.
+     */
