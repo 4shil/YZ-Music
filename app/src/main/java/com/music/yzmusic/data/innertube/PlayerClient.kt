@@ -54,3 +54,40 @@ data class PlayerClient(
      * URL, and googlevideo treats a mismatch between the two as reason enough
      * to throttle the response to a crawl or refuse it with 403.
      */
+    fun mediaHeaders(): Map<String, String> = buildMap {
+        put("User-Agent", userAgent)
+        origin?.let { put("Origin", it) }
+        referer?.let { put("Referer", it) }
+    }
+
+    companion object {
+        private const val MUSIC_ORIGIN = "https://music.youtube.com"
+        private const val YOUTUBE_ORIGIN = "https://www.youtube.com"
+
+        private const val WEB_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+
+        /**
+         * iPhone YouTube, and the one that carries the session in practice: it
+         * is answered without a login, without a proof of origin token and
+         * without a signature timestamp, and it returns plain `url` fields —
+         * so a stream is one POST away with no player JavaScript in the path.
+         *
+         * The version is the whole ballgame. Anything Google considers stale is
+         * refused with an HTTP 400 before playability is looked at, which is
+         * not a "try the next format" failure but a "this identity is dead"
+         * one. These are current as of July 2026.
+         */
+        val IOS = PlayerClient(
+            clientName = "IOS",
+            clientVersion = "21.26.4",
+            clientId = "5",
+            userAgent = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+            osName = "iPhone",
+            osVersion = "18.3.2.22D82",
+            deviceMake = "Apple",
+            deviceModel = "iPhone16,2",
+        )
+
+        /** A newer build of the same app: refused on a different schedule. */
