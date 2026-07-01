@@ -30,3 +30,5 @@ import java.util.Locale
 data class PlayerClient(
     val clientName: String,
     val clientVersion: String,
+    val clientId: String,
+    val userAgent: String,
