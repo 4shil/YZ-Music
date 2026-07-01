@@ -700,3 +700,69 @@ object InnertubeParser {
             // the leading runs before the first bullet are the credit.
             val bylineRuns = renderer.o("longBylineText").a("runs").orEmpty()
             val byline = bylineRuns.map { it.s("text").orEmpty() }
+            val artist = byline.takeWhile { !it.contains("•") }.joinToString("").trim()
+            // Those same runs link out to the artist and album pages, which is
+            // how a track started from the queue knows where it came from.
+            val credits = creditsOf(bylineRuns)
+            val thumbnails = renderer.o("thumbnail").a("thumbnails")
+
+            // Structured discriminator:
+            // "MUSIC_VIDEO_TYPE_ATV" is an official catalogue Audio Track Video (Art Track).
+            // "MUSIC_VIDEO_TYPE_OMV" is an Official Music Video upload.
+            // In addition, catalogue tracks link to release albums or carry square cover art.
+            val musicVideoType = renderer.o("navigationEndpoint")
+                .o("watchEndpoint")
+                .o("watchEndpointMusicSupportedConfigs")
+                .o("watchEndpointMusicConfig")
+                .s("musicVideoType")
+
+            val isVideo = when {
+                musicVideoType == "MUSIC_VIDEO_TYPE_OMV" ||
+                    musicVideoType == "MUSIC_VIDEO_TYPE_UGC" -> true
+
+                musicVideoType == "MUSIC_VIDEO_TYPE_ATV" -> false
+
+                thumbnails.isNotSquare() -> true
+
+                credits.albumId != null || credits.albumName != null -> false
+
+                else -> false
+            }
+
+            out[videoId] = Song(
+                videoId = videoId,
+                title = title,
+                artist = artist,
+                thumbnailUrl = thumbnails.best(),
+                durationText = renderer.o("lengthText").runs().takeIf { it.isNotBlank() },
+                artistId = credits.artistId,
+                albumId = credits.albumId,
+                albumName = credits.albumName,
+                isVideo = isVideo,
+            )
+        }
+        return out.values.toList()
+    }
+
+    /**
+     * The account's own state for one track, read off the watch queue's row
+     * menu: the thumbs rating, and the tokens that toggle library membership.
+     *
+     * Read from `next` rather than from anywhere cheaper because there is
+     * nowhere cheaper — no endpoint answers "is this liked" on its own, and
+     * library membership is only ever expressed as a pair of opaque tokens
+     * attached to a rendered row. The queue's own entry for the track carries
+     * both, so one call answers the whole menu.
+     *
+     * Scoped to [videoId]'s row: a watch queue is a list, and reading the
+     * first `likeButtonRenderer` in the response would answer for whichever
+     * track happened to be rendered first.
+     */
+    fun parseSongMenu(root: JsonElement, videoId: String): SongMenu? {
+        val row = collectRenderers(root, "playlistPanelVideoRenderer")
+            .firstOrNull { it.s("videoId") == videoId }
+            ?: return null
+
+        // Null, not INDIFFERENT, for anything this row doesn't actually say —
+        // see [SongMenu.likeStatus]. A missing like button and a stated
+        // "no rating" are different answers and must not collapse into one.
