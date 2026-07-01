@@ -522,3 +522,27 @@ object InnertubeParser {
         val pageType = endpoint.o("browseEndpointContextSupportedConfigs")
             .o("browseEndpointContextMusicConfig").s("pageType").orEmpty()
         if ("ARTIST" !in pageType) return null
+        val browseId = endpoint.s("browseId") ?: return null
+
+        val columns = renderer.a("flexColumns").orEmpty()
+        val title = columns.getOrNull(0)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        if (title.isBlank()) return null
+        val subtitle = columns.getOrNull(1)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+
+        val thumbnails = renderer.o("thumbnail").o("musicThumbnailRenderer")
+            .o("thumbnail").a("thumbnails")
+        return ShelfItem(
+            title = title,
+            subtitle = subtitle,
+            thumbnailUrl = thumbnails.best(),
+            videoId = null,
+            browseId = browseId,
+        )
+    }
+
+    /** The artist / album pages a run list links out to, and their names. */
+    private data class Credits(
+        val artistId: String? = null,
+        val artistName: String? = null,
