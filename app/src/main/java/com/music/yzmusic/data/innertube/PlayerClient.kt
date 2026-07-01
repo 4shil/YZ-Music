@@ -91,3 +91,78 @@ data class PlayerClient(
         )
 
         /** A newer build of the same app: refused on a different schedule. */
+        val IOS_RECENT = IOS.copy(
+            clientVersion = "21.29.1",
+            userAgent = "com.google.ios.youtube/21.29.1 (iPhone16,2; U; CPU iOS 18_5 like Mac OS X;)",
+            osVersion = "18.5.22F70",
+        )
+
+        /**
+         * The phone YouTube app. Answers `OK` where the others are turned away,
+         * but every format comes back ciphered — so reaching it costs a
+         * download of YouTube's player JavaScript and a signature to solve.
+         * Worth it as a fallback; not worth it first.
+         */
+        val ANDROID = PlayerClient(
+            clientName = "ANDROID",
+            clientVersion = "21.26.364",
+            clientId = "3",
+            userAgent = "com.google.android.youtube/21.26.364 " +
+                "(Linux; U; Android 15; en_US; Pixel 9 Pro; Build/AP4A.250205.002; Cronet/132.0.6834.79) gzip",
+            osName = "Android",
+            osVersion = "15",
+            deviceMake = "Google",
+            deviceModel = "Pixel 9 Pro",
+            androidSdkVersion = "35",
+            needsSignatureTimestamp = true,
+        )
+
+        /**
+         * YouTube Music Android app. Returns plain URLs without ciphering.
+         * As of mid-2026, this client is not subject to the po_token
+         * enforcement that blocks stream fetches from other clients —
+         * the only known client that still serves HTTPS streams freely.
+         */
+        val ANDROID_MUSIC = PlayerClient(
+            clientName = "ANDROID_MUSIC",
+            clientVersion = "8.39.42",
+            clientId = "21",
+            userAgent = "com.google.android.apps.youtube.music/8.39.42 " +
+                "(Linux; U; Android 15; en_US; Pixel 9 Pro; Build/AP4A.250205.002) gzip",
+            osName = "Android",
+            osVersion = "15",
+            deviceMake = "Google",
+            deviceModel = "Pixel 9 Pro",
+            androidSdkVersion = "35",
+        )
+
+        /**
+         * The Quest's YouTube app, and the first thing to try: unciphered,
+         * login-free, no proof-of-origin token and no signature timestamp, so
+         * a stream is one POST away with no player JavaScript in the path.
+         *
+         * Worth knowing when this list is next revisited: whether it is
+         * answered depends on the *network the request leaves from*, not on
+         * the app or the account. It serves a phone on mobile data or home
+         * wifi while answering the same request from a datacentre or a
+         * hard-used address with `LOGIN_REQUIRED` / "Sign in to confirm you're
+         * not a bot". A check run from anywhere but the device is measuring
+         * the wrong thing.
+         *
+         * Version MUST be ≤1.65.10 — versions >1.65 trigger SABR-only
+         * streaming (no HTTPS URLs returned).
+         */
+        val ANDROID_VR = PlayerClient(
+            clientName = "ANDROID_VR",
+            clientVersion = "1.65.10",
+            clientId = "28",
+            userAgent = "com.google.android.apps.youtube.vr.oculus/1.65.10 " +
+                "(Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+            osName = "Android",
+            osVersion = "12L",
+            deviceMake = "Oculus",
+            deviceModel = "Quest 3",
+            androidSdkVersion = "32",
+        )
+
+        /** An older build of the same app; refused on a different schedule. */
