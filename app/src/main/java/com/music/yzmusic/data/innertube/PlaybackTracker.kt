@@ -159,3 +159,32 @@ object PlaybackTracker {
         if (current.videoId != videoId) return
         if (!current.atrSent && positionSeconds >= current.tracking.atrAfterSeconds) {
             current.atrSent = true
+            val atrUrl = current.tracking.atrUrl
+            if (atrUrl != null) {
+                scope.launch(TrackLog.about(videoId)) {
+                    runCatching { Innertube.pingAtr(atrUrl, current.cpn) }
+                        .onFailure { TrackLog.w(TAG, "atr ping failed for $videoId: ${it.message}") }
+                }
+            }
+        }
+        // Against `flushingTo`, not `reportedSeconds`. The sampler runs every
+        // five seconds and a ping takes longer than that on a bad connection,
+        // so gating on a value only written *after* the request returned fired
+        // the same report several times over.
+        if (positionSeconds - maxOf(current.reportedSeconds, current.flushingTo) < REPORT_INTERVAL_SECONDS) return
+        scope.launch(TrackLog.about(videoId)) {
+            runCatching { flush(current, positionSeconds) }
+                .onFailure { TrackLog.w(TAG, "watchtime ping failed for $videoId: ${it.message}") }
+        }
+    }
+
+    /**
+     * Close out the current play for good — the queue running dry, or the
+     * service going away.
+     *
+     * Neither of those fires a track transition, so without this a session that
+     * ended by finishing its last song reported everything except the part that
+     * says it finished. [withContext] `NonCancellable` because the usual caller
+     * is a teardown that is about to cancel everything in sight.
+     */
+    fun onPlaybackFinished(positionSeconds: Long) {
