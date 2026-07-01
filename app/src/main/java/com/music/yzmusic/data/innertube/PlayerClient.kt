@@ -40,3 +40,17 @@ data class PlayerClient(
     /** The host this client runs on, for browser-shaped clients only. */
     val origin: String? = null,
     /** Ciphered formats can't be unlocked without one. */
+    val needsSignatureTimestamp: Boolean = false,
+) {
+    val referer: String? get() = origin?.let { "$it/" }
+
+    /** Browser-shaped clients are served from their own host; app clients from YouTube proper. */
+    val usesMusicHost: Boolean get() = origin == MUSIC_ORIGIN
+
+    /**
+     * Headers the *media* request must carry for a URL this client minted.
+     *
+     * The stream fetch is a separate request from the one that produced the
+     * URL, and googlevideo treats a mismatch between the two as reason enough
+     * to throttle the response to a crawl or refuse it with 403.
+     */
