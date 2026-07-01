@@ -965,3 +965,132 @@ object InnertubeParser {
         val videoId = endpoint.o("watchEndpoint").s("videoId")
             ?: browseId?.takeIf { it.startsWith("MPED") }?.removePrefix("MPED")
         val resolvedBrowseId = browseId?.takeUnless { it.startsWith("MPED") }
+        val thumbnails = renderer.o("thumbnailRenderer").o("musicThumbnailRenderer")
+            .o("thumbnail").a("thumbnails")
+        val subtitle = renderer.o("subtitle").runs()
+        // A card with no browse target is a playable track, not an album,
+        // playlist or artist; widescreen art on one of those means it's a
+        // music-video upload rather than the catalogue track — drop it, same
+        // as the equivalent check in parseResponsiveListItem.
+        if (resolvedBrowseId == null && videoId != null && thumbnails.isNotSquare()) return null
+        // An album/playlist billed as a video chart/compilation — "N videos"
+        // in the subtitle, or "video" in the card's own title (e.g. "Daily
+        // Top Music Videos") — is the same dead-end as in parseBrowseItem.
+        // A plain track card is exempt: a song can legitimately be titled
+        // "Video Games" without being a music-video upload.
+        if (resolvedBrowseId != null &&
+            (VIDEO_WORD.containsMatchIn(title) || VIDEO_WORD.containsMatchIn(subtitle))
+        ) {
+            return null
+        }
+        return ShelfItem(
+            title = title,
+            subtitle = subtitle,
+            thumbnailUrl = thumbnails.best(),
+            videoId = videoId,
+            browseId = resolvedBrowseId,
+        )
+    }
+
+    /**
+     * The credit out of a shelf card's subtitle, which reads "Song • Chelsea
+     * Wolfe" rather than just the artist — [parseTwoRowItem] keeps the whole
+     * line because the card shows it as billed, but starting a radio off the
+     * card and carrying that line into [Song.artist] would print the label
+     * everywhere the field is read afterwards: the player, the mini player,
+     * a shared link, a scrobble. Same split as [parseResponsiveListItem]'s
+     * subtitle, so a "Song" or "Single" heading drops out the same way.
+     */
+    fun artistFromSubtitle(subtitle: String): String {
+        val parts = subtitle.split(" • ").map(String::trim).filter { it.isNotBlank() }
+        return parts.firstOrNull {
+            it.lowercase() !in TYPE_WORDS && !it.matches(TALLY) && !it.matches(DURATION)
+        } ?: subtitle
+    }
+
+    /**
+     * Playlist-id prefixes nothing can be added to: `LM` is Liked Music (a
+     * song joins it by being liked), `SE` is Episodes for Later, `RD` is a
+     * generated radio mix, and `OLAK`/`MPRE` are albums wearing a playlist id.
+     */
+    private val NOT_EDITABLE = listOf("LM", "SE", "RD", "OLAK", "MPRE")
+
+    private val DURATION = Regex("""\d+:\d{2}""")
+    private val YEAR = Regex("""\d{4}""")
+    /**
+     * A counted quantity rather than a name — "12.4M plays", "13 songs",
+     * "1 hour, 4 minutes". Deliberately narrow: it has to leave "21 Savage"
+     * and "50 Cent" alone, so a number only disqualifies a segment when it is
+     * counting one of the words YouTube counts with.
+     */
+    private val TALLY = Regex(
+        """[\d.,]+\s*[KMB]?\s+(plays|views|likes|songs|tracks|subscribers|""" +
+            """hours?|minutes?|seconds?)\b.*""",
+        RegexOption.IGNORE_CASE,
+    )
+    /** Header words that mark a page as a release, whose rows share its credit. */
+    private val RELEASE_WORDS = setOf("album", "single", "ep")
+    private val HEADER_RENDERERS = listOf(
+        "musicResponsiveHeaderRenderer",
+        "musicDetailHeaderRenderer",
+    )
+    /** Header lines that name the artist, in either header shape. */
+    private val HEADER_CREDIT_LINES = listOf("straplineTextOne", "subtitle")
+    private val TYPE_WORDS = setOf(
+        "song", "video", "album", "single", "ep", "artist",
+        "playlist", "podcast", "episode",
+    )
+    /**
+     * Flags a browse card as video content: "50 videos" in a subtitle
+     * (instead of "50 songs"), or the word right in a title like
+     * "Daily Top Music Videos".
+     */
+    private val VIDEO_WORD = Regex("""\bvideos?\b""", RegexOption.IGNORE_CASE)
+}
+
+// ---- Tiny JSON navigation helpers (null-safe, never throw) ------------------
+
+private fun JsonElement?.o(key: String): JsonObject? =
+    (this as? JsonObject)?.get(key) as? JsonObject
+
+private fun JsonElement?.a(key: String): JsonArray? =
+    (this as? JsonObject)?.get(key) as? JsonArray
+
+private fun JsonElement?.s(key: String): String? =
+    ((this as? JsonObject)?.get(key) as? JsonPrimitive)?.contentOrNull
+
+private fun JsonElement?.runs(): String =
+    this.a("runs")?.joinToString("") { it.s("text").orEmpty() }.orEmpty()
+
+/** The first run's text alone — for a field that is a count or a label, never a sentence. */
+private fun JsonElement?.firstRunText(): String? =
+    this.a("runs")?.firstOrNull().s("text")
+
+/**
+ * Last thumbnail is the largest, taken exactly as offered.
+ *
+ * This used to rewrite the size hint up to 544px on the way past, on the
+ * reasoning that YouTube will serve any size asked for and bigger is better.
+ * It is, for the one image drawn full-screen — and it is wasteful for every
+ * other, which is most of them: YouTube offers a search row's cover at 120px
+ * for 7.8kB and will happily serve the same cover at 544px for 84kB, to fill
+ * a square the size of a fingertip.
+ *
+ * So the size is now decided where the image is drawn rather than here, by
+ * [com.music.yzmusic.data.model.artworkAt] — which trades up just as freely
+ * as it trades down, and is what the player calls.
+ */
+private fun JsonArray?.best(): String? = this?.lastOrNull().s("url")
+
+/**
+ * Catalogue art is always square; a music-video upload's thumbnail is
+ * widescreen. Missing dimensions default to "square" so a row is never
+ * dropped just because the field wasn't present.
+ */
+private fun JsonArray?.isNotSquare(): Boolean {
+    val last = this?.lastOrNull()
+    val width = last.s("width")?.toDoubleOrNull() ?: return false
+    val height = last.s("height")?.toDoubleOrNull() ?: return false
+    if (width <= 0 || height <= 0) return false
+    return width / height !in 0.85..1.15
+}
