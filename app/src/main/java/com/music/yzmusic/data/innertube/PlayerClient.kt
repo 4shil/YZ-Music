@@ -36,3 +36,7 @@ data class PlayerClient(
     val osVersion: String? = null,
     val deviceMake: String? = null,
     val deviceModel: String? = null,
+    val androidSdkVersion: String? = null,
+    /** The host this client runs on, for browser-shaped clients only. */
+    val origin: String? = null,
+    /** Ciphered formats can't be unlocked without one. */
