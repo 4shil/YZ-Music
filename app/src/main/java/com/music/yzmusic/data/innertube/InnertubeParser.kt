@@ -839,3 +839,129 @@ object InnertubeParser {
      * page, an auto-playlist, or a release YouTube marks unsaveable.
      */
     fun parseLibraryState(root: JsonElement): LibraryState? {
+        val buttons = collectRenderers(root, "musicResponsiveHeaderRenderer")
+            .firstOrNull()
+            .a("buttons")
+            .orEmpty()
+        val save = buttons.firstNotNullOfOrNull { it.o("toggleButtonRenderer")?.takeIf { b -> b.isSaveToggle } }
+            ?: return null
+        if (save.s("isDisabled") == "true") return null
+        // A play button states the release as a playlist, which is the one
+        // thing on the page that names what saving would act on.
+        val play = buttons.firstNotNullOfOrNull { it.o("musicPlayButtonRenderer").o("playNavigationEndpoint") }
+        return LibraryState(
+            playlistId = play.o("watchPlaylistEndpoint").s("playlistId")
+                ?: play.o("watchEndpoint").s("playlistId")
+                ?: return null,
+            // The toggle carries the answer directly, rather than the
+            // which-icon-leads reading a menu toggle needs: a button that is
+            // *shown* toggled is one whose release is already saved.
+            saved = save.s("isToggled") == "true",
+        )
+    }
+
+    /**
+     * Whether a header toggle is the save-to-library one rather than the
+     * description's expander, told by its icons for the same reason
+     * [isLibraryToggle] is: the label is localised, the icon type never is.
+     *
+     * Bookmarks, not the `LIBRARY_*` icons a track's menu uses — YouTube draws
+     * the two actions differently even though they land in the same library.
+     */
+    private val JsonElement?.isSaveToggle: Boolean
+        get() = o("defaultIcon").s("iconType") == "BOOKMARK_BORDER" ||
+            o("toggledIcon").s("iconType") == "BOOKMARK"
+
+    /**
+     * Whether a playlist page is one the account *made*, rather than one it
+     * merely saved — null when the response doesn't say either way.
+     *
+     * The library feed can't answer this. `FEmusic_liked_playlists` lists a
+     * stranger's playlist this account saved in exactly the same shape as one
+     * this account created (see [parseUserPlaylists]), which is how Rename and
+     * Delete came to be offered on someone else's playlist. The page can
+     * answer, and does so three ways over:
+     *
+     *  - An own playlist's header comes wrapped in
+     *    `musicEditablePlaylistDetailHeaderRenderer` — YouTube's own words for
+     *    "this belongs to whoever is asking".
+     *  - Its header menu carries the Edit and Delete rows, read by icon rather
+     *    than by label for the same reason [isSaveToggle] is.
+     *  - Its header carries no save bookmark, and a saved playlist's always
+     *    does: there is nothing to save a playlist already yours *into*. So a
+     *    playlist header without one is this account's.
+     *
+     * Any one of the three is enough, because the two mistakes cost different
+     * amounts. Reading "saved" as "own" puts a Delete button on a playlist the
+     * account cannot delete; reading "own" as "saved" takes Rename and Delete
+     * off the user's own playlist, which is a feature quietly vanishing. Three
+     * readings rather than one so a layout change can only ever cause the
+     * first, which the edit endpoint would refuse anyway.
+     *
+     * Only meaningful for a `VL…` playlist page — an album has a save bookmark
+     * and no owner in this sense at all, and a continuation has no header.
+     */
+    fun parsePlaylistOwned(root: JsonElement): Boolean? {
+        if (collectRenderers(root, "musicEditablePlaylistDetailHeaderRenderer").isNotEmpty()) {
+            return true
+        }
+        // Scoped to the header, not walked for: every track row on the page
+        // carries its own menu, and a row's "Remove from playlist" would
+        // answer for the row rather than for the playlist.
+        val header = collectRenderers(root, "musicResponsiveHeaderRenderer").firstOrNull()
+            ?: return null
+        if (collectRenderers(header, "menuNavigationItemRenderer")
+                .any { it.o("icon").s("iconType") in OWNER_ICONS }
+        ) {
+            return true
+        }
+        return header.a("buttons").orEmpty().none { it.o("toggleButtonRenderer").isSaveToggle }
+    }
+
+    /** Header menu icons only the playlist's owner is offered. */
+    private val OWNER_ICONS = setOf("DELETE", "EDIT")
+
+    /**
+     * The playlists the account can be asked to add a track to.
+     *
+     * `FEmusic_liked_playlists` also carries the "New playlist" tile (no
+     * browse id, so it never survives [parseLibraryItems]), the Liked Music
+     * auto-playlist and YouTube's own generated mixes — none of which take an
+     * edit.
+     *
+     * Filtered by exclusion rather than by requiring a `PL` prefix. Playlist
+     * ids are not as regular as they look, and a list that quietly drops the
+     * user's own playlist is worse than one that offers a playlist the edit
+     * endpoint then refuses — which it reports, and which the picker surfaces.
+     *
+     * Whether a playlist is *owned* rather than merely saved isn't stated on
+     * this feed at all, so it isn't decided here: this stays the permissive
+     * list the picker wants, and [parsePlaylistOwned] is what rules a saved
+     * playlist out of being renamed or deleted.
+     */
+    fun parseUserPlaylists(root: JsonElement): List<UserPlaylist> =
+        parseLibraryItems(root).mapNotNull { item ->
+            val browseId = item.browseId ?: return@mapNotNull null
+            if (!browseId.startsWith("VL")) return@mapNotNull null
+            if (NOT_EDITABLE.any { browseId.startsWith("VL$it") }) return@mapNotNull null
+            UserPlaylist(
+                playlistId = browseId.removePrefix("VL"),
+                title = item.title,
+                subtitle = item.subtitle,
+                thumbnailUrl = item.thumbnailUrl,
+            )
+        }
+
+    private fun parseTwoRowItem(renderer: JsonObject?): ShelfItem? {
+        if (renderer == null) return null
+        val title = renderer.o("title").runs()
+        if (title.isBlank()) return null
+        val endpoint = renderer.o("navigationEndpoint")
+        val browseId = endpoint.o("browseEndpoint").s("browseId")
+        // History/"Listen again" cards for tracks YouTube never catalogued
+        // as a proper Song carry no watchEndpoint at all — just a browseId
+        // to a "non-music audio track page" prefixed MPED<videoId>. That's
+        // the actual video id, not a real browsable page.
+        val videoId = endpoint.o("watchEndpoint").s("videoId")
+            ?: browseId?.takeIf { it.startsWith("MPED") }?.removePrefix("MPED")
+        val resolvedBrowseId = browseId?.takeUnless { it.startsWith("MPED") }
