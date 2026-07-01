@@ -690,3 +690,13 @@ object InnertubeParser {
     }
 
     /** Tracks of a watch queue (`next` response) — the AutoPlay radio mix. */
+    fun parseWatchQueue(root: JsonElement): List<Song> {
+        val out = LinkedHashMap<String, Song>()
+        collectRenderers(root, "playlistPanelVideoRenderer").forEach { renderer ->
+            val videoId = renderer.s("videoId") ?: return@forEach
+            val title = renderer.o("title").runs()
+            if (title.isBlank()) return@forEach
+            // The byline packs artist, album, views and likes into one run list; only
+            // the leading runs before the first bullet are the credit.
+            val bylineRuns = renderer.o("longBylineText").a("runs").orEmpty()
+            val byline = bylineRuns.map { it.s("text").orEmpty() }
