@@ -445,3 +445,21 @@ object InnertubeParser {
         fallback: Credits = Credits(),
     ): Song? {
         if (renderer == null) return null
+        val videoId = renderer.o("playlistItemData").s("videoId")
+            ?: renderer.o("overlay")
+                .o("musicItemThumbnailOverlayRenderer").o("content")
+                .o("musicPlayButtonRenderer").o("playNavigationEndpoint")
+                .o("watchEndpoint").s("videoId")
+            ?: return null
+
+        val columns = renderer.a("flexColumns").orEmpty()
+        val title = columns.getOrNull(0)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        if (title.isBlank()) return null
+
+        val subtitle = columns.getOrNull(1)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        val parts = subtitle.split(" • ").filter { it.isNotBlank() }
+        val duration = parts.lastOrNull()?.takeIf { it.matches(DURATION) }
+        // On the "All" tab the first segment is the row type ("Song", "Video"),
+        // not the artist — skip those so the subtitle reads like a credit.
