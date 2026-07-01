@@ -463,3 +463,62 @@ object InnertubeParser {
         val duration = parts.lastOrNull()?.takeIf { it.matches(DURATION) }
         // On the "All" tab the first segment is the row type ("Song", "Video"),
         // not the artist — skip those so the subtitle reads like a credit.
+        val rowType = parts.firstOrNull { it.lowercase(Locale.ROOT) in TYPE_WORDS }?.lowercase(Locale.ROOT)
+        // A track row on an album lists its play count where a search row
+        // lists the artist, so a segment that reads as a tally is no credit.
+        val artist = parts.firstOrNull {
+            !it.matches(DURATION) && it.lowercase(Locale.ROOT) !in TYPE_WORDS && !it.matches(TALLY)
+        }
+
+        // The artist/album names in the subtitle carry browse endpoints; pull
+        // them out so the long-press menu can open those pages.
+        val credits = creditsOf(
+            columns.flatMap {
+                it.o("musicResponsiveListItemFlexColumnRenderer").o("text").a("runs").orEmpty()
+            },
+        )
+
+        val thumbnails = renderer.o("thumbnail").o("musicThumbnailRenderer")
+            .o("thumbnail").a("thumbnails")
+
+        return Song(
+            videoId = videoId,
+            title = title,
+            // The run that links to an artist page is the authoritative
+            // credit; the "All" tab often lists only "Song • 4:30" otherwise,
+            // and an album's own rows carry no credit at all — the release is
+            // billed once, in the header the row hangs under.
+            artist = credits.artistName?.takeIf { it.isNotBlank() }
+                ?: artist
+                ?: fallback.artistName
+                ?: "Unknown artist",
+            thumbnailUrl = thumbnails.best(),
+            durationText = duration,
+            artistId = credits.artistId ?: fallback.artistId,
+            albumId = credits.albumId ?: fallback.albumId,
+            albumName = credits.albumName ?: fallback.albumName,
+            // Only playlist rows carry one; on an album or a search hit this
+            // is simply absent, which is what makes "remove from playlist"
+            // offer itself exactly where it means something.
+            setVideoId = renderer.o("playlistItemData").s("playlistSetVideoId"),
+            // The row type word is the clean signal when present ("All" tab);
+            // otherwise a music-video upload gives itself away with widescreen
+            // art where a catalogue track has square album cover art.
+            isVideo = rowType == "video" || thumbnails.isNotSquare(),
+        )
+    }
+
+    /**
+     * A chart row that names an artist rather than a track — "Top artists"
+     * on the Charts page lists 40 of them with no song attached, so there is
+     * no `videoId` for [parseResponsiveListItem] to key off and it returns
+     * null for every one. Read here off the row's own `navigationEndpoint`
+     * instead (the flex columns carry only the name and a subscriber count)
+     * and pointed at the artist page rather than dropped.
+     */
+    private fun parseArtistRow(renderer: JsonObject?): ShelfItem? {
+        if (renderer == null) return null
+        val endpoint = renderer.o("navigationEndpoint").o("browseEndpoint")
+        val pageType = endpoint.o("browseEndpointContextSupportedConfigs")
+            .o("browseEndpointContextMusicConfig").s("pageType").orEmpty()
+        if ("ARTIST" !in pageType) return null
