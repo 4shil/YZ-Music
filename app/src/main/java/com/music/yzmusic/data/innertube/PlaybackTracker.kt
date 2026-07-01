@@ -188,3 +188,65 @@ object PlaybackTracker {
      * is a teardown that is about to cancel everything in sight.
      */
     fun onPlaybackFinished(positionSeconds: Long) {
+        val closing = session ?: return
+        session = null
+        scope.launch(TrackLog.about(closing.videoId)) {
+            withContext(NonCancellable) {
+                runCatching { flush(closing, positionSeconds, final = true) }
+                    .onFailure {
+                        TrackLog.w(TAG, "closing watchtime ping failed for ${closing.videoId}: ${it.message}")
+                    }
+            }
+        }
+    }
+
+    /**
+     * [open], given more than one chance.
+     *
+     * Stops early on the three answers that will not change: another track
+     * having become current in the meantime, the session having opened, and
+     * YouTube declining to issue a tracking block for this track at all. Only
+     * genuine failures are repeated.
+     */
+    private suspend fun openWithRetries(videoId: String) {
+        repeat(OPEN_ATTEMPTS) { attempt ->
+            if (opening != videoId) return
+            val settled = try {
+                open(videoId)
+            } catch (e: CancellationException) {
+                // Not a failure, and not ours to swallow: the only thing that
+                // cancels this is the tracker's own scope going away.
+                throw e
+            } catch (e: Throwable) {
+                TrackLog.w(
+                    TAG,
+                    "history registration failed for $videoId " +
+                        "(attempt ${attempt + 1}/$OPEN_ATTEMPTS): ${e.message}",
+                )
+                false
+            }
+            if (settled) return
+            if (attempt < OPEN_ATTEMPTS - 1) delay(OPEN_RETRY_DELAY_MS)
+        }
+    }
+
+    /**
+     * @return whether there is anything left to try. False means the attempt is
+     *   worth repeating — the answer was a failure, not a verdict.
+     */
+    private suspend fun open(videoId: String): Boolean = lock.withLock {
+        // The one thing the tracking request cannot be answered without. Fetched
+        // through [StreamResolver] so it is shared with — and usually already
+        // warmed by — the resolve that is starting this very track.
+        val signatureTimestamp = StreamResolver.signatureTimestamp(videoId)
+        if (signatureTimestamp == null) {
+            TrackLog.w(TAG, "no signature timestamp yet; retrying history for $videoId")
+            return@withLock false
+        }
+        val tracking = Innertube.playbackTracking(videoId, signatureTimestamp)
+        if (tracking == null) {
+            TrackLog.d(TAG, "no playback tracking for $videoId (guest, or the player declined)")
+            // A verdict, not a failure — asking again with the same timestamp
+            // gets the same answer.
+            return@withLock true
+        }
