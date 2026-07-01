@@ -700,3 +700,142 @@ object InnertubeParser {
             // the leading runs before the first bullet are the credit.
             val bylineRuns = renderer.o("longBylineText").a("runs").orEmpty()
             val byline = bylineRuns.map { it.s("text").orEmpty() }
+            val artist = byline.takeWhile { !it.contains("•") }.joinToString("").trim()
+            // Those same runs link out to the artist and album pages, which is
+            // how a track started from the queue knows where it came from.
+            val credits = creditsOf(bylineRuns)
+            val thumbnails = renderer.o("thumbnail").a("thumbnails")
+
+            // Structured discriminator:
+            // "MUSIC_VIDEO_TYPE_ATV" is an official catalogue Audio Track Video (Art Track).
+            // "MUSIC_VIDEO_TYPE_OMV" is an Official Music Video upload.
+            // In addition, catalogue tracks link to release albums or carry square cover art.
+            val musicVideoType = renderer.o("navigationEndpoint")
+                .o("watchEndpoint")
+                .o("watchEndpointMusicSupportedConfigs")
+                .o("watchEndpointMusicConfig")
+                .s("musicVideoType")
+
+            val isVideo = when {
+                musicVideoType == "MUSIC_VIDEO_TYPE_OMV" ||
+                    musicVideoType == "MUSIC_VIDEO_TYPE_UGC" -> true
+
+                musicVideoType == "MUSIC_VIDEO_TYPE_ATV" -> false
+
+                thumbnails.isNotSquare() -> true
+
+                credits.albumId != null || credits.albumName != null -> false
+
+                else -> false
+            }
+
+            out[videoId] = Song(
+                videoId = videoId,
+                title = title,
+                artist = artist,
+                thumbnailUrl = thumbnails.best(),
+                durationText = renderer.o("lengthText").runs().takeIf { it.isNotBlank() },
+                artistId = credits.artistId,
+                albumId = credits.albumId,
+                albumName = credits.albumName,
+                isVideo = isVideo,
+            )
+        }
+        return out.values.toList()
+    }
+
+    /**
+     * The account's own state for one track, read off the watch queue's row
+     * menu: the thumbs rating, and the tokens that toggle library membership.
+     *
+     * Read from `next` rather than from anywhere cheaper because there is
+     * nowhere cheaper — no endpoint answers "is this liked" on its own, and
+     * library membership is only ever expressed as a pair of opaque tokens
+     * attached to a rendered row. The queue's own entry for the track carries
+     * both, so one call answers the whole menu.
+     *
+     * Scoped to [videoId]'s row: a watch queue is a list, and reading the
+     * first `likeButtonRenderer` in the response would answer for whichever
+     * track happened to be rendered first.
+     */
+    fun parseSongMenu(root: JsonElement, videoId: String): SongMenu? {
+        val row = collectRenderers(root, "playlistPanelVideoRenderer")
+            .firstOrNull { it.s("videoId") == videoId }
+            ?: return null
+
+        // Null, not INDIFFERENT, for anything this row doesn't actually say —
+        // see [SongMenu.likeStatus]. A missing like button and a stated
+        // "no rating" are different answers and must not collapse into one.
+        val likeStatus = when (
+            collectRenderers(row, "likeButtonRenderer").firstOrNull().s("likeStatus")
+        ) {
+            "LIKE" -> LikeStatus.LIKE
+            "DISLIKE" -> LikeStatus.DISLIKE
+            "INDIFFERENT" -> LikeStatus.INDIFFERENT
+            else -> null
+        }
+
+        // A row's menu carries several toggles that all hang a feedback token
+        // off the same endpoint — "Don't recommend this", "Remove from
+        // history". Only the one wearing a library icon is this one, and
+        // taking the first token that turned up meant reading a stranger's
+        // state: its default icon isn't LIBRARY_ADD, so every song it matched
+        // claimed to already be in the library.
+        val toggle = collectRenderers(row, "toggleMenuServiceItemRenderer")
+            .firstOrNull { it.feedbackToken("defaultServiceEndpoint") != null && it.isLibraryToggle }
+        // A toggle states the action available *now* as its default and the
+        // way back as its toggled half, so which icon leads also says whether
+        // the track is in the library already.
+        val defaultAdds = toggle.o("defaultIcon").s("iconType") == "LIBRARY_ADD"
+        val defaultToken = toggle.feedbackToken("defaultServiceEndpoint")
+        val toggledToken = toggle.feedbackToken("toggledServiceEndpoint")
+
+        return SongMenu(
+            likeStatus = likeStatus,
+            inLibrary = toggle != null && !defaultAdds,
+            addToLibraryToken = if (defaultAdds) defaultToken else toggledToken,
+            removeFromLibraryToken = if (defaultAdds) toggledToken else defaultToken,
+        )
+    }
+
+    private fun JsonElement?.feedbackToken(endpoint: String): String? =
+        this.o(endpoint).o("feedbackEndpoint").s("feedbackToken")
+
+    /**
+     * Whether a toggle menu item is the library one, told by its icons rather
+     * than by its label — the label is localised, the icon type never is.
+     */
+    private val JsonElement?.isLibraryToggle: Boolean
+        get() = LIBRARY_ICONS.any {
+            o("defaultIcon").s("iconType") == it || o("toggledIcon").s("iconType") == it
+        }
+
+    private val LIBRARY_ICONS = setOf("LIBRARY_ADD", "LIBRARY_REMOVE", "LIBRARY_SAVED")
+
+    /**
+     * Whether the album or playlist a browse response describes is in the
+     * library, and the id that would change that — see [LibraryState].
+     *
+     * Both come off the page header, and both have to. A release's save control
+     * is a [toggleButtonRenderer][isSaveToggle] wearing YouTube's bookmark
+     * icons, *not* a like button: every track row on the page carries a
+     * `likeButtonRenderer` aimed at its own `videoId` and the release carries
+     * none at all, so reading a like button here answers for a track. Which is
+     * how the first cut of this came back empty on every page — thirteen like
+     * buttons on an album, every one of them a row's.
+     *
+     * The id is read from the header's *play* button, because it isn't the
+     * browse id the page was fetched with: an `MPREb…` album is backed by an
+     * `OLAK5uy_…` playlist, which the button names as a `watchPlaylistEndpoint`,
+     * while a playlist page names its own raw id as a `watchEndpoint`. One of
+     * the two answers for either kind of page.
+     *
+     * Scoped to the header rather than walked for, which matters more here than
+     * it looks: an album page's "more from this artist" carousel is full of
+     * *other* releases' playlist ids — a dozen of them, ahead of the header in
+     * document order — so a page-wide walk would quietly save the wrong record.
+     *
+     * Null when the header has no save button to read: a continuation, a local
+     * page, an auto-playlist, or a release YouTube marks unsaveable.
+     */
+    fun parseLibraryState(root: JsonElement): LibraryState? {
