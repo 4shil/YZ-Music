@@ -93,3 +93,48 @@ object PlaybackTracker {
      * moves — the counter is the signal to re-fetch, and carries no meaning
      * beyond having changed.
      */
+    val registeredPlays: StateFlow<Int> = _registeredPlays.asStateFlow()
+
+    /** Guards session hand-over: starting a track must not race its own pings. */
+    private val lock = Mutex()
+
+    @Volatile
+    private var session: Session? = null
+
+    /** The track a session is being opened for, so repeat calls don't stack up. */
+    @Volatile
+    private var opening: String? = null
+
+    /**
+     * Call when [videoId] becomes audible — both on play/resume and when the
+     * queue moves on. A no-op while the same track is already being tracked, so
+     * a pause/resume does not register a second play.
+     */
+    fun onPlaying(videoId: String) {
+        if (!VIDEO_ID.matches(videoId)) return
+        if (Innertube.cookie == null) return
+        // A downloaded track plays perfectly well with the radio off — the
+        // whole point of downloading it — so this is the one place that has
+        // to ask before trying rather than let a request find out the hard
+        // way. [meteredConnection] is null exactly when there is no active
+        // network, which is the one case worth skipping outright rather than
+        // spending three retries on: nothing here is urgent enough to wait
+        // for connectivity to return, and the play was still counted by
+        // whichever surface reads local listening history.
+        if (AppSettings.meteredConnection.value == null) return
+        if (session?.videoId == videoId || opening == videoId) return
+        opening = videoId
+        scope.launch(TrackLog.about(videoId)) {
+            try {
+                openWithRetries(videoId)
+            } finally {
+                if (opening == videoId) opening = null
+            }
+        }
+    }
+
+    /**
+     * Call when the queue moves to a different track. The previous session's
+     * watched time is flushed before it is dropped, so a track skipped at the
+     * two-minute mark is reported as two minutes rather than lost.
+     */
