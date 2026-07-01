@@ -138,3 +138,19 @@ object PlaybackTracker {
      * watched time is flushed before it is dropped, so a track skipped at the
      * two-minute mark is reported as two minutes rather than lost.
      */
+    fun onTrackChanged(positionSeconds: Long) {
+        val closing = session ?: return
+        session = null
+        scope.launch(TrackLog.about(closing.videoId)) {
+            runCatching { flush(closing, positionSeconds, final = true) }
+                .onFailure {
+                    TrackLog.w(TAG, "final watchtime ping failed for ${closing.videoId}: ${it.message}")
+                }
+        }
+    }
+
+    /**
+     * Periodic progress report for the current track, in seconds played.
+     * Cheap to call often — it only hits the network every
+     * [REPORT_INTERVAL_SECONDS] of new audio.
+     */
