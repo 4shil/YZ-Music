@@ -73,3 +73,8 @@ object PlaybackTracker {
     private class Session(
         val videoId: String,
         val cpn: String,
+        val tracking: Innertube.PlaybackTracking,
+    ) {
+        var reportedSeconds = 0L
+
+        /** Set before the network call, so a slow flush can't stack up behind itself. */
