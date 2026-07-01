@@ -259,3 +259,19 @@ object PlaybackTracker {
     }
 
     private suspend fun flush(target: Session, positionSeconds: Long, final: Boolean = false) {
+        val url = target.tracking.watchtimeUrl ?: return
+        // A final report is worth sending even at a position already covered:
+        // it is the `final=1` that matters, not the number.
+        if (!final && positionSeconds <= target.reportedSeconds) return
+        target.flushingTo = maxOf(target.flushingTo, positionSeconds)
+        lock.withLock {
+            val status = Innertube.pingWatchtime(url, target.cpn, positionSeconds, final)
+            target.reportedSeconds = maxOf(target.reportedSeconds, positionSeconds)
+            TrackLog.d(
+                TAG,
+                "watchtime ${positionSeconds}s reported for ${target.videoId}" +
+                    "${if (final) " (final)" else ""} (HTTP $status)",
+            )
+        }
+    }
+}
