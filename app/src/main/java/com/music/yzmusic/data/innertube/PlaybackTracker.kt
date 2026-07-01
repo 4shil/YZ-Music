@@ -250,3 +250,12 @@ object PlaybackTracker {
             // gets the same answer.
             return@withLock true
         }
+        val fresh = Session(videoId, Innertube.newCpn(), tracking)
+        val status = Innertube.pingPlayback(tracking.playbackUrl, fresh.cpn)
+        session = fresh
+        _registeredPlays.value++
+        TrackLog.d(TAG, "history entry created for $videoId (HTTP $status)")
+        true
+    }
+
+    private suspend fun flush(target: Session, positionSeconds: Long, final: Boolean = false) {
