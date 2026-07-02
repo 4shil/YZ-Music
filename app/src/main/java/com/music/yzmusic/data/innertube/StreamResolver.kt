@@ -1068,3 +1068,28 @@ object StreamResolver {
      */
     private fun <T> underCeiling(candidates: List<Pair<Int, T>>, maxKbps: Int): T? {
         if (candidates.isEmpty()) return null
+        val withinBudget = candidates.filter { it.first <= maxKbps }
+        return (withinBudget.maxByOrNull { it.first } ?: candidates.minByOrNull { it.first })
+            ?.second
+    }
+
+    // ---- Unlocking ----------------------------------------------------------
+
+    /** The playable URL behind a format, or null if it can't be unlocked. */
+    private suspend fun streamUrl(videoId: String, format: Audio): String? {
+        val direct = format.url
+        if (direct != null) return deobfuscate(videoId, direct)
+
+        val cipher = format.signatureCipher ?: return null
+        // Asked before the library is, because the library's answer is a cached
+        // exception and its cost is a log line per format per walk rather than
+        // any real work. See [signatureSolverBroken].
+        if (signatureSolverBroken) return null
+        val params = cipher.split("&")
+            .mapNotNull { part ->
+                val i = part.indexOf('=').takeIf { it > 0 } ?: return@mapNotNull null
+                URLDecoder.decode(part.substring(0, i), "UTF-8") to
+                    URLDecoder.decode(part.substring(i + 1), "UTF-8")
+            }
+            .toMap()
+
