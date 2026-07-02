@@ -1023,3 +1023,28 @@ object StreamResolver {
      * ordering it first would spend the client's turn on a certainty. See
      * [onSignatureSolverBroken].
      */
+    private fun rankByQuality(candidates: List<Audio>, maxKbps: Int): List<Audio> {
+        val order = compareByDescending<Audio> { it.url != null }
+        val (withinBudget, overBudget) = candidates.partition { it.kbps <= maxKbps }
+        val ranked = withinBudget.sortedWith(compareByDescending<Audio> { it.kbps }.then(order)) +
+            overBudget.sortedWith(compareBy<Audio> { it.kbps }.then(order))
+        return if (signatureSolverBroken) ranked.sortedWith(order) else ranked
+    }
+
+    /**
+     * What a download wants: the best AAC at or under the download setting's
+     * own ceiling.
+     *
+     * MP4 rather than the better codec because it is the only container the
+     * media store will accept for the audio collection — see
+     * [resolveForDownload].
+     *
+     * The ceiling comes in as an argument rather than being read here, and it is
+     * a different setting from the one [rankForPlayback] reads. The quality
+     * ceilings budget a *stream* — bytes spent again on every replay of a track
+     * being listened to — and a file saved to the device is the opposite case:
+     * paid for once, kept, played from disk forever after. Capping a permanent
+     * artefact at whichever network happened to be in hand would bake a
+     * temporary decision into it, so a download is capped by a decision made
+     * about downloads, or not at all.
+     */
