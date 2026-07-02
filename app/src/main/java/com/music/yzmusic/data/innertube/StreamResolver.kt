@@ -1093,3 +1093,15 @@ object StreamResolver {
             }
             .toMap()
 
+        val base = params["url"] ?: return null
+        val signature = params["s"] ?: return null
+        // Which query parameter the solved signature belongs in; YouTube has
+        // changed the name before, so it travels alongside rather than assumed.
+        val into = params["sp"] ?: "signature"
+        val solved = runCatching {
+            jsPlayerManager { YoutubeJavaScriptPlayerManager.deobfuscateSignature(videoId, signature) }
+        }.getOrElse {
+            TrackLog.w(TAG, "signature cipher failed: ${it.message}")
+            if (it.isUnparseablePlayer()) onSignatureSolverBroken(it)
+            return null
+        }
