@@ -842,3 +842,121 @@ object StreamResolver {
                 // timings alone cannot: a client that offers no acceptable
                 // format never reaches [streamUrl], so both cases look
                 // identical from outside — a `player()` line and then silence.
+                val candidates = select(response)
+                if (candidates.isEmpty()) {
+                    TrackLog.d(TAG, "${client.clientName} offered no usable format for $videoId")
+                    refused(videoId, client)
+                    continue
+                }
+                // Down the ladder rather than one shot at the top of it.
+                //
+                // [select] used to return a single format, and a format that
+                // would not unlock ended the client's turn — which conflates two
+                // different things: a client being refused the track, and the
+                // one format that happened to win on bitrate being the one whose
+                // URL could not be unlocked. A response is routinely a mix, some
+                // entries with a plain `url` and some ciphered, and ranking by
+                // bitrate alone is blind to which is which — so a broken
+                // signature solver threw away whole clients that were offering a
+                // perfectly serviceable unciphered rung one step down.
+                var format: Audio? = null
+                var url: String? = null
+                timed("$videoId ${client.clientName} streamUrl") {
+                    for (candidate in candidates) {
+                        val unlocked = streamUrl(videoId, candidate)
+                            ?.let { patchClientVersion(it, client.clientVersion) }
+                        if (unlocked != null) {
+                            format = candidate
+                            url = unlocked
+                            break
+                        }
+                    }
+                }
+                val picked = format
+                val playable = url
+                if (picked == null || playable == null) {
+                    TrackLog.d(
+                        TAG,
+                        "${client.clientName} offered ${candidates.size} format(s) for $videoId but none " +
+                            "could be unlocked (${candidates.joinToString { "${it.mimeType} @ ${it.kbps}kbps" }})",
+                    )
+                    refused(videoId, client)
+                    continue
+                }
+
+                val verdict = timed("$videoId ${client.clientName} probe") { probe(playable) }
+                TrackLog.d(TAG, "TIMING $videoId ${client.clientName} total: ${SystemClock.elapsedRealtime() - clientStart}ms")
+                when (verdict) {
+                    Probe.OK -> {
+                        TrackLog.d(TAG, "resolved $videoId via ${client.clientName} @ ${picked.kbps}kbps")
+                        served(client)
+                        preferred = client
+                        return Stream(playable, picked.kbps, picked.mimeType)
+                    }
+                    // The client itself is being refused this track; don't
+                    // spend another round trip on it for a while.
+                    Probe.REFUSED -> {
+                        standDown(videoId, client)
+                        refused(videoId, client)
+                    }
+                    // Nobody answered, so this says nothing about the client —
+                    // deliberately not counted as a refusal, or a bad minute on
+                    // the connection would stand down clients that are fine.
+                    Probe.UNREACHABLE -> Unit
+                }
+                // Which format was rejected, not just that one was: the same
+                // client can mint a good URL for one itag and a dead one for
+                // another, so without the format this line cannot tell a track
+                // being refused from a codec being refused.
+                TrackLog.w(
+                    TAG,
+                    "${client.clientName} minted an unusable URL for $videoId: " +
+                        "$verdict for ${picked.mimeType} @ ${picked.kbps}kbps",
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A client turned away with "Please sign in" or "confirm you're
+                // not a bot" is not being told something about this track. It is
+                // being told something about this app's session, and the answer
+                // will be the same for the next track and the one after that —
+                // which is exactly what the logs show: the same five clients
+                // refusing, every track, for a whole session, while the walk
+                // asks all of them again each time.
+                //
+                // That is worth more than the two seconds it spends. Each pass
+                // is roughly ten requests, several of them minting a fresh
+                // visitor id, and churning identities at that rate is itself
+                // the behaviour Google throttles — measured here as every
+                // request in a resolve going four to twenty times slower for a
+                // stretch, which is the difference between a track starting in
+                // three seconds and in twenty. Standing a refused client down
+                // for everything, not just for one video, cuts both the wait
+                // and the volume that provokes the throttling.
+                //
+                // A phrase match is the right test only when it matches, and it
+                // is one sentence of Google's wording away from not. On this
+                // emulator TVHTML5 is turned away with "The page needs to be
+                // reloaded." every track — the same refusal, worded so as to
+                // contain none of "bot", "unusual traffic" or "sign in" — and so
+                // was asked again for every track of the session. Any refusal
+                // therefore also counts toward [refused], which needs no
+                // vocabulary because it waits for the repetition instead.
+                if (e is Innertube.UnplayableException) {
+                    if (e.looksLikeBotCheck) standDownEverywhere(client) else refused(videoId, client)
+                }
+                TrackLog.w(TAG, "${client.clientName} failed for $videoId: ${e.message}")
+            }
+        }
+        return null
+    }
+
+    /**
+     * [CLIENTS], led by whichever one last worked.
+     *
+     * Google's decisions apply to the whole app for as long as they last, not
+     * to one track, so the client that served the previous song is overwhelmingly
+     * likely to serve this one — and starting there is what keeps the common
+     * case at a single round trip.
+     */
+    private fun clientOrder(): List<PlayerClient> {
