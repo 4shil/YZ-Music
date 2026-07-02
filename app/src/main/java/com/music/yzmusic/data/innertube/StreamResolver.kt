@@ -1380,3 +1380,14 @@ object StreamResolver {
 
     private const val STAND_DOWN_MS = 10 * 60 * 1000L
 
+    private fun key(videoId: String, client: PlayerClient) =
+        "$videoId|${client.clientName}@${client.clientVersion}"
+
+    private fun standDown(videoId: String, client: PlayerClient) {
+        standDownUntil[key(videoId, client)] = SystemClock.elapsedRealtime() + STAND_DOWN_MS
+    }
+
+    private fun isStoodDown(videoId: String, client: PlayerClient): Boolean =
+        isStoodDown(key(videoId, client)) || isStoodDown(key(client))
+
+    private fun isStoodDown(k: String): Boolean {
