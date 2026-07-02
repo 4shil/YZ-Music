@@ -1679,3 +1679,109 @@ object StreamResolver {
     ): Stream = extractionGate.withLock {
         withContext(Dispatchers.IO) {
             val waited = SystemClock.elapsedRealtime()
+            val extractor = ServiceList.YouTube.getStreamExtractor(
+                "https://www.youtube.com/watch?v=$videoId",
+            )
+            extractor.fetchPage()
+            val candidates = extractor.audioStreams
+                // Progressive only — DASH/HLS entries carry a manifest, not a URL.
+                .filter {
+                    !it.content.isNullOrBlank() &&
+                        it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
+                }
+            val stream = select(candidates.map { it.averageBitrate to it })
+                ?: error("Track unavailable: no audio streams")
+            TrackLog.d(
+                TAG,
+                "NewPipe picked ${stream.format?.name} @ ${stream.averageBitrate}kbps " +
+                    "(extraction held the gate ${SystemClock.elapsedRealtime() - waited}ms)",
+            )
+            // stream.content is already playable, not raw: YoutubeStreamExtractor
+            // resolves the signature cipher and the `n` parameter itself while
+            // building audioStreams, through the same YoutubeJavaScriptPlayerManager
+            // this file also calls directly. Running it through deobfuscate() again
+            // was a second, redundant trip through that same machinery on every
+            // fallback — real latency (and a second chance to hit whatever's
+            // currently failing it) spent solving something already solved.
+            Stream(
+                url = stream.content,
+                kbps = stream.averageBitrate,
+                mimeType = stream.mime,
+            )
+        }
+    }
+
+    /**
+     * The container, which is all NewPipe's mime type reports.
+     *
+     * `MediaFormat.WEBMA_OPUS` — what YouTube's Opus arrives as — carries the
+     * mime type `audio/webm`, identical to the Vorbis-in-WebM entry beside it.
+     * Accurate about the bytes, and useless for telling the codec apart, which
+     * is what [isM4a] is asked of the format for instead.
+     */
+    private val AudioStream.mime: String get() = format?.mimeType.orEmpty()
+
+    /**
+     * Whether these bytes are AAC in MP4, asked of the format rather than its
+     * name.
+     *
+     * The name would in fact do here — `MediaFormat.M4A` reports `audio/mp4`,
+     * the same thing the player endpoint calls it — but the enum is what
+     * actually carries the answer, and the sibling case is a standing warning
+     * against reading these mime types as codecs: the format that means Opus
+     * says `audio/webm`, so a download demanding Opus by name concluded the
+     * track hadn't any and fell through, while playback took the very same
+     * stream and played it as Opus.
+     */
+    private val AudioStream.isM4a: Boolean
+        get() = format == MediaFormat.M4A
+
+    // ---- Cache --------------------------------------------------------------
+
+    /**
+     * How many bytes the whole track is, or null if the URL doesn't say.
+     *
+     * Every progressive googlevideo URL carries the figure as `clen`. It is
+     * worth reading from there because the alternative is an HTTP request that
+     * reaches the end of the resource: a bounded range never reveals the total,
+     * so read-ahead would have no way to know when it was finished. Resolving
+     * is memoised, so asking costs nothing beyond the first time.
+     */
+    suspend fun contentLength(videoId: String): Long? =
+        resolve(videoId).toHttpUrlOrNull()?.queryParameter("clen")?.toLongOrNull()
+
+    private class Resolved(val url: String, val at: Long)
+
+    /**
+     * Stream URLs already resolved, by videoId — and, since [resolve] only ever
+     * stores one that has served bytes, already known good rather than merely
+     * recent.
+     *
+     * Google issues them with several hours of validity, so the ceiling here is
+     * chosen for a different reason: a URL is tied to the playback session that
+     * minted it, and holding one indefinitely means a stale entry survives long
+     * enough to fail a play. Twenty minutes covers a track and the seeking
+     * around it while staying well inside the window where the URL is good.
+     */
+    private val recent = ConcurrentHashMap<String, Resolved>()
+
+    private const val URL_TTL_MS = 20 * 60 * 1000L
+
+    /** Enough for the queue in hand; this is a latency cache, not a store. */
+    private const val MAX_REMEMBERED = 32
+
+    /** See [resolveForDownload]: one walk to burn a stale visitor id, one to use its replacement. */
+    private const val DOWNLOAD_ATTEMPTS = 2
+
+    /** Long enough for a freshly minted visitor id to be worth anything, short enough not to be felt. */
+    private const val DOWNLOAD_RETRY_MS = 500L
+
+    private fun remember(videoId: String, url: String) {
+        if (recent.size >= MAX_REMEMBERED) {
+            val cutoff = SystemClock.elapsedRealtime() - URL_TTL_MS
+            recent.entries.removeAll { it.value.at < cutoff }
+            if (recent.size >= MAX_REMEMBERED) recent.clear()
+        }
+        recent[videoId] = Resolved(url, SystemClock.elapsedRealtime())
+    }
+}
