@@ -974,3 +974,77 @@ object StreamResolver {
         val url: String?,
         val signatureCipher: String?,
         val kbps: Int,
+        val mimeType: String,
+    ) {
+        /**
+         * YouTube's Opus is always carried in WebM and its AAC always in MP4 —
+         * there is no Opus-in-MP4 on this endpoint — so the container the mime
+         * type names is enough to tell the two ladders apart, and the container
+         * is the thing a download actually cares about.
+         */
+        val isAac: Boolean get() = "mp4" in mimeType.lowercase(Locale.ROOT)
+    }
+
+    private fun audioFormats(response: JsonObject): List<Audio> =
+        response["streamingData"]?.jsonObject
+            ?.get("adaptiveFormats")?.jsonArray
+            ?.map { it.jsonObject }
+            ?.filter { it.str("mimeType")?.startsWith("audio/") == true }
+            ?.map {
+                Audio(
+                    url = it.str("url"),
+                    signatureCipher = it.str("signatureCipher") ?: it.str("cipher"),
+                    kbps = ((it.str("bitrate")?.toLongOrNull() ?: 0L) / 1000).toInt(),
+                    mimeType = it.str("mimeType").orEmpty(),
+                )
+            }
+            ?.filter { it.url != null || it.signatureCipher != null }
+            .orEmpty()
+
+    /**
+     * What playback wants, best first: the formats the connection's ceiling
+     * allows, in the order they are worth trying.
+     *
+     * A list rather than a single pick because unlocking can fail per format —
+     * see [playerStream] and [streamUrl].
+     */
+    private fun rankForPlayback(response: JsonObject): List<Audio> =
+        rankByQuality(audioFormats(response), AppSettings.effectiveAudioQuality.maxKbps)
+
+    /**
+     * [candidates] in the order they are worth attempting: the highest at or
+     * under [maxKbps] first and the rest of the ladder descending from it, then
+     * anything above the ceiling ascending — because a rung over budget still
+     * beats no audio at all, and the cheapest such rung is the least wrong.
+     *
+     * Unciphered formats are preferred within a bitrate tie, and moved ahead of
+     * ciphered ones outright once the signature solver has been found broken:
+     * a ciphered format is then not merely more expensive, it is unplayable, and
+     * ordering it first would spend the client's turn on a certainty. See
+     * [onSignatureSolverBroken].
+     */
+    private fun rankByQuality(candidates: List<Audio>, maxKbps: Int): List<Audio> {
+        val order = compareByDescending<Audio> { it.url != null }
+        val (withinBudget, overBudget) = candidates.partition { it.kbps <= maxKbps }
+        val ranked = withinBudget.sortedWith(compareByDescending<Audio> { it.kbps }.then(order)) +
+            overBudget.sortedWith(compareBy<Audio> { it.kbps }.then(order))
+        return if (signatureSolverBroken) ranked.sortedWith(order) else ranked
+    }
+
+    /**
+     * What a download wants: the best AAC at or under the download setting's
+     * own ceiling.
+     *
+     * MP4 rather than the better codec because it is the only container the
+     * media store will accept for the audio collection — see
+     * [resolveForDownload].
+     *
+     * The ceiling comes in as an argument rather than being read here, and it is
+     * a different setting from the one [rankForPlayback] reads. The quality
+     * ceilings budget a *stream* — bytes spent again on every replay of a track
+     * being listened to — and a file saved to the device is the opposite case:
+     * paid for once, kept, played from disk forever after. Capping a permanent
+     * artefact at whichever network happened to be in hand would bake a
+     * temporary decision into it, so a download is capped by a decision made
+     * about downloads, or not at all.
+     */
