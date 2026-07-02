@@ -45,3 +45,10 @@ private fun LyricLine.splitTrailingBracket(): LyricLine {
             text = lead,
             background = LyricLine(timeMs, backing, sungUntilMs = sungUntilMs),
         )
+    }
+
+    // [text] is the words joined by single spaces in every word-synced parser
+    // here, so the bracket's character offset is a word boundary — unless the
+    // bracket opens mid-word ("wait(ing)"), in which case it isn't one and
+    // there is nothing to hand the backing line for timing. Leave those be.
+    val split = words.indexOfFirstStartingAt(open) ?: return this
