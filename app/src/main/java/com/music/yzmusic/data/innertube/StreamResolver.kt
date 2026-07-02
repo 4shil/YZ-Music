@@ -1391,3 +1391,106 @@ object StreamResolver {
         isStoodDown(key(videoId, client)) || isStoodDown(key(client))
 
     private fun isStoodDown(k: String): Boolean {
+        val until = standDownUntil[k] ?: return false
+        if (until > SystemClock.elapsedRealtime()) return true
+        standDownUntil.remove(k)
+        return false
+    }
+
+    /**
+     * Which tracks each client has been refused since it last served one.
+     *
+     * [standDownEverywhere] is the right answer for a client that has stopped
+     * being served, and reading the refusal is the hard part: Google says no in
+     * whatever words it likes, and only some of them are recognisable. So this
+     * does not try to read it. A client asked for one track and refused has
+     * told us about that track; a client asked for three different tracks and
+     * refused all three, without serving anything in between, has told us about
+     * itself — whatever the wording. Videos rather than a count because one
+     * track can put the same client through this twice (see [resolveForDownload],
+     * which walks for AAC and then for anything), and two refusals of the same
+     * track are one piece of evidence.
+     */
+    private val refusalsByClient = ConcurrentHashMap<String, MutableSet<String>>()
+
+    /**
+     * How much evidence is enough. Low, because the cost of being wrong is
+     * bounded by [STAND_DOWN_MS] and the cost of being slow is paid on every
+     * track: three tracks of the walk, then the rest of the ten minutes going
+     * straight to what works.
+     */
+    private const val REFUSALS_BEFORE_STANDING_DOWN = 3
+
+    /** A client answered about [videoId], and the answer was no use. */
+    private fun refused(videoId: String, client: PlayerClient) {
+        val refusedTracks = refusalsByClient.computeIfAbsent(key(client)) {
+            ConcurrentHashMap.newKeySet<String>()
+        }
+        refusedTracks.add(videoId)
+        if (refusedTracks.size >= REFUSALS_BEFORE_STANDING_DOWN) {
+            // Cleared as it escalates, so that when the stand-down expires the
+            // client is owed a fresh [REFUSALS_BEFORE_STANDING_DOWN] tracks
+            // rather than being stood down again by the first one.
+            refusalsByClient.remove(key(client))
+            standDownEverywhere(client)
+        }
+    }
+
+    /**
+     * A client served a track, so what came before it was about those tracks
+     * rather than about the client.
+     */
+    private fun served(client: PlayerClient) {
+        refusalsByClient.remove(key(client))
+    }
+
+    /**
+     * A client refused the session rather than the track — see [playerStream].
+     *
+     * Shares [standDownUntil] and its expiry with the per-track case, under a
+     * key naming no video. The expiry is the whole reason this is safe to do
+     * app-wide: Google's decisions here last hours but not forever, so one
+     * track every [STAND_DOWN_MS] pays for a full walk and finds out whether
+     * the client is being served again, while the rest go straight to what
+     * works.
+     */
+    private fun standDownEverywhere(client: PlayerClient) {
+        val k = key(client)
+        if (!isStoodDown(k)) {
+            TrackLog.d(TAG, "${client.clientName} is refusing this session; standing it down app-wide")
+        }
+        standDownUntil[k] = SystemClock.elapsedRealtime() + STAND_DOWN_MS
+        // The walk starts from whichever client last worked; a client that is
+        // now being skipped everywhere must not be that one.
+        if (preferred == client) preferred = null
+    }
+
+    private fun key(client: PlayerClient) = "*|${client.clientName}@${client.clientVersion}"
+
+    /**
+     * A URL that [probe] cleared has been refused while actually playing.
+     *
+     * Everything above assumes a URL that served bytes once will keep serving
+     * them, and mostly that holds. When it doesn't, nothing here would ever
+     * find out: [probe] runs before playback and not again, so a client that
+     * goes bad mid-session stays [preferred], and [recent] keeps handing back
+     * the same dead URL for the rest of its TTL. Every following track then
+     * fails the same way, and the app can only be talked out of it by being
+     * restarted — which is the one symptom users actually report.
+     *
+     * So the refusal is fed back: forget the URL, stand the client down for
+     * that track, and give up the preference so the next resolve starts from
+     * the top of [CLIENTS] rather than from the client that just failed.
+     *
+     * Called from the playback path — see
+     * [ChunkedDataSource][com.music.yzmusic.playback.ChunkedDataSource].
+     */
+    fun onPlaybackRefused(url: String, responseCode: Int) {
+        if (responseCode !in REFUSAL_CODES) return
+        // Only googlevideo's URLs say anything about a [PlayerClient]. Anything
+        // else — a module's stream URL, a downloaded file — carries no `c`
+        // parameter, and [PlayerClient.forStreamUrl] answers IOS for a URL it
+        // can't read rather than nothing. So without this, a Tidal URL
+        // answering 404 stands down the client that mints most of YouTube's,
+        // and the next YouTube track pays for a failure on a different server.
+        if (url.toHttpUrlOrNull()?.host?.endsWith("googlevideo.com") != true) return
