@@ -38,3 +38,10 @@ private fun LyricLine.splitTrailingBracket(): LyricLine {
     if (lead.isEmpty() || !backing.any { it.isLetterOrDigit() }) return this
 
     if (words.isEmpty()) {
+        // Line-synced: there is no timing to divide, so the two halves share
+        // the line's stamp and simply stack. Both keep the stated end — it is
+        // the line's end, and the line is both of them.
+        return copy(
+            text = lead,
+            background = LyricLine(timeMs, backing, sungUntilMs = sungUntilMs),
+        )
