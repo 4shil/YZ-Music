@@ -31,3 +31,17 @@ private fun LyricLine.splitTrailingBracket(): LyricLine {
     // A source that marked its own backing vocal has already said everything
     // guessing from punctuation could, and better.
     if (background != null || isGap) return this
+
+    val open = bracketStart(text) ?: return this
+    val lead = text.substring(0, open).trimEnd()
+    val backing = text.substring(open).trim()
+    if (lead.isEmpty() || !backing.any { it.isLetterOrDigit() }) return this
+
+    if (words.isEmpty()) {
+        // Line-synced: there is no timing to divide, so the two halves share
+        // the line's stamp and simply stack. Both keep the stated end — it is
+        // the line's end, and the line is both of them.
+        return copy(
+            text = lead,
+            background = LyricLine(timeMs, backing, sungUntilMs = sungUntilMs),
+        )
