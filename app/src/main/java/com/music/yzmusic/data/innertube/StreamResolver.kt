@@ -460,3 +460,124 @@ object StreamResolver {
 
     private suspend fun resolveUncached(videoId: String): Stream {
         val resolveStart = SystemClock.elapsedRealtime()
+        val stream = try {
+            timed("$videoId playerStream") { playerStream(videoId, ::rankForPlayback) }
+                ?: timed("$videoId authenticatedWebRemixStream") { authenticatedWebRemixStream(videoId, ::rankForPlayback) }
+                ?: run {
+                    TrackLog.w(TAG, "every player client failed for $videoId; falling back to extraction")
+                    timed("$videoId newPipeStream") { newPipeStream(videoId, ::pickForQuality) }
+                }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: LinkageError) {
+            // Every strategy above either runs third-party extraction code or
+            // drives YouTube's player JavaScript, so any of them can turn out to
+            // have been compiled against an API this OS version does not carry.
+            // That arrives as an Error, which the clause below does not catch and
+            // no caller of this function catches either — ExoPlayer's loader
+            // thread least of all, which is where it surfaced as a process kill
+            // rather than a failed track. Converted here, at the one point every
+            // strategy passes through, so the answer is the same wherever the
+            // linkage failure came from.
+            TrackLog.w(
+                TAG,
+                "resolve hit a linkage failure for $videoId after " +
+                    "${SystemClock.elapsedRealtime() - resolveStart}ms: ${e.javaClass.name}: ${e.message}",
+                e,
+            )
+            throw IOException("Stream resolution cannot run on this device: $e", e)
+        } catch (e: Exception) {
+            // The one path out of here that said nothing at all. A resolve that
+            // throws is handed to ExoPlayer as a load error, which retries it on
+            // a backoff of its own — so the symptom is a track that sits in
+            // BUFFERING and walks the clients again every thirty seconds, with
+            // no line anywhere naming what actually went wrong. The stack trace
+            // is the point: the failure is usually several frames inside
+            // NewPipe, where the message alone ("null", commonly) identifies
+            // nothing.
+            TrackLog.w(
+                TAG,
+                "resolve failed for $videoId after ${SystemClock.elapsedRealtime() - resolveStart}ms: " +
+                    "${e.javaClass.name}: ${e.message}",
+                e,
+            )
+            // Recorded before it is rethrown, so the retries stacked above this
+            // — ExoPlayer's, the service's, read-ahead's — are answered from
+            // memory instead of each one walking seven clients and extracting
+            // three times against a refusal that is never going to soften.
+            permanentReason(e)?.let { reason ->
+                rememberUnplayable(videoId, reason)
+                TrackLog.w(TAG, "$videoId is not playable: $reason; not asking again for 10 minutes")
+                throw PermanentlyUnplayableException(reason)
+            }
+            throw e
+        }
+        TrackLog.d(TAG, "TIMING $videoId total resolve: ${SystemClock.elapsedRealtime() - resolveStart}ms")
+        return stream
+    }
+
+    /** Logs how long [block] took, whatever it returns — a timing probe, not a control flow change. */
+    private suspend inline fun <T> timed(label: String, block: suspend () -> T): T {
+        val start = SystemClock.elapsedRealtime()
+        return block().also { TrackLog.d(TAG, "TIMING $label: ${SystemClock.elapsedRealtime() - start}ms") }
+    }
+
+    /**
+     * Tried after [playerStream] and before extraction, and only when there is
+     * a session to send: [PlayerClient.WEB_REMIX] carrying the signed-in
+     * listener's own cookie.
+     *
+     * The anonymous walk in [playerStream] is refused on sight far more often
+     * than not right now — every device client answering "sign in to confirm
+     * you're not a bot" to a request that, honestly, isn't signed in. A real
+     * session cookie on a browser-shaped client is the one case that isn't an
+     * anonymous device pretending otherwise, which is why it is asked at all,
+     * rather than left at the reputation an earlier cookie-less attempt earned
+     * it — the one that got it dropped from [CLIENTS] entirely.
+     *
+     * It is asked *after* that walk rather than ahead of it because of what it
+     * costs when it doesn't work. WEB_REMIX is a web client, so its formats
+     * come back ciphered without exception, so this is the one path that has to
+     * solve a signature on every single track — and a signature that cannot be
+     * solved is not a cheap no. Ahead of the walk that made every track pay for
+     * the most expensive failure available before anything cheaper was tried;
+     * behind it, the clients that answer in one round trip get their say first
+     * and this is reached only on tracks that were already failing. See
+     * [jsPlayerMutex] for what the expensive failure actually was.
+     *
+     * Anything short of a working URL — no cookie, a refusal, a format that
+     * won't unlock, a probe that fails — falls through to null rather than
+     * throwing, so a bad guess here never costs more than the one round trip.
+     */
+    private suspend fun authenticatedWebRemixStream(
+        videoId: String,
+        select: (JsonObject) -> List<Audio>,
+    ): Stream? {
+        if (Innertube.cookie == null) return null
+        // Every format this client returns is ciphered, so with the solver
+        // broken there is nothing here but a round trip and a log line. The
+        // signed-in device clients in [playerStream] are the route that works.
+        if (signatureSolverBroken) return null
+        return try {
+            timed("$videoId WEB_REMIX ensureVisitorData") { Innertube.ensureVisitorData() }
+            val timestamp = timed("$videoId WEB_REMIX getSignatureTimestamp") {
+                signatureTimestamp(videoId)
+            }
+            val response = timed("$videoId WEB_REMIX player()") {
+                Innertube.player(videoId, PlayerClient.WEB_REMIX, timestamp, authenticated = true)
+            }
+            val candidates = select(response)
+            if (candidates.isEmpty()) return null
+            var format: Audio? = null
+            var url: String? = null
+            timed("$videoId WEB_REMIX streamUrl") {
+                for (candidate in candidates) {
+                    val unlocked = streamUrl(videoId, candidate)
+                        ?.let { patchClientVersion(it, PlayerClient.WEB_REMIX.clientVersion) }
+                    if (unlocked != null) {
+                        format = candidate
+                        url = unlocked
+                        break
+                    }
+                }
+            }
