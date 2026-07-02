@@ -217,3 +217,22 @@ data class PlayerClient(
          * TV Cobalt v7 — the most reliable client for flagged IPs. No PO Token
          * needed, no login required. Uses cookie-based auth when available.
          */
+        val TVHTML5 = PlayerClient(
+            clientName = "TVHTML5",
+            clientVersion = "7.20260707.07.00",
+            clientId = "7",
+            userAgent = "Mozilla/5.0(SMART-TV; Linux; Tizen 4.0.0.2) AppleWebkit/605.1.15 " +
+                "(KHTML, like Gecko) SamsungBrowser/9.2 TV Safari/605.1.15",
+            origin = YOUTUBE_ORIGIN,
+        )
+
+        /**
+         * The client a googlevideo URL says minted it, so the media fetch can
+         * be dressed as that client whatever produced the URL — including the
+         * extraction failsafe, which picks a client of its own choosing.
+         *
+         * Falls back to [IOS] when the URL names a client we don't model: it is
+         * what mints most of them here, and being approximately right beats
+         * sending a smart TV's headers for a URL an iPhone asked for.
+         */
+        fun forStreamUrl(url: String): PlayerClient {
