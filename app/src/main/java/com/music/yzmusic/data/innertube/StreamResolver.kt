@@ -566,3 +566,18 @@ object StreamResolver {
             val response = timed("$videoId WEB_REMIX player()") {
                 Innertube.player(videoId, PlayerClient.WEB_REMIX, timestamp, authenticated = true)
             }
+            val candidates = select(response)
+            if (candidates.isEmpty()) return null
+            var format: Audio? = null
+            var url: String? = null
+            timed("$videoId WEB_REMIX streamUrl") {
+                for (candidate in candidates) {
+                    val unlocked = streamUrl(videoId, candidate)
+                        ?.let { patchClientVersion(it, PlayerClient.WEB_REMIX.clientVersion) }
+                    if (unlocked != null) {
+                        format = candidate
+                        url = unlocked
+                        break
+                    }
+                }
+            }
