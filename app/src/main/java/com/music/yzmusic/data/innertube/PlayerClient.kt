@@ -236,3 +236,21 @@ data class PlayerClient(
          * sending a smart TV's headers for a URL an iPhone asked for.
          */
         fun forStreamUrl(url: String): PlayerClient {
+            val parsed = url.toHttpUrlOrNull() ?: return IOS
+            val name = parsed.queryParameter("c")?.uppercase(Locale.ROOT) ?: return IOS
+            val version = parsed.queryParameter("cver")
+            return when {
+                name.startsWith("IOS") ->
+                    if (version == IOS_RECENT.clientVersion) IOS_RECENT else IOS
+                name == "ANDROID_VR" ->
+                    if (version == ANDROID_VR_LEGACY.clientVersion) ANDROID_VR_LEGACY else ANDROID_VR
+                name == "ANDROID_MUSIC" -> ANDROID_MUSIC
+                name.startsWith("ANDROID") -> ANDROID
+                name.startsWith("TVHTML5") -> TVHTML5
+                name == "WEB_REMIX" -> WEB_REMIX
+                name.startsWith("WEB") || name == "MWEB" -> WEB
+                else -> IOS
+            }
+        }
+    }
+}
