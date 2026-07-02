@@ -1181,3 +1181,202 @@ object StreamResolver {
      * and [probe] gets the final say on whether it plays at all.
      */
     private suspend fun deobfuscate(videoId: String, url: String): String {
+        val needsWork = url.toHttpUrlOrNull()?.queryParameter("n")?.isNotBlank() == true
+        if (!needsWork) return url
+        return runCatching {
+            jsPlayerManager { YoutubeJavaScriptPlayerManager.getUrlWithThrottlingParameterDeobfuscated(videoId, url) }
+        }.getOrElse {
+            TrackLog.w(TAG, "n-param deobfuscation failed: ${it.message}")
+            url
+        }
+    }
+
+    /**
+     * Guards every call into [YoutubeJavaScriptPlayerManager].
+     *
+     * Its player-JS cache — the parsed code, the deobfuscation function, and
+     * even a *failed* parse's exception — lives in static fields with no
+     * synchronization, shared by the whole process. This app resolves more
+     * than one track at once by design (a track playing while its successor
+     * pre-caches — see [AudioCache][com.music.yzmusic.playback.AudioCache]),
+     * so two resolves can enter these calls together; the library was never
+     * written for that, and serializing access is what keeps concurrent
+     * resolves from corrupting that shared state.
+     *
+     * A failure here is passed straight out, and deliberately so. An earlier
+     * version answered one by calling [clearAllCaches] and running the block
+     * again, on the reasoning that the library caches a *failed* parse's
+     * exception and replays it forever, so one bad parse would otherwise be
+     * permanent for the process. Measured, that cure was far worse than the
+     * disease, for two reasons that only show up on a device:
+     *
+     *  - The failure this app actually sees — "Could not parse deobfuscation
+     *    function" against a `base.js` this NewPipe release doesn't understand
+     *    — is deterministic. Re-fetching the script and parsing it again cannot
+     *    end differently, so the retry only ever bought a second failure, at
+     *    5s to 55s a time, holding this mutex while every concurrent resolve
+     *    queued behind it.
+     *  - [clearAllCaches] is all-or-nothing. It throws away the parsed player
+     *    JS that the *working* paths depend on — the `n` parameter transform
+     *    that [newPipeStream] runs for every format it extracts — along with
+     *    the one broken function. So the price of the retry was charged twice:
+     *    once here, and again on the fallback that was about to succeed, which
+     *    went from 2.7s warm to 49.8s against the cache this had just emptied.
+     *
+     * Left alone, the cached exception makes the failure free — it is what
+     * turns a broken signature solve into the ~0ms no it should always have
+     * been, and what lets the walk move on to something that works. The cost
+     * of not clearing is that a parse which failed for a reason that has since
+     * passed stays failed until the process restarts; that is a real loss, and
+     * a much smaller one than a fifty-second track.
+     */
+    private val jsPlayerMutex = Mutex()
+
+    private suspend fun <T> jsPlayerManager(block: () -> T): T = jsPlayerMutex.withLock { block() }
+
+    /**
+     * YouTube's current player revision, as the number a client quotes to prove
+     * it is running that player.
+     *
+     * Named and shared rather than fetched at each of the three call sites,
+     * because there is now a fourth kind of caller that is nothing to do with
+     * streaming: [PlaybackTracker] needs one to be issued a tracking block at
+     * all, and it has no business knowing that the value comes from parsing
+     * YouTube's player JavaScript.
+     *
+     * Memoised for the process. It is a property of YouTube's deployment, not of
+     * a track — the videoId is passed only because NewPipe's API takes one, to
+     * decide which player script to fetch — and it changes on the order of days,
+     * against a first parse that costs seconds.
+     */
+    suspend fun signatureTimestamp(videoId: String): Int? {
+        cachedSignatureTimestamp?.let { return it }
+        return runCatching {
+            jsPlayerManager { YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId) }
+        }
+            .onFailure { TrackLog.w(TAG, "no signature timestamp: ${it.message}") }
+            .getOrNull()
+            ?.also { cachedSignatureTimestamp = it }
+    }
+
+    @Volatile
+    private var cachedSignatureTimestamp: Int? = null
+
+    /**
+     * Align the URL's `cver` with the client that actually asked.
+     *
+     * The player response fills it in from the request, but a signature or `n`
+     * transform can be solved against player JavaScript of a different vintage,
+     * and googlevideo answers a version it doesn't expect with a 403.
+     */
+    private fun patchClientVersion(url: String, clientVersion: String): String =
+        if ("cver=" in url) url.replace(Regex("cver=[^&]+"), "cver=$clientVersion") else url
+
+    // ---- Validation ---------------------------------------------------------
+
+    private enum class Probe {
+        /** Served media bytes; safe to play and to cache. */
+        OK,
+
+        /** Answered, but refused this request — the client is the problem. */
+        REFUSED,
+
+        /** Never got an answer worth interpreting; blame nothing in particular. */
+        UNREACHABLE,
+    }
+
+    /**
+     * Read the end of a URL before trusting it.
+     *
+     * This is the whole difference between a track that fails and a track that
+     * fails *visibly and instantly*. A URL that 403s is indistinguishable from
+     * a good one until something reads from it; hand it to ExoPlayer and the
+     * failure surfaces as a track that spins and never starts.
+     *
+     * The range has to be as large as the real fetch will ask for, not a token
+     * one. A URL minted for a session Google has reservations about serves
+     * small ranges to anybody — enough to pass a small probe — and then refuses
+     * the multi-megabyte ranges actual listening is made of with a 403.
+     * [PROBE_RANGE_BYTES] matches the chunk size the player and read-ahead
+     * fetch with, so a grudging URL fails here instead of on the playback path.
+     * Sixteen kilobytes of the answer still have to actually arrive, so a
+     * response that stalls after its headers is a failure too.
+     *
+     * The headers are the ones the media fetch will really use — see
+     * [PlayerClient.forStreamUrl] — so this tests the request that matters
+     * rather than a more favourable version of it.
+     */
+    private fun probe(url: String): Probe {
+        val builder = okhttp3.Request.Builder().url(url)
+            .header("Range", "bytes=0-${PROBE_RANGE_BYTES - 1}")
+        PlayerClient.forStreamUrl(url).mediaHeaders().forEach { (name, value) ->
+            builder.header(name, value)
+        }
+        return try {
+            prober.newCall(builder.build()).execute().use { response ->
+                when {
+                    response.code in REFUSAL_CODES -> Probe.REFUSED
+                    response.code !in 200..299 && response.code != 416 -> Probe.UNREACHABLE
+                    // A refusal dressed as a success: an error page, or the
+                    // consent/captcha interstitial, rather than audio.
+                    response.header("Content-Type")?.startsWith("audio/") != true -> Probe.REFUSED
+                    // Headers can arrive long before a body that never does —
+                    // exactly the shaping this whole path exists to sidestep.
+                    // Insisting on the bytes is the point: a trickle that
+                    // yields its first byte and stalls is a failure too.
+                    response.body?.source()?.request(PROBE_READ_BYTES) != true -> Probe.UNREACHABLE
+                    else -> Probe.OK
+                }
+            }
+        } catch (e: Exception) {
+            TrackLog.w(TAG, "probe failed: ${e.message}")
+            Probe.UNREACHABLE
+        }
+    }
+
+    private val REFUSAL_CODES = setOf(403, 404, 410)
+
+    /**
+     * The probe's own client: the app's, but on a short leash.
+     *
+     * [Http.client]'s 30-second read timeout is right for a stream being
+     * consumed as it arrives and far too patient for a yes/no question —
+     * waiting it out is indistinguishable from the stall being tested for.
+     * Built from the shared client, so the connection pool and DNS are the
+     * same ones the real fetch will use.
+     */
+    private val prober by lazy {
+        Http.client.newBuilder()
+            .callTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private const val PROBE_TIMEOUT_SECONDS = 6L
+
+    /**
+     * How much the probe asks for, in one range.
+     *
+     * Has to match what the real fetch asks for ([ChunkedDataSource] and
+     * [AudioCache] both fetch two-megabyte ranges), or a URL that grudges real
+     * listening-sized requests — while still serving token ones — sails through
+     * the probe and dies on the playback path instead.
+     */
+    private const val PROBE_RANGE_BYTES = 2L * 1024 * 1024
+
+    /** How much of the answer must actually arrive, to catch a stalled body. */
+    private const val PROBE_READ_BYTES = 16L * 1024
+
+    // ---- Clients stood down -------------------------------------------------
+
+    /**
+     * Clients refused a given track, and until when.
+     *
+     * A refusal is rarely about the track alone — it usually means Google has
+     * stopped answering that identity — but it is recorded per track because
+     * that is the granularity it can be observed at. Keyed the same way it is
+     * looked up, so a stale entry costs one retry rather than a lasting hole.
+     */
+    private val standDownUntil = ConcurrentHashMap<String, Long>()
+
+    private const val STAND_DOWN_MS = 10 * 60 * 1000L
+
