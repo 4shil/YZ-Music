@@ -581,3 +581,49 @@ object StreamResolver {
                     }
                 }
             }
+            val picked = format ?: return null
+            val playable = url ?: return null
+            if (timed("$videoId WEB_REMIX probe") { probe(playable) } != Probe.OK) return null
+            TrackLog.d(TAG, "resolved $videoId via authenticated WEB_REMIX @ ${picked.kbps}kbps")
+            Stream(playable, picked.kbps, picked.mimeType)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            TrackLog.d(TAG, "authenticated WEB_REMIX failed for $videoId: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * A resolved stream: the URL, and what the format behind it turned out to
+     * be. Playback only ever needs the URL; a download needs the rest of it to
+     * name the file and declare its type.
+     */
+    class Stream(val url: String, val kbps: Int, val mimeType: String) {
+
+        /**
+         * The container these bytes are actually in, which is not always what
+         * names them.
+         *
+         * Nothing here transcodes or remuxes — what googlevideo sends is what
+         * lands on disk — so the extension has to describe the bytes rather
+         * than the codec inside them. YouTube's Opus is Opus-in-WebM, and the
+         * two sources disagree about how to say so: the player endpoint calls
+         * it `audio/webm; codecs="opus"` and NewPipe calls it `audio/opus`.
+         * Taking the latter at face value would write a WebM file named
+         * `.opus`, and an `.opus` file is expected to be Ogg — which is how a
+         * perfectly good download ends up refusing to open in half the players
+         * on the device.
+         *
+         * Downloads no longer reach the WebM branch — [resolveForDownload]
+         * takes MP4 or nothing — but playback still hands Opus around, and a
+         * file an older build already wrote is still a `.webm` this app has to
+         * be able to describe.
+         */
+        val downloadExtension: String
+            get() = when {
+                "mp4" in mimeType || "m4a" in mimeType -> "m4a"
+                else -> "webm"
+            }
+
+        /** What the media store should be told this file is. */
