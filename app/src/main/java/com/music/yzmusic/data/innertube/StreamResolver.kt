@@ -1048,3 +1048,23 @@ object StreamResolver {
      * temporary decision into it, so a download is capped by a decision made
      * about downloads, or not at all.
      */
+    private fun pickAac(response: JsonObject, maxKbps: Int): List<Audio> =
+        rankByQuality(audioFormats(response).filter { it.isAac }, maxKbps)
+
+    private fun JsonObject.str(key: String): String? = this[key]?.jsonPrimitive?.content
+
+    /**
+     * Highest stream at or under the ceiling set for the connection in use; if
+     * everything is above it (e.g. Low on a track that only has 130kbps+), take
+     * the cheapest available rather than failing.
+     */
+    private fun <T> pickForQuality(candidates: List<Pair<Int, T>>): T? =
+        underCeiling(candidates, AppSettings.effectiveAudioQuality.maxKbps)
+
+    /**
+     * Highest of [candidates] at or under [maxKbps]; if everything is above it
+     * — Standard on a track whose AAC ladder starts at 256, say — the cheapest
+     * available, because a rung over budget still beats no audio at all.
+     */
+    private fun <T> underCeiling(candidates: List<Pair<Int, T>>, maxKbps: Int): T? {
+        if (candidates.isEmpty()) return null
