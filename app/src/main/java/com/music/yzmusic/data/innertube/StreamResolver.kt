@@ -960,3 +960,17 @@ object StreamResolver {
      * case at a single round trip.
      */
     private fun clientOrder(): List<PlayerClient> {
+        val first = preferred ?: return CLIENTS
+        return listOf(first) + CLIENTS.filterNot { it == first }
+    }
+
+    @Volatile
+    private var preferred: PlayerClient? = null
+
+    // ---- Format selection ---------------------------------------------------
+
+    /** One audio entry of a player response, before its URL has been unlocked. */
+    private class Audio(
+        val url: String?,
+        val signatureCipher: String?,
+        val kbps: Int,
