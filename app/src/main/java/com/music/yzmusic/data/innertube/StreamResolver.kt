@@ -1105,3 +1105,79 @@ object StreamResolver {
             if (it.isUnparseablePlayer()) onSignatureSolverBroken(it)
             return null
         }
+        val separator = if ("?" in base) "&" else "?"
+        return deobfuscate(videoId, "$base$separator$into=$solved")
+    }
+
+    /**
+     * Whether NewPipe cannot read the current `base.js` at all, as opposed to
+     * having failed to solve one particular signature.
+     *
+     * The wording is the only thing that distinguishes them, which is
+     * unsatisfying and still worth acting on: "Could not parse deobfuscation
+     * function" is thrown before this app's input is looked at, so it says
+     * nothing about the track and everything about the pair of (this extractor
+     * release, whatever player YouTube is currently serving).
+     *
+     * Matched narrowly on purpose. A false positive here costs every ciphered
+     * format for the rest of the process — the ANDROID client and WEB_REMIX
+     * both — so a broad "could not parse" would trade one track's failure for a
+     * session's, which is the wrong way round. Every player-JS parse failure
+     * NewPipe raises names the function or the script it could not read.
+     */
+    private fun Throwable.isUnparseablePlayer(): Boolean {
+        val text = generateSequence(this) { it.cause?.takeIf { c -> c !== it } }
+            .mapNotNull { it.message }
+            .joinToString(" ")
+            .lowercase(Locale.ROOT)
+        return "deobfuscation function" in text ||
+            "player js" in text ||
+            "player javascript" in text ||
+            "javascript base url" in text
+    }
+
+    /**
+     * NewPipe cannot solve signatures against the player YouTube is currently
+     * serving, so nothing that depends on solving one is worth attempting again
+     * this process.
+     *
+     * This is the actual root cause of the report, and the reason it looks like
+     * an age-restriction bug when it isn't. Ordinary tracks never reach a
+     * signature at all: the device clients at the top of [CLIENTS] hand back
+     * plain `url` fields, so a broken solver is invisible on everything that
+     * plays. An age-restricted track is the one case where every unciphered
+     * client is refused and the *only* remaining route —
+     * [authenticatedWebRemixStream] — is ciphered without exception, so the
+     * broken solver is fatal exactly there and nowhere else. Hence "other songs
+     * played fine", and hence clearing caches and restarting not helping: the
+     * parse failure is deterministic, and NewPipe caches even the failed parse's
+     * exception (see [jsPlayerMutex]).
+     *
+     * Recorded as a flag rather than acted on, because there is nothing to do
+     * about it in this file beyond not paying for it repeatedly. What makes the
+     * track play regardless is [playerStream]'s authenticated retry, which gets
+     * an *unciphered* URL out of a device client and never touches this path.
+     * Bumping NewPipeExtractor is not the fix: no release through v0.26.5
+     * addresses this parse failure, and the last upstream fix in this area
+     * shipped in 2025.
+     */
+    private fun onSignatureSolverBroken(cause: Throwable) {
+        if (signatureSolverBroken) return
+        signatureSolverBroken = true
+        TrackLog.w(
+            TAG,
+            "this NewPipe release cannot read YouTube's current player JavaScript " +
+                "(${cause.message}); ciphered formats are unavailable for the rest of this session — " +
+                "signed-in device clients are the only route to an age-restricted track",
+        )
+    }
+
+    @Volatile
+    private var signatureSolverBroken = false
+
+    /**
+     * Transform the `n` parameter when present. If deobfuscation itself fails
+     * we still return the original URL — a throttled stream beats no stream,
+     * and [probe] gets the final say on whether it plays at all.
+     */
+    private suspend fun deobfuscate(videoId: String, url: String): String {
