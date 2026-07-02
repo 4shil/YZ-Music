@@ -391,3 +391,72 @@ object StreamResolver {
      * go with it: a client refused while anonymous is owed a fresh hearing now
      * that there is a session to send.
      */
+    fun onSessionChanged() {
+        unplayable.clear()
+        standDownUntil.clear()
+        refusalsByClient.clear()
+        preferred = null
+    }
+
+    private const val UNPLAYABLE_TTL_MS = 10 * 60 * 1000L
+
+    /**
+     * One walk per videoId at a time.
+     *
+     * [AudioCache]'s read-ahead resolves the queued track before it is
+     * reached, to warm the cache; if the queue advances faster than that
+     * walk finishes, playback calls [resolve] for the same track a second
+     * time before the first walk has populated [recent]. Left alone, that is
+     * two full client walks in flight for the same track at once, each
+     * paying for the other's requests — round trips measured elsewhere in
+     * this file at ~250ms stretched past 3s under exactly this contention.
+     * A second caller for a videoId already being resolved waits on the
+     * first walk instead of starting its own.
+     *
+     * Parented to [resolverScope] rather than the caller's own coroutine, so
+     * that a caller giving up on its own timeout — see
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService] —
+     * cancels only its own wait, not the walk a second caller may still be
+     * waiting on. Being parented elsewhere is also why the walk has to be told
+     * whose it is — [TrackLog.about] — rather than inheriting it: this is the
+     * single largest producer of lines in the log, and every one of them was
+     * previously filed against whatever happened to be playing while the walk
+     * ran, which for read-ahead is the track before this one.
+     */    private suspend fun coalescedResolve(videoId: String): Stream {
+        inFlight[videoId]?.let { return it.await() }
+        // Started lazily so that losing the race below costs nothing: the walk
+        // that gets discarded has not run a line, so cancelling it fires no
+        // requests and leaves no half-finished deferred behind.
+        val walk = resolverScope.async(TrackLog.about(videoId), start = CoroutineStart.LAZY) {
+            resolveUncached(videoId)
+        }
+        val running = inFlight.putIfAbsent(videoId, walk)
+        if (running != null) {
+            walk.cancel()
+            return running.await()
+        }
+        // Unregistered by the walk's own completion rather than by the awaiter,
+        // which is the difference between coalescing and only appearing to.
+        //
+        // This used to be `try { deferred.await() } finally { inFlight.remove }`,
+        // and the finally is the bug: the walk is parented to [resolverScope]
+        // precisely so a caller giving up does not kill it, so a caller that
+        // gives up — which is every read-ahead resolve the queue moves past, and
+        // every [PlaybackService] resolve that hits its own timeout — took the
+        // still-running walk out of the map on its way out. The next caller then
+        // found nothing in flight and started a second full walk against the
+        // same videoId, which is exactly what the logs show: two overlapping
+        // resolves for one track, 4472ms and 4620ms, 2.8s of them concurrent,
+        // each paying for the other's round trips. The doc comment above
+        // promised one walk per videoId and the finally guaranteed the opposite.
+        walk.invokeOnCompletion { inFlight.remove(videoId, walk) }
+        walk.start()
+        return walk.await()
+    }
+
+    private val inFlight = ConcurrentHashMap<String, Deferred<Stream>>()
+
+    private val resolverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private suspend fun resolveUncached(videoId: String): Stream {
+        val resolveStart = SystemClock.elapsedRealtime()
