@@ -341,3 +341,53 @@ object StreamResolver {
      * [PlaybackService][com.music.yzmusic.playback.PlaybackService]'s load-error
      * policy and `recoverFrom`.
      */
+    class PermanentlyUnplayableException(reason: String) : IOException(reason)
+
+    /**
+     * Tracks that have already failed for a reason retrying cannot fix, and
+     * until when.
+     *
+     * This is the single change that turns the observed failure — a track that
+     * sits in BUFFERING for minutes on end, hammering youtubei — back into a
+     * failure that happens once. Nothing above this object retries *less* than
+     * three deep: ExoPlayer's own load-error policy retries the source, this
+     * service's `recoverFrom` retries the player, and read-ahead resolves the
+     * same track again on its own schedule. Against a permanent refusal every
+     * one of those is a full client walk plus a triple extraction — measured in
+     * the report at roughly twenty-seven walks and fifty youtubei requests in a
+     * 2m41s window, for a track whose answer was settled by the first one.
+     *
+     * Entries expire rather than being permanent, because the reasons behind
+     * them do: an age gate stops mattering the moment the listener signs in
+     * (see [forgetUnplayable], called from the login flow), and Google's region
+     * and bot verdicts are measured in hours, not sessions. Ten minutes is the
+     * same budget [STAND_DOWN_MS] uses, for the same reason — long enough that
+     * the storm cannot re-form, short enough that a listener who fixes the
+     * cause does not have to restart the app.
+     */
+    private val unplayable = ConcurrentHashMap<String, Verdict>()
+
+    private class Verdict(val reason: String, val at: Long)
+
+    private fun unplayableReason(videoId: String): String? {
+        val entry = unplayable[videoId] ?: return null
+        if (SystemClock.elapsedRealtime() - entry.at < UNPLAYABLE_TTL_MS) return entry.reason
+        unplayable.remove(videoId)
+        return null
+    }
+
+    private fun rememberUnplayable(videoId: String, reason: String) {
+        if (unplayable.size > MAX_REMEMBERED) unplayable.clear()
+        unplayable[videoId] = Verdict(reason, SystemClock.elapsedRealtime())
+    }
+
+    /**
+     * Forget every verdict recorded above.
+     *
+     * Signing in is the one event that can turn an age-gated track playable,
+     * and signing out the one that can turn it back — so both have to clear
+     * this, or the listener who signs in specifically to play a track is told
+     * for the next ten minutes that it still cannot be played. The stand-downs
+     * go with it: a client refused while anonymous is owed a fresh hearing now
+     * that there is a session to send.
+     */
