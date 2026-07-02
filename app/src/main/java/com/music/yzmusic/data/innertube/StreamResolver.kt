@@ -772,3 +772,73 @@ object StreamResolver {
         timed("$videoId ensureVisitorData") { Innertube.ensureVisitorData() }
 
         var timestamp: Int? = null
+        var mintedFreshVisitor = false
+        // One signed-in retry per client per walk. Without the bound, a client
+        // that answers the age gate with the same age gate signed in would be
+        // asked twice for every walk, and there are seven of them.
+        val triedSignedIn = mutableSetOf<PlayerClient>()
+
+        for (client in clientOrder()) {
+            if (isStoodDown(videoId, client)) continue
+            val clientStart = SystemClock.elapsedRealtime()
+            try {
+                // Only fetched once, and only if a client that needs it is
+                // reached — it costs a download of YouTube's player JavaScript.
+                if (client.needsSignatureTimestamp && timestamp == null) {
+                    timestamp = timed("$videoId getSignatureTimestamp") {
+                        signatureTimestamp(videoId)
+                    } ?: continue
+                }
+
+                val response = responses[client] ?: try {
+                    timed("$videoId ${client.clientName} player()") { Innertube.player(videoId, client, timestamp) }
+                } catch (e: Innertube.UnplayableException) {
+                    when {
+                        // The fix for the reported bug, and the only one that
+                        // makes an age-restricted track actually play.
+                        //
+                        // The refusal here is "Sign in to confirm your age" (or,
+                        // from the iOS and Android clients, "This video may be
+                        // inappropriate for some users"), and it is a statement
+                        // about the *request*, not the track: the same client
+                        // asked again carrying the listener's session is
+                        // answered OK. Worth doing on these clients in
+                        // particular because they return plain `url` fields — so
+                        // this route never touches YouTube's player JavaScript,
+                        // which is the thing that is currently broken. Before
+                        // this, the only path with a hope of an age-gated track
+                        // was [authenticatedWebRemixStream], whose formats are
+                        // ciphered without exception, so a track YouTube was
+                        // perfectly willing to serve failed on the signature
+                        // solve instead. See [onSignatureSolverBroken].
+                        e.isAgeGate && Innertube.cookie != null && !triedSignedIn.contains(client) -> {
+                            triedSignedIn.add(client)
+                            TrackLog.d(
+                                TAG,
+                                "${client.clientName} wants an age check for $videoId; asking again signed in",
+                            )
+                            timed("$videoId ${client.clientName} player() signed in") {
+                                Innertube.player(videoId, client, timestamp, authenticated = true)
+                            }
+                        }
+                        // A visitor id can be burned while the session around it
+                        // is fine, and the only symptom is being called a bot.
+                        // Worth one fresh id and one more try, once per resolve.
+                        e.looksLikeBotCheck && !mintedFreshVisitor -> {
+                            mintedFreshVisitor = true
+                            TrackLog.d(TAG, "bot check from ${client.clientName}; minting a fresh visitor id")
+                            timed("$videoId ensureVisitorData(refresh)") { Innertube.ensureVisitorData(refresh = true) }
+                            timed("$videoId ${client.clientName} player() retry") {
+                                Innertube.player(videoId, client, timestamp)
+                            }
+                        }
+                        else -> throw e
+                    }
+                }
+                responses[client] = response
+
+                // Answered, but with nothing this app can use. Logged because
+                // the two ways that happens are worth telling apart and the
+                // timings alone cannot: a client that offers no acceptable
+                // format never reaches [streamUrl], so both cases look
+                // identical from outside — a `player()` line and then silence.
