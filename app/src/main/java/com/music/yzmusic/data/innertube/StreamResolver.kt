@@ -1494,3 +1494,188 @@ object StreamResolver {
         // answering 404 stands down the client that mints most of YouTube's,
         // and the next YouTube track pays for a failure on a different server.
         if (url.toHttpUrlOrNull()?.host?.endsWith("googlevideo.com") != true) return
+        val client = PlayerClient.forStreamUrl(url)
+        // Keyed by videoId, and the fetch only knows the googlevideo URL it was
+        // handed; the map is a latency cache of a few dozen entries, so finding
+        // the way back costs nothing worth measuring.
+        recent.entries.firstOrNull { it.value.url == url }?.key?.let { videoId ->
+            recent.remove(videoId)
+            standDown(videoId, client)
+        }
+        // Independent of that lookup on purpose: standing down the preference
+        // is what breaks the loop, and it must still happen if the URL has
+        // already aged out of the cache.
+        if (preferred == client) {
+            TrackLog.w(TAG, "${client.clientName} refused a URL it had already served; standing it down")
+            preferred = null
+        }
+    }
+
+    // ---- Failsafe -----------------------------------------------------------
+
+    /**
+     * NewPipe's full extractor, kept for the case where every player client has
+     * been turned away — it re-derives everything itself and is updated
+     * upstream when YouTube changes, so it works when nothing else does.
+     *
+     * Last rather than first because of what it costs: it scrapes the watch
+     * page, which is the request Google shapes hardest, and a shaped response
+     * can hold this call open for the better part of a minute. Worth waiting
+     * out when the alternative is silence; not worth paying for every track.
+     *
+     * Driven through [StreamExtractor][org.schabi.newpipe.extractor.stream.StreamExtractor]
+     * directly rather than through `StreamInfo.getInfo`, which is the obvious
+     * call and the expensive one. `getInfo` assembles everything a video page
+     * has — it drives forty-odd extractor methods, among them `getVideoStreams`
+     * and `getVideoOnlyStreams`, and YouTube answers those with twenty to
+     * thirty formats whose `n` parameter each has to be transformed by running
+     * YouTube's player JavaScript. This app then discards every one of them and
+     * keeps the audio. Fetching the page and asking only for [audioStreams]
+     * pays that transform four or five times instead: measured on-device at
+     * 49.8s against 2.3s for the same track over the same connection.
+     */
+    private suspend fun newPipeStream(
+        videoId: String,
+        select: (List<Pair<Int, AudioStream>>) -> AudioStream?,
+    ): Stream {
+        var failure: Exception? = null
+        repeat(EXTRACTION_ATTEMPTS) { attempt ->
+            if (attempt > 0) delay(EXTRACTION_RETRY_MS * attempt)
+            try {
+                return extractStream(videoId, select)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: LinkageError) {
+                // Not a failed extraction — a method or class the extractor was
+                // compiled against that this OS version does not have, which is
+                // the same answer every time and so is not worth the remaining
+                // attempts. It reaches here as an Error rather than an Exception,
+                // and an Error let past this point does not fail the track: it
+                // unwinds through ExoPlayer's loader thread, where nothing is
+                // catching it, and takes the process with it. That is what a
+                // NoSuchMethodError out of NewPipe's URL codec did on every
+                // Android below 13 — see the note in the vendored
+                // `org.schabi.newpipe.extractor.utils.Utils`. Reported as an
+                // Exception so the layers above treat it as the load failure it
+                // is, with the type name kept because the message alone ("No
+                // static method ...") reads like nothing.
+                throw IOException("Extractor cannot run on this device: $e", e)
+            } catch (e: Exception) {
+                // A verdict about the content, not about this minute. There was
+                // no classification here at all, so the most expensive retry in
+                // the app was spent on the one class of failure that cannot
+                // benefit from it: an age-restricted track threw
+                // AgeRestrictedContentException, which extends
+                // ContentNotAvailableException extends ParsingException extends
+                // Exception, landed in this clause, and was granted all three
+                // attempts with 1s and 2s backoffs — each one re-fetching the
+                // watch page and holding [extractionGate] against every other
+                // resolve in the process while it did. Three identical refusals
+                // per walk, and the walk itself repeated. Named and rethrown on
+                // the first one instead.
+                permanentReason(e)?.let { reason ->
+                    TrackLog.w(TAG, "extraction will not succeed for $videoId: $reason")
+                    throw e
+                }
+                // Worth another go rather than worth giving up on: the common
+                // failure here is a shaped or cut-off watch page, which is a
+                // fact about this minute rather than about the track, and this
+                // is the last thing standing between the listener and silence.
+                TrackLog.w(
+                    TAG,
+                    "extraction attempt ${attempt + 1} of $EXTRACTION_ATTEMPTS failed for $videoId: ${e.message}",
+                )
+                failure = e
+            }
+        }
+        throw failure ?: IllegalStateException("Track unavailable: no audio streams")
+    }
+
+    /**
+     * Why [e] means "never", or null if it only means "not just now".
+     *
+     * The distinction is the difference between one failed track and a request
+     * storm, and it is not available from the exception hierarchy: NewPipe files
+     * a takedown, a region block and a truncated watch page under the same
+     * [ParsingException] ancestry, so a `catch (e: Exception)` treats "this
+     * video does not exist" exactly like "the page arrived cut in half". Every
+     * retry in this app sat downstream of that conflation.
+     *
+     * Kept as a message rather than a boolean because the message is what the
+     * listener eventually sees, and "This video is age-restricted" is a
+     * different thing to be told than `ERROR_CODE_IO_UNSPECIFIED`.
+     */
+    private fun permanentReason(e: Throwable): String? = when (e) {
+        is PermanentlyUnplayableException -> e.message ?: "This track cannot be played"
+        // The whole reason this function exists — see [newPipeStream].
+        is AgeRestrictedContentException ->
+            if (Innertube.cookie == null) {
+                "This track is age-restricted. Sign in to YouTube to play it."
+            } else {
+                "YouTube will not serve this age-restricted track to this app."
+            }
+        is GeographicRestrictionException -> "This track isn't available in your country"
+        is UnsupportedContentInCountryException -> "This track isn't available in your country"
+        is PaidContentException -> "This track is paid content"
+        is YoutubeMusicPremiumContentException -> "This track needs YouTube Music Premium"
+        is PrivateContentException -> "This track is private"
+        is AccountTerminatedException -> "The channel behind this track was terminated"
+        is SoundCloudGoPlusContentException -> "This track needs SoundCloud Go+"
+        is Innertube.UnplayableException ->
+            when {
+                // An age gate is only permanent once the session that could get
+                // past it has been tried and refused. Signed out it is a
+                // sentence with an action attached, and [resolve] must not cache
+                // it in a way that survives the listener taking that action —
+                // hence [onSessionChanged].
+                e.isAgeGate ->
+                    if (Innertube.cookie == null) {
+                        "This track is age-restricted. Sign in to YouTube to play it."
+                    } else {
+                        null
+                    }
+                e.isPermanent -> e.message
+                else -> null
+            }
+        // ExoPlayer and the coroutine machinery both wrap freely, and the
+        // classification has to survive being wrapped or it never fires: the
+        // failure that reaches [resolveUncached] arrives as whatever the last
+        // layer chose to throw it as.
+        else -> e.cause?.takeIf { it !== e }?.let(::permanentReason)
+    }
+
+    /** How many times the watch page is worth asking for before giving up. */
+    private const val EXTRACTION_ATTEMPTS = 3
+
+    /** Multiplied by the attempt number, so the wait grows if the first retry doesn't take. */
+    private const val EXTRACTION_RETRY_MS = 1000L
+
+    /**
+     * One extraction at a time, across the whole app.
+     *
+     * Extraction is not the network-bound step it looks like. Fetching the
+     * watch page is the small part; the expensive part is running YouTube's
+     * player JavaScript through Rhino to transform each format's `n`
+     * parameter, which is CPU work on a phone against static state NewPipe
+     * shares process-wide. Run concurrently it does not share out, it
+     * collapses — measured on-device at 1.8s alone, 16.2s with two in flight
+     * (both finishing within 35ms of each other, which is the tell), and 30.3s
+     * with three. Read-ahead is what puts three or four in flight: the track
+     * being waited on plus [AudioCache][com.music.yzmusic.playback.AudioCache]'s
+     * queue warm-up, every one of them an extraction now that no player client
+     * is being served.
+     *
+     * So they are queued rather than raced. Serialised, three cost about two
+     * seconds each in turn instead of thirty seconds each at once, and the one
+     * a listener is actually waiting on is behind at most one other — see
+     * `QUEUE_LOOKAHEAD`, kept at one for exactly this reason. The bound on how
+     * long a single holder can keep the gate is [EXTRACTOR_TIMEOUT_SECONDS].
+     */
+    private val extractionGate = Mutex()
+
+    private suspend fun extractStream(
+        videoId: String,
+        select: (List<Pair<Int, AudioStream>>) -> AudioStream?,
+    ): Stream = extractionGate.withLock {
+        withContext(Dispatchers.IO) {
+            val waited = SystemClock.elapsedRealtime()
