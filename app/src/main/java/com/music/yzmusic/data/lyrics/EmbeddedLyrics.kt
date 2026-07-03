@@ -278,3 +278,27 @@ object EmbeddedLyrics {
      * An EBML variable-length integer: the highest set bit of the first byte
      * gives the width, and the bits after it are the value.
      */
+    private fun readVint(bytes: ByteArray, offset: Int): Vint? {
+        if (offset >= bytes.size) return null
+        val first = bytes[offset].toInt() and 0xFF
+        if (first == 0) return null
+        var width = 1
+        var mask = 0x80
+        while (first and mask == 0) {
+            mask = mask shr 1
+            width++
+        }
+        if (offset + width > bytes.size) return null
+        var value = (first and mask.inv() and 0xFF).toLong()
+        for (i in 1 until width) value = (value shl 8) or (bytes[offset + i].toLong() and 0xFF)
+        return Vint(value, width)
+    }
+
+    // ---- Bytes --------------------------------------------------------------
+
+    /** Reads up to [max] bytes, which is all of a normal file and a prefix of a huge one. */
+    private fun InputStream.readAtMost(max: Int): ByteArray {
+        val out = ByteArrayOutputStream(minOf(max, 1 shl 16))
+        val buffer = ByteArray(1 shl 16)
+        var total = 0
+        while (total < max) {
