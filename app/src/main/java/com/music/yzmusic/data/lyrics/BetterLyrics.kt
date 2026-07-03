@@ -31,3 +31,6 @@ object BetterLyrics {
     ): List<LyricLine>? = withContext(Dispatchers.IO) {
         val url = BASE.toHttpUrl().newBuilder()
             .addQueryParameter("s", title)
+            .addQueryParameter("a", artist)
+            .apply {
+                val seconds = durationMs / 1000
