@@ -34,3 +34,6 @@ object BetterLyrics {
             .addQueryParameter("a", artist)
             .apply {
                 val seconds = durationMs / 1000
+                if (seconds > 0) addQueryParameter("d", seconds.toString())
+                if (!album.isNullOrBlank()) addQueryParameter("al", album)
+            }
