@@ -152,3 +152,44 @@ object EmbeddedLyrics {
      */
     private fun ilstText(bytes: ByteArray, from: Int, endExclusive: Int, freeform: Boolean): String? {
         val marker = if (freeform) WORD_LYRICS_FIELD.toByteArray(Charsets.UTF_8) else LYR_ATOM
+        var at = from
+        while (true) {
+            val found = bytes.indexOf(marker, at, endExclusive) ?: return null
+            // The value is the first `data` box after the name, in both layouts:
+            // a freeform item is mean/name/data, a standard one is type/data.
+            val data = bytes.indexOf(DATA_ATOM, found, endExclusive) ?: return null
+            dataText(bytes, data, endExclusive)?.let { return it }
+            at = found + marker.size
+        }
+    }
+
+    /**
+     * An iTunes `data` box's payload as text.
+     *
+     * The box is version/flags(4) + locale(4) + the value, and the length in
+     * front of it is what says where the value stops — a lyric sheet has
+     * newlines in it and nothing else terminates it.
+     */
+    private fun dataText(bytes: ByteArray, dataAt: Int, endExclusive: Int): String? {
+        val start = dataAt - 4
+        if (start < 0 || dataAt + 12 > endExclusive) return null
+        val size = readU32(bytes, start).toInt()
+        if (size <= 16 || start + size > endExclusive) return null
+        // Type indicator 1 is UTF-8 text; a cover's 13/14 is the other thing a
+        // `data` box holds, and decoding a JPEG as a string is not a lyric.
+        if (readU32(bytes, dataAt + 4).toInt() != 1) return null
+        return String(bytes, dataAt + 12, start + size - (dataAt + 12), Charsets.UTF_8)
+    }
+
+    // ---- FLAC ---------------------------------------------------------------
+
+    /**
+     * The `LYRICS` (or [WORD_LYRICS_FIELD]) comment out of the `VORBIS_COMMENT` block.
+     *
+     * Every length in the block is **little-endian** — it reuses Ogg Vorbis'
+     * layout, which is the one part of FLAC that isn't big-endian.
+     */
+    private fun flac(bytes: ByteArray): String? {
+        var pos = FLAC_MAGIC.size
+        while (pos + 4 <= bytes.size) {
+            val flags = bytes[pos].toInt() and 0xFF
