@@ -43,3 +43,6 @@ object BetterLyrics {
         val ttml = runCatching {
             (lyricsJson.parseToJsonElement(body) as? JsonObject)
                 ?.get("ttml")?.jsonPrimitive?.contentOrNull
+        }.getOrNull() ?: return@withContext null
+
+        TtmlLyrics.parse(ttml).takeIf { it.isNotEmpty() }
