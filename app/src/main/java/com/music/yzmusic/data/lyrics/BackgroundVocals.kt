@@ -101,3 +101,5 @@ private fun bracketStart(text: String): Int? {
             }
         }
     }
+    return null
+}
