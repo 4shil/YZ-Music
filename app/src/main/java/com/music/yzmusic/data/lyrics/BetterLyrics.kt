@@ -22,3 +22,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 object BetterLyrics {
 
     private const val BASE = "https://lyrics-api.boidu.dev/getLyrics"
+
+    suspend fun lyrics(
+        title: String,
