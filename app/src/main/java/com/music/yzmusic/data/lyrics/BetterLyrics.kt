@@ -40,3 +40,6 @@ object BetterLyrics {
             .build()
 
         val body = lyricsGet(url.toString()) ?: return@withContext null
+        val ttml = runCatching {
+            (lyricsJson.parseToJsonElement(body) as? JsonObject)
+                ?.get("ttml")?.jsonPrimitive?.contentOrNull
