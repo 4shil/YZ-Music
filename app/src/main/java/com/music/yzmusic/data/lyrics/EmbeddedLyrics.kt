@@ -221,3 +221,41 @@ object EmbeddedLyrics {
         val count = u32() ?: return null
         var plain: String? = null
         repeat(count.coerceAtMost(4_096)) {
+            val length = u32() ?: return plain
+            if (length < 0 || pos + length > end) return plain
+            val entry = String(bytes, pos, length, Charsets.UTF_8)
+            pos += length
+            val name = entry.substringBefore('=').uppercase()
+            val value = entry.substringAfter('=', "")
+            // This app's own field wins outright; the standard one is held in
+            // case it turns out to be the only one there.
+            if (name == WORD_LYRICS_FIELD && value.isNotBlank()) return value
+            if (name == "LYRICS" && plain == null && value.isNotBlank()) plain = value
+        }
+        return plain
+    }
+
+    // ---- Matroska / WebM ----------------------------------------------------
+
+    /**
+     * The `LYRICS` SimpleTag's string.
+     *
+     * Scanned for rather than walked down to: the tags a download writes are
+     * appended after everything else (see `WebmTagger`), so reaching them
+     * properly would mean parsing the whole Segment — every cluster of audio —
+     * to arrive at the last few hundred bytes. The name is matched inside a
+     * `TagName` element and the value read out of the `TagString` that follows,
+     * so this is looking at tag structure rather than guessing at loose bytes.
+     */
+    private fun matroska(bytes: ByteArray): String? {
+        var plain: String? = null
+        for (name in listOf(WORD_LYRICS_FIELD, "LYRICS")) {
+            val needle = name.toByteArray(Charsets.US_ASCII)
+            var from = 0
+            while (true) {
+                val at = bytes.indexOf(needle, from, bytes.size) ?: break
+                from = at + needle.size
+                // The name element's own header sits immediately in front of it:
+                // id(2) + a one-byte length for a name this short.
+                if (at < 3 || bytes[at - 3] != ID_TAGNAME[0] || bytes[at - 2] != ID_TAGNAME[1]) continue
+                if ((bytes[at - 1].toInt() and 0x7F) != needle.size) continue
