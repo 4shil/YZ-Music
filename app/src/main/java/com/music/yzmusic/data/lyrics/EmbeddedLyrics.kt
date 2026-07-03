@@ -126,3 +126,29 @@ object EmbeddedLyrics {
         while (pos + 8 <= bytes.size) {
             val declared = readU32(bytes, pos)
             var headerLen = 8
+            var size = declared
+            if (declared == 1L) {
+                if (pos + 16 > bytes.size) return null
+                size = readU64(bytes, pos + 8)
+                headerLen = 16
+            } else if (declared == 0L) {
+                size = (bytes.size - pos).toLong()
+            }
+            if (size < headerLen || size > Int.MAX_VALUE) return null
+            val end = (pos + size).toInt().coerceAtMost(bytes.size)
+            if (String(bytes, pos + 4, 4, Charsets.ISO_8859_1) == type) return pos until end
+            pos += size.toInt()
+        }
+        return null
+    }
+
+    /**
+     * The text of the lyrics item inside [within].
+     *
+     * [freeform] picks which of the two: this app's `----` item, whose name is
+     * carried in a `name` box beside the value, or the standard `©lyr`, whose
+     * four-byte type *is* the name. They are stored differently enough that one
+     * search cannot find both.
+     */
+    private fun ilstText(bytes: ByteArray, from: Int, endExclusive: Int, freeform: Boolean): String? {
+        val marker = if (freeform) WORD_LYRICS_FIELD.toByteArray(Charsets.UTF_8) else LYR_ATOM
