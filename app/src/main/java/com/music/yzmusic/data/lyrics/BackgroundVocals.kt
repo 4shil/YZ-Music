@@ -80,3 +80,10 @@ private fun List<LyricWord>.indexOfFirstStartingAt(offset: Int): Int? {
     }
     return null
 }
+
+/**
+ * Where the bracket that closes the line opens, or null if the line does not
+ * end in one.
+ *
+ * Walked back from the end counting depth, so a nested bracket doesn't split
+ * the line at the inner pair. A line that is *entirely* bracketed is already
