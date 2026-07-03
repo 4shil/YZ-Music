@@ -46,3 +46,6 @@ object BetterLyrics {
         }.getOrNull() ?: return@withContext null
 
         TtmlLyrics.parse(ttml).takeIf { it.isNotEmpty() }
+    }
+}
+
