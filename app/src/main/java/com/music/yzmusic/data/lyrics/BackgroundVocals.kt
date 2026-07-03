@@ -73,3 +73,10 @@ private fun LyricLine.splitTrailingBracket(): LyricLine {
 private fun List<LyricWord>.indexOfFirstStartingAt(offset: Int): Int? {
     var at = 0
     forEachIndexed { index, word ->
+        if (at == offset) return index
+        if (at > offset) return null
+        // The space that joins this word to the next one.
+        at += word.text.length + 1
+    }
+    return null
+}
