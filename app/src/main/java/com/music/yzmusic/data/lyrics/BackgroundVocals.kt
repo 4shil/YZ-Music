@@ -59,3 +59,17 @@ private fun LyricLine.splitTrailingBracket(): LyricLine {
         text = lead,
         words = words.take(split),
         background = LyricLine(
+            timeMs = backingWords.first().startMs,
+            text = backing,
+            words = backingWords,
+        ),
+    )
+}
+
+/**
+ * Index of the word starting at character [offset] in the joined text, or null
+ * if no word starts there.
+ */
+private fun List<LyricWord>.indexOfFirstStartingAt(offset: Int): Int? {
+    var at = 0
+    forEachIndexed { index, word ->
