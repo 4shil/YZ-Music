@@ -302,3 +302,23 @@ object EmbeddedLyrics {
         val buffer = ByteArray(1 shl 16)
         var total = 0
         while (total < max) {
+            val read = read(buffer, 0, minOf(buffer.size, max - total))
+            if (read <= 0) break
+            out.write(buffer, 0, read)
+            total += read
+        }
+        return out.toByteArray()
+    }
+
+    private fun ByteArray.startsWith(prefix: ByteArray): Boolean {
+        if (size < prefix.size) return false
+        return prefix.indices.all { this[it] == prefix[it] }
+    }
+
+    /** `ftyp` at offset 4 is what says "this is an MP4" — there is no leading magic. */
+    private fun ByteArray.isMp4(): Boolean =
+        size > 12 && this[4] == 'f'.code.toByte() && this[5] == 't'.code.toByte() &&
+            this[6] == 'y'.code.toByte() && this[7] == 'p'.code.toByte()
+
+    private fun ByteArray.indexOf(needle: ByteArray, from: Int, until: Int): Int? {
+        if (needle.isEmpty()) return null
