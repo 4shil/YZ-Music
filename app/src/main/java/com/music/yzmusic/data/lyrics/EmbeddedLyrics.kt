@@ -78,3 +78,51 @@ object EmbeddedLyrics {
      * trip is the only thing that proves a reader and a writer agree.
      */
     internal fun fromBytes(head: ByteArray): String? {
+        val found = when {
+            head.startsWith(FLAC_MAGIC) -> flac(head)
+            head.startsWith(MATROSKA_MAGIC) -> matroska(head)
+            head.isMp4() -> mp4(head)
+            else -> null
+        }
+        return found?.takeIf { it.isNotBlank() }
+    }
+
+    private fun open(context: Context, uri: Uri): InputStream? =
+        if (uri.scheme == "file") {
+            uri.path?.let { File(it).takeIf(File::exists)?.inputStream() }
+        } else {
+            context.contentResolver.openInputStream(uri)
+        }
+
+    // ---- MP4 / M4A ----------------------------------------------------------
+
+    /**
+     * The `©lyr` atom's text, or this app's freeform one where it is present.
+     *
+     * Both live under `moov/udta/meta/ilst`, and the search is scoped to `moov`
+     * rather than run over the file: a four-byte pattern turns up in audio data
+     * often enough that scanning the whole thing would eventually read a frame
+     * as a tag. Inside `moov` the same pattern is a tag or it is nothing.
+     */
+    private fun mp4(bytes: ByteArray): String? {
+        val moov = topLevelBox(bytes, "moov") ?: return null
+        // Exclusive, and deliberately so: the lyrics are the last item written
+        // into `ilst`, so their value ends exactly on `moov`'s own end — an
+        // inclusive bound here rejects the one atom this is looking for.
+        val end = moov.last + 1
+        return ilstText(bytes, moov.first, end, freeform = true)
+            ?: ilstText(bytes, moov.first, end, freeform = false)
+    }
+
+    /**
+     * The bounds of a top-level box, without walking into it.
+     *
+     * `moov` is not required to come before the audio — a file written without
+     * the faststart pass puts it after `mdat` — so this steps box to box rather
+     * than assuming a position.
+     */
+    private fun topLevelBox(bytes: ByteArray, type: String): IntRange? {
+        var pos = 0
+        while (pos + 8 <= bytes.size) {
+            val declared = readU32(bytes, pos)
+            var headerLen = 8
