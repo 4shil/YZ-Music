@@ -48,4 +48,3 @@ object BetterLyrics {
         TtmlLyrics.parse(ttml).takeIf { it.isNotEmpty() }
     }
 }
-
