@@ -193,3 +193,19 @@ object EmbeddedLyrics {
         var pos = FLAC_MAGIC.size
         while (pos + 4 <= bytes.size) {
             val flags = bytes[pos].toInt() and 0xFF
+            val length = ((bytes[pos + 1].toInt() and 0xFF) shl 16) or
+                ((bytes[pos + 2].toInt() and 0xFF) shl 8) or
+                (bytes[pos + 3].toInt() and 0xFF)
+            val start = pos + 4
+            if (start + length > bytes.size) return null
+            if (flags and 0x7F == FLAC_VORBIS_COMMENT) {
+                return vorbisComment(bytes, start, start + length)
+            }
+            if (flags and 0x80 != 0) return null
+            pos = start + length
+        }
+        return null
+    }
+
+    private fun vorbisComment(bytes: ByteArray, start: Int, end: Int): String? {
+        var pos = start
