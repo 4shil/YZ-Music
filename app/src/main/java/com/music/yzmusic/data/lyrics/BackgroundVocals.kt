@@ -87,3 +87,10 @@ private fun List<LyricWord>.indexOfFirstStartingAt(offset: Int): Int? {
  *
  * Walked back from the end counting depth, so a nested bracket doesn't split
  * the line at the inner pair. A line that is *entirely* bracketed is already
+ * its own backing line and has no lead to hang under, so it is left alone.
+ */
+private fun bracketStart(text: String): Int? {
+    if (!text.endsWith(')')) return null
+    var depth = 0
+    for (index in text.indices.reversed()) {
+        when (text[index]) {
