@@ -25,3 +25,6 @@ object BetterLyrics {
 
     suspend fun lyrics(
         title: String,
+        artist: String,
+        durationMs: Long,
+        album: String? = null,
