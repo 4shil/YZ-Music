@@ -52,3 +52,10 @@ private fun LyricLine.splitTrailingBracket(): LyricLine {
     // bracket opens mid-word ("wait(ing)"), in which case it isn't one and
     // there is nothing to hand the backing line for timing. Leave those be.
     val split = words.indexOfFirstStartingAt(open) ?: return this
+    if (split <= 0) return this
+
+    val backingWords = words.drop(split)
+    return copy(
+        text = lead,
+        words = words.take(split),
+        background = LyricLine(
