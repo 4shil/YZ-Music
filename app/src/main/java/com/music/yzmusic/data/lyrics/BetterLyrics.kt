@@ -37,3 +37,6 @@ object BetterLyrics {
                 if (seconds > 0) addQueryParameter("d", seconds.toString())
                 if (!album.isNullOrBlank()) addQueryParameter("al", album)
             }
+            .build()
+
+        val body = lyricsGet(url.toString()) ?: return@withContext null
