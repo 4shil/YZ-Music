@@ -25,3 +25,9 @@ object BetterLyrics {
 
     suspend fun lyrics(
         title: String,
+        artist: String,
+        durationMs: Long,
+        album: String? = null,
+    ): List<LyricLine>? = withContext(Dispatchers.IO) {
+        val url = BASE.toHttpUrl().newBuilder()
+            .addQueryParameter("s", title)
