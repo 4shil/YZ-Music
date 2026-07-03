@@ -94,3 +94,12 @@ private fun bracketStart(text: String): Int? {
     var depth = 0
     for (index in text.indices.reversed()) {
         when (text[index]) {
+            ')' -> depth++
+            '(' -> {
+                depth--
+                if (depth == 0) return index.takeIf { it > 0 }
+            }
+        }
+    }
+    return null
+}
