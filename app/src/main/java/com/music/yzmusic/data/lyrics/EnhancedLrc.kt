@@ -48,3 +48,17 @@ object EnhancedLrc {
                 val text = decodeEntities(match.groupValues[4]).trim()
                 if (text.isEmpty()) return@mapIndexedNotNull null
                 val wordStart = stamp(match)
+                val wordEnd = row.words.getOrNull(i + 1)?.let { stamp(it) } ?: lineEnd
+                LyricWord(wordStart, wordEnd.coerceAtLeast(wordStart), text)
+            }
+            if (words.isEmpty()) return@mapIndexedNotNull null
+            LyricLine(
+                timeMs = minOf(row.timeMs, words.first().startMs),
+                text = words.joinToString(" ") { it.text },
+                words = words,
+            )
+        }.withInstrumentalGaps()
+    }
+
+    private class Row(val timeMs: Long, val words: List<MatchResult>, val plain: String)
+
