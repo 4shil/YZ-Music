@@ -33,3 +33,18 @@ object LrcLib {
     suspend fun lyrics(title: String, artist: String, durationMs: Long): List<LyricLine>? =
         withContext(Dispatchers.IO) {
             val cleanTitle = title.clean()
+            val cleanArtist = artist.clean()
+            val seconds = (durationMs / 1000).toInt()
+
+            val exact = runCatching { exactMatch(cleanTitle, cleanArtist, seconds) }.getOrNull()
+            val synced = exact ?: runCatching { bestSearchHit(cleanTitle, cleanArtist, seconds) }
+                .getOrNull()
+            synced?.let(::parseLrc)?.takeIf { it.isNotEmpty() }
+        }
+
+    private fun exactMatch(title: String, artist: String, seconds: Int): String? {
+        val url = "$BASE/get".toHttpUrl().newBuilder()
+            .addQueryParameter("track_name", title)
+            .addQueryParameter("artist_name", artist)
+            .addQueryParameter("duration", seconds.toString())
+            .build()
