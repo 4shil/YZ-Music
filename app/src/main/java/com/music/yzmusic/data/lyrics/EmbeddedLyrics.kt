@@ -322,3 +322,35 @@ object EmbeddedLyrics {
 
     private fun ByteArray.indexOf(needle: ByteArray, from: Int, until: Int): Int? {
         if (needle.isEmpty()) return null
+        val last = minOf(until, size) - needle.size
+        var i = from.coerceAtLeast(0)
+        outer@ while (i <= last) {
+            for (j in needle.indices) {
+                if (this[i + j] != needle[j]) {
+                    i++
+                    continue@outer
+                }
+            }
+            return i
+        }
+        return null
+    }
+
+    private fun readU32(b: ByteArray, off: Int): Long =
+        ((b[off].toLong() and 0xFF) shl 24) or ((b[off + 1].toLong() and 0xFF) shl 16) or
+            ((b[off + 2].toLong() and 0xFF) shl 8) or (b[off + 3].toLong() and 0xFF)
+
+    private fun readU64(b: ByteArray, off: Int): Long {
+        var v = 0L
+        for (i in 0 until 8) v = (v shl 8) or (b[off + i].toLong() and 0xFF)
+        return v
+    }
+
+    private const val FLAC_VORBIS_COMMENT = 4
+    private val FLAC_MAGIC = "fLaC".toByteArray(Charsets.US_ASCII)
+    private val MATROSKA_MAGIC = byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte())
+    private val DATA_ATOM = "data".toByteArray(Charsets.ISO_8859_1)
+    private val LYR_ATOM = byteArrayOf(0xA9.toByte()) + "lyr".toByteArray(Charsets.ISO_8859_1)
+    private val ID_TAGNAME = byteArrayOf(0x45, 0xA3.toByte())
+    private val ID_TAGSTRING = byteArrayOf(0x44, 0x87.toByte())
+}
