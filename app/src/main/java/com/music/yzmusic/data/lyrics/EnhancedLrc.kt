@@ -18,3 +18,26 @@ object EnhancedLrc {
 
     /** Empty when [lrc] carries no word stamps — the caller can then fall back. */
     fun parse(lrc: String): List<LyricLine> {
+        val rows = lrc.lineSequence()
+            .mapNotNull { line -> LINE.matchEntire(line.trim()) }
+            .map { match ->
+                Row(
+                    timeMs = stamp(match.groupValues[1], match.groupValues[2], match.groupValues[3]),
+                    words = WORD.findAll(match.groupValues[4]).toList(),
+                    plain = match.groupValues[4].trim(),
+                )
+            }
+            .sortedBy { it.timeMs }
+            .toList()
+        // Nothing word-stamped in here: this is an ordinary LRC file and the
+        // caller is better served parsing it as one.
+        if (rows.none { it.words.isNotEmpty() }) return emptyList()
+
+        return rows.mapIndexedNotNull { index, row ->
+            if (row.words.isEmpty()) {
+                val text = decodeEntities(row.plain)
+                return@mapIndexedNotNull if (text.isEmpty()) null else LyricLine(row.timeMs, text)
+            }
+            // A word runs until the next one starts; the last runs until the
+            // next line does. Without a next line — the closing word of the
+            // song — give it a beat rather than zero, or its sweep never runs.
