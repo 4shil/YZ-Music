@@ -67,3 +67,28 @@ object EnhancedLrc {
 
     private fun stamp(minutes: String, seconds: String, fraction: String): Long {
         // Two digits mean centiseconds, three mean milliseconds.
+        val fractionMs = if (fraction.length == 3) fraction.toLong() else fraction.toLong() * 10
+        return minutes.toLong() * 60_000 + seconds.toLong() * 1_000 + fractionMs
+    }
+
+    /**
+     * SimpMusic serves its rich sync HTML-escaped, so an apostrophe arrives as
+     * `&#x27;` and would be sung literally. Metrolist shipped that bug; this
+     * is the fix.
+     */
+    internal fun decodeEntities(text: String): String {
+        if ('&' !in text) return text
+        return text
+            .replace(Regex("&#x([0-9a-fA-F]+);")) { it.groupValues[1].toInt(16).toChar().toString() }
+            .replace(Regex("&#(\\d+);")) { it.groupValues[1].toInt().toChar().toString() }
+            .replace("&apos;", "'")
+            .replace("&quot;", "\"")
+            .replace("&nbsp;", " ")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            // Last, so "&amp;#x27;" doesn't decode twice into an apostrophe.
+            .replace("&amp;", "&")
+    }
+
+    private const val TAIL_MS = 800L
+}
