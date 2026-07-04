@@ -45,3 +45,5 @@ object EnhancedLrc {
                 ?: (stamp(row.words.last()) + TAIL_MS)
 
             val words = row.words.mapIndexedNotNull { i, match ->
+                val text = decodeEntities(match.groupValues[4]).trim()
+                if (text.isEmpty()) return@mapIndexedNotNull null
