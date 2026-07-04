@@ -289,3 +289,16 @@ object EmbeddedLyrics {
             width++
         }
         if (offset + width > bytes.size) return null
+        var value = (first and mask.inv() and 0xFF).toLong()
+        for (i in 1 until width) value = (value shl 8) or (bytes[offset + i].toLong() and 0xFF)
+        return Vint(value, width)
+    }
+
+    // ---- Bytes --------------------------------------------------------------
+
+    /** Reads up to [max] bytes, which is all of a normal file and a prefix of a huge one. */
+    private fun InputStream.readAtMost(max: Int): ByteArray {
+        val out = ByteArrayOutputStream(minOf(max, 1 shl 16))
+        val buffer = ByteArray(1 shl 16)
+        var total = 0
+        while (total < max) {
