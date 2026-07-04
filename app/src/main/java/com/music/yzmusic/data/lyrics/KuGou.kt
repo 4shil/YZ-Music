@@ -125,3 +125,34 @@ object KuGou {
     internal fun String.stripCredits(): String {
         val lines = lineSequence().filter { STAMPED.matches(it) }.toList()
         if (lines.isEmpty()) return ""
+        val headLimit = min(30, lines.lastIndex)
+        val headCut = (headLimit downTo 0).firstOrNull { CREDIT.matches(lines[it]) }?.let { it + 1 } ?: 0
+        val body = lines.drop(headCut)
+        val tailLimit = min(30, body.lastIndex)
+        val tailCut = (0..tailLimit).firstOrNull { CREDIT.matches(body[body.lastIndex - it]) }?.let { it + 1 } ?: 0
+        return body.dropLast(tailCut).joinToString("\n")
+    }
+
+    private val STAMPED = Regex("""\[\d{2}:\d{2}\.\d{2,3}].*""")
+    private val CREDIT = Regex(""".+][^\[]+[:：].+""")
+
+    private class Keyword(val query: String)
+
+    @Serializable
+    private data class SearchSongResponse(val data: Data? = null) {
+        @Serializable
+        data class Data(val info: List<Info> = emptyList())
+
+        @Serializable
+        data class Info(val hash: String, val duration: Int = -1)
+    }
+
+    @Serializable
+    private data class SearchLyricsResponse(val candidates: List<Candidate> = emptyList())
+
+    @Serializable
+    private data class Candidate(val id: String, val accesskey: String)
+
+    @Serializable
+    private data class DownloadResponse(val content: String = "")
+}
