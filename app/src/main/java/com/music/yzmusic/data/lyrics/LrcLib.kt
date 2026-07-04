@@ -33,3 +33,7 @@ object LrcLib {
     suspend fun lyrics(title: String, artist: String, durationMs: Long): List<LyricLine>? =
         withContext(Dispatchers.IO) {
             val cleanTitle = title.clean()
+            val cleanArtist = artist.clean()
+            val seconds = (durationMs / 1000).toInt()
+
+            val exact = runCatching { exactMatch(cleanTitle, cleanArtist, seconds) }.getOrNull()
