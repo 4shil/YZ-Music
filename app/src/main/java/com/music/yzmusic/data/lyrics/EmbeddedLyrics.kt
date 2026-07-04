@@ -259,3 +259,22 @@ object EmbeddedLyrics {
                 // id(2) + a one-byte length for a name this short.
                 if (at < 3 || bytes[at - 3] != ID_TAGNAME[0] || bytes[at - 2] != ID_TAGNAME[1]) continue
                 if ((bytes[at - 1].toInt() and 0x7F) != needle.size) continue
+                val string = bytes.indexOf(ID_TAGSTRING, from, bytes.size) ?: continue
+                val size = readVint(bytes, string + 2) ?: continue
+                val valueAt = string + 2 + size.width
+                if (size.value <= 0 || valueAt + size.value > bytes.size) continue
+                val value = String(bytes, valueAt, size.value.toInt(), Charsets.UTF_8)
+                if (value.isBlank()) continue
+                if (name == WORD_LYRICS_FIELD) return value
+                if (plain == null) plain = value
+            }
+        }
+        return plain
+    }
+
+    private class Vint(val value: Long, val width: Int)
+
+    /**
+     * An EBML variable-length integer: the highest set bit of the first byte
+     * gives the width, and the bits after it are the value.
+     */
