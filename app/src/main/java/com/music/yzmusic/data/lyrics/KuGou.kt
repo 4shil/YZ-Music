@@ -63,3 +63,21 @@ object KuGou {
             .map { it.hash }
     }
 
+    private fun searchLyrics(hash: String? = null, keyword: Keyword? = null, seconds: Int = -1): List<Candidate>? {
+        val builder = "https://lyrics.kugou.com/search".toHttpUrl().newBuilder()
+            .addQueryParameter("ver", "1")
+            .addQueryParameter("man", "yes")
+            .addQueryParameter("client", "pc")
+        when {
+            hash != null -> builder.addQueryParameter("hash", hash)
+            keyword != null -> {
+                builder.addQueryParameter("keyword", keyword.query)
+                if (seconds > 0) builder.addQueryParameter("duration", (seconds * 1000).toString())
+            }
+            else -> return null
+        }
+        val body = lyricsGet(builder.build().toString()) ?: return null
+        val response = runCatching { lyricsJson.decodeFromString<SearchLyricsResponse>(body) }.getOrNull()
+        return response?.candidates
+    }
+
