@@ -41,3 +41,6 @@ object EnhancedLrc {
             // A word runs until the next one starts; the last runs until the
             // next line does. Without a next line — the closing word of the
             // song — give it a beat rather than zero, or its sweep never runs.
+            val lineEnd = rows.getOrNull(index + 1)?.timeMs
+                ?: (stamp(row.words.last()) + TAIL_MS)
+
