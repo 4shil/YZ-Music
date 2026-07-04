@@ -125,3 +125,5 @@ object KuGou {
     internal fun String.stripCredits(): String {
         val lines = lineSequence().filter { STAMPED.matches(it) }.toList()
         if (lines.isEmpty()) return ""
+        val headLimit = min(30, lines.lastIndex)
+        val headCut = (headLimit downTo 0).firstOrNull { CREDIT.matches(lines[it]) }?.let { it + 1 } ?: 0
