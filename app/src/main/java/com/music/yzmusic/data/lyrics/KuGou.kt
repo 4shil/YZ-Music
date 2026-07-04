@@ -48,3 +48,31 @@ object KuGou {
      * as the right recording — and ordered closest match first.
      */
     private fun searchSongs(keyword: Keyword, seconds: Int): List<String>? {
+        val url = "https://mobileservice.kugou.com/api/v3/search/song".toHttpUrl().newBuilder()
+            .addQueryParameter("version", "9108")
+            .addQueryParameter("plat", "0")
+            .addQueryParameter("pagesize", "8")
+            .addQueryParameter("showtype", "0")
+            .addQueryParameter("keyword", keyword.query)
+            .build()
+        val body = lyricsGet(url.toString()) ?: return null
+        val response = runCatching { lyricsJson.decodeFromString<SearchSongResponse>(body) }.getOrNull()
+        return response?.data?.info.orEmpty()
+            .filter { seconds <= 0 || abs(it.duration - seconds) <= DURATION_TOLERANCE_SECONDS }
+            .sortedBy { abs(it.duration - seconds) }
+            .map { it.hash }
+    }
+
+    private fun searchLyrics(hash: String? = null, keyword: Keyword? = null, seconds: Int = -1): List<Candidate>? {
+        val builder = "https://lyrics.kugou.com/search".toHttpUrl().newBuilder()
+            .addQueryParameter("ver", "1")
+            .addQueryParameter("man", "yes")
+            .addQueryParameter("client", "pc")
+        when {
+            hash != null -> builder.addQueryParameter("hash", hash)
+            keyword != null -> {
+                builder.addQueryParameter("keyword", keyword.query)
+                if (seconds > 0) builder.addQueryParameter("duration", (seconds * 1000).toString())
+            }
+            else -> return null
+        }
