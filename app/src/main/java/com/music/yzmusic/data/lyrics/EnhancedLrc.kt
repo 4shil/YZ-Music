@@ -44,3 +44,4 @@ object EnhancedLrc {
             val lineEnd = rows.getOrNull(index + 1)?.timeMs
                 ?: (stamp(row.words.last()) + TAIL_MS)
 
+            val words = row.words.mapIndexedNotNull { i, match ->
