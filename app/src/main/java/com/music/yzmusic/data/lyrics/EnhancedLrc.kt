@@ -17,3 +17,4 @@ object EnhancedLrc {
     private val WORD = Regex("""<(\d{1,3}):(\d{2})[.:](\d{2,3})>([^<]*)""")
 
     /** Empty when [lrc] carries no word stamps — the caller can then fall back. */
+    fun parse(lrc: String): List<LyricLine> {
