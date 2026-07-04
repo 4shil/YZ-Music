@@ -48,3 +48,17 @@ object LrcLib {
             .addQueryParameter("artist_name", artist)
             .addQueryParameter("duration", seconds.toString())
             .build()
+        val body = get(url.toString()) ?: return null
+        return (json.parseToJsonElement(body) as? JsonObject)
+            ?.get("syncedLyrics")?.jsonPrimitive?.contentOrNull
+    }
+
+    /**
+     * Fuzzy fallback. Prefers whichever hit is closest in length to what we're
+     * actually playing — same song, different edit, would drift otherwise.
+     */
+    private fun bestSearchHit(title: String, artist: String, seconds: Int): String? {
+        val url = "$BASE/search".toHttpUrl().newBuilder()
+            .addQueryParameter("track_name", title)
+            .addQueryParameter("artist_name", artist)
+            .build()
