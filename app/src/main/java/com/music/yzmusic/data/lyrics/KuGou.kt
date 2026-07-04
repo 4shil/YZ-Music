@@ -37,3 +37,14 @@ object KuGou {
         } ?: searchLyrics(keyword = keyword, seconds = seconds)?.firstOrNull()
             ?: return@withContext null
 
+        val lrc = download(candidate.id, candidate.accesskey) ?: return@withContext null
+        LrcLib.parseLrc(lrc).takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Song hashes worth trying, restricted to cuts within
+     * [DURATION_TOLERANCE_SECONDS] of the track being played — otherwise the
+     * first result for a common title is as likely to be a cover or a remix
+     * as the right recording — and ordered closest match first.
+     */
+    private fun searchSongs(keyword: Keyword, seconds: Int): List<String>? {
