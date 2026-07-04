@@ -62,3 +62,6 @@ object EnhancedLrc {
 
     private class Row(val timeMs: Long, val words: List<MatchResult>, val plain: String)
 
+    private fun stamp(match: MatchResult): Long =
+        stamp(match.groupValues[1], match.groupValues[2], match.groupValues[3])
+
