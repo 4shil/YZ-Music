@@ -30,3 +30,10 @@ object KuGou {
         album: String? = null,
     ): List<LyricLine>? = withContext(Dispatchers.IO) {
         val keyword = keyword(title, artist, album)
+        val seconds = (durationMs / 1000).toInt()
+
+        val candidate = searchSongs(keyword, seconds)?.firstNotNullOfOrNull { hash ->
+            searchLyrics(hash = hash)?.firstOrNull()
+        } ?: searchLyrics(keyword = keyword, seconds = seconds)?.firstOrNull()
+            ?: return@withContext null
+
