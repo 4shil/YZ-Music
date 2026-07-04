@@ -278,3 +278,14 @@ object EmbeddedLyrics {
      * An EBML variable-length integer: the highest set bit of the first byte
      * gives the width, and the bits after it are the value.
      */
+    private fun readVint(bytes: ByteArray, offset: Int): Vint? {
+        if (offset >= bytes.size) return null
+        val first = bytes[offset].toInt() and 0xFF
+        if (first == 0) return null
+        var width = 1
+        var mask = 0x80
+        while (first and mask == 0) {
+            mask = mask shr 1
+            width++
+        }
+        if (offset + width > bytes.size) return null
