@@ -99,3 +99,29 @@ object KuGou {
         return decoded.stripCredits()
     }
 
+    private fun keyword(title: String, artist: String, album: String?) = Keyword(
+        buildString {
+            append(title.stripParenthetical())
+            append(" - ")
+            append(artist.stripParenthetical())
+            if (!album.isNullOrBlank()) {
+                append(' ')
+                append(album)
+            }
+        },
+    )
+
+    private fun String.stripParenthetical(): String =
+        replace(Regex("""[(（].*?[)）]"""), "").trim().ifBlank { this }
+
+    /**
+     * KuGou's lyric files open and close with uncredited lines — songwriter,
+     * composer, arranger — that carry a real timestamp and would otherwise be
+     * sung as the first and last lines of the song. Cut the same way the
+     * source client does: from either end, up to the first/last line matching
+     * "label: value", and only within the first and last 30 lines so a legit
+     * lyric that happens to contain a colon deep in the song is left alone.
+     */
+    internal fun String.stripCredits(): String {
+        val lines = lineSequence().filter { STAMPED.matches(it) }.toList()
+        if (lines.isEmpty()) return ""
