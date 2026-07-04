@@ -81,3 +81,21 @@ object KuGou {
         return response?.candidates
     }
 
+    private fun download(id: String, accessKey: String): String? {
+        val url = "https://lyrics.kugou.com/download".toHttpUrl().newBuilder()
+            .addQueryParameter("fmt", "lrc")
+            .addQueryParameter("charset", "utf8")
+            .addQueryParameter("client", "pc")
+            .addQueryParameter("ver", "1")
+            .addQueryParameter("id", id)
+            .addQueryParameter("accesskey", accessKey)
+            .build()
+        val body = lyricsGet(url.toString()) ?: return null
+        val response = runCatching { lyricsJson.decodeFromString<DownloadResponse>(body) }.getOrNull()
+            ?: return null
+        val decoded = runCatching {
+            Base64.getDecoder().decode(response.content).toString(Charsets.UTF_8)
+        }.getOrNull() ?: return null
+        return decoded.stripCredits()
+    }
+
