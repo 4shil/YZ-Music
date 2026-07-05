@@ -110,3 +110,32 @@ private fun LyricLine.enhancedBody(): String {
  * line's text is made of, and emitting only the background's runs would write a
  * line that is missing everything before the bracket.
  */
+private fun LyricLine.timedRuns(): List<LyricWord> {
+    if (words.isEmpty()) return emptyList()
+    val answer = background?.let { bg ->
+        bg.words.ifEmpty {
+            if (bg.text.isBlank()) emptyList() else listOf(LyricWord(bg.timeMs, bg.endMs, bg.text))
+        }
+    }.orEmpty()
+    return words + answer
+}
+
+/**
+ * `[mm:ss.xx]`, in centiseconds — the two-digit fraction, which is the form
+ * with the widest support. [LrcLib.parseLrc] reads three digits too, but
+ * writing them is a millisecond of precision bought at the cost of the readers
+ * that only accept two.
+ *
+ * Assembled with [padStart] rather than `String.format`, which is not a style
+ * preference: `%02d` formats through the default locale, and under a locale
+ * with its own numerals — Arabic, Bengali, several Indic ones — that emits
+ * digits no LRC parser on earth matches, including this package's own. The
+ * output has to be ASCII wherever the device is.
+ *
+ * Minutes are not wrapped at 99. A stamp that long is a DJ set rather than a
+ * song, but truncating it would silently move the line to the wrong place,
+ * where overflowing to three digits at worst loses one reader the timing.
+ */
+private fun stamp(timeMs: Long): String = "[" + clock(timeMs) + "]"
+
+/** The same clock inside angle brackets — one word's start, in A2. */
