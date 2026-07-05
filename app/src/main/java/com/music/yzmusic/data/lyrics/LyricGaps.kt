@@ -28,3 +28,6 @@ internal fun List<LyricLine>.withInstrumentalGaps(): List<LyricLine> {
         // A marker sharing its line's stamp could never be reached: the cursor
         // takes the last line whose stamp has passed, so the note would sit on
         // top of the line it belongs to and the words would never light up.
+        if (silence >= MIN_GAP_MS && line.endMs > line.timeMs) out += LyricLine(line.endMs, "")
+    }
+    return out
