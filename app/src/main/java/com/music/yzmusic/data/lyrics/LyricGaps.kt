@@ -19,3 +19,9 @@ internal fun List<LyricLine>.withInstrumentalGaps(): List<LyricLine> {
     if (isEmpty()) return this
     val out = ArrayList<LyricLine>(size + 4)
     // Nothing stands for the intro, so give the run-up its own break.
+    if (first().timeMs >= MIN_GAP_MS) out += LyricLine(0L, "")
+    forEachIndexed { index, line ->
+        out += line
+        val next = getOrNull(index + 1) ?: return@forEachIndexed
+        if (!line.hasKnownEnd) return@forEachIndexed
+        val silence = next.timeMs - line.endMs
