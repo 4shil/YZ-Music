@@ -37,3 +37,14 @@ object LrcLib {
             val seconds = (durationMs / 1000).toInt()
 
             val exact = runCatching { exactMatch(cleanTitle, cleanArtist, seconds) }.getOrNull()
+            val synced = exact ?: runCatching { bestSearchHit(cleanTitle, cleanArtist, seconds) }
+                .getOrNull()
+            synced?.let(::parseLrc)?.takeIf { it.isNotEmpty() }
+        }
+
+    private fun exactMatch(title: String, artist: String, seconds: Int): String? {
+        val url = "$BASE/get".toHttpUrl().newBuilder()
+            .addQueryParameter("track_name", title)
+            .addQueryParameter("artist_name", artist)
+            .addQueryParameter("duration", seconds.toString())
+            .build()
