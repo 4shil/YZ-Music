@@ -86,3 +86,27 @@ internal fun List<LyricLine>.toEnhancedLrc(): String {
 private fun LyricLine.enhancedBody(): String {
     val runs = timedRuns()
     if (runs.isEmpty()) return flattened()
+    val out = StringBuilder()
+    // Clamped to run forwards. A background vocal legitimately starts partway
+    // through the lead it answers, so concatenating the two can hand us a stamp
+    // earlier than the one before it — and a reader taking each run's end from
+    // the next one's start would read that as a negative-length word.
+    var previous = timeMs
+    runs.forEachIndexed { index, word ->
+        val start = maxOf(word.startMs, previous)
+        out.append(wordStamp(start)).append(word.text)
+        if (index != runs.lastIndex) out.append(' ')
+        previous = start
+    }
+    out.append(wordStamp(maxOf(runs.maxOf { it.endMs }, previous)))
+    return out.toString()
+}
+
+/**
+ * The line's words, the answering vocal's after them — or nothing, when the
+ * lead has no timings to anchor them to.
+ *
+ * The lead is required rather than merely preferred: its words are what the
+ * line's text is made of, and emitting only the background's runs would write a
+ * line that is missing everything before the bracket.
+ */
