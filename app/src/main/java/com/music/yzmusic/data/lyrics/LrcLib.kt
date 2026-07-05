@@ -89,3 +89,5 @@ object LrcLib {
      * with nothing after it closes the final line, so it always survives.
      */
     internal fun parseLrc(lrc: String): List<LyricLine> {
+        val all = lrc.lineSequence().mapNotNull { line ->
+            val match = STAMP.find(line) ?: return@mapNotNull null
