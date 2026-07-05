@@ -141,3 +141,8 @@ private fun stamp(timeMs: Long): String = "[" + clock(timeMs) + "]"
 /** The same clock inside angle brackets — one word's start, in A2. */
 private fun wordStamp(timeMs: Long): String = "<" + clock(timeMs) + ">"
 
+private fun clock(timeMs: Long): String {
+    // A negative stamp is not something to sort or write; nothing produces one,
+    // and clamping is cheaper than a parser somewhere deciding what "[-1:.." is.
+    val total = timeMs.coerceAtLeast(0L)
+    val minutes = (total / 60_000).toString().padStart(2, '0')
