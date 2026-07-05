@@ -31,3 +31,5 @@ internal fun List<LyricLine>.withInstrumentalGaps(): List<LyricLine> {
         if (silence >= MIN_GAP_MS && line.endMs > line.timeMs) out += LyricLine(line.endMs, "")
     }
     return out
+}
+
