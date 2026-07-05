@@ -67,3 +67,20 @@ private fun LyricLine.flattened(): String =
  */
 internal const val WORD_LYRICS_FIELD = "YZMUSIC_LYRICS"
 
+internal fun List<LyricLine>.toEnhancedLrc(): String {
+    if (isEmpty()) return ""
+    if (none { it.isWordSynced || it.background?.isWordSynced == true }) return ""
+    return sortedBy { it.timeMs }.joinToString("\n") { line -> stamp(line.timeMs) + line.enhancedBody() }
+}
+
+/**
+ * One line as stamped word runs, or its plain text when it has none.
+ *
+ * The answering vocal rides along on the end exactly as it does in [flattened],
+ * for the same reason — one line of the song is one line of the file — but here
+ * it keeps its own stamps, so the backing voice is still timed rather than
+ * pinned to the lead's last word. A background with text but no timings of its
+ * own becomes a single run at its own stamp, which is the most that can be said
+ * about it truthfully.
+ */
+private fun LyricLine.enhancedBody(): String {
