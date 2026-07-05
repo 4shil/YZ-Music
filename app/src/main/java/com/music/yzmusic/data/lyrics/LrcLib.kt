@@ -62,3 +62,14 @@ object LrcLib {
             .addQueryParameter("track_name", title)
             .addQueryParameter("artist_name", artist)
             .build()
+        val body = get(url.toString()) ?: return null
+        val hits = json.parseToJsonElement(body) as? JsonArray ?: return null
+        return hits.mapNotNull { it as? JsonObject }
+            .filter { it["syncedLyrics"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true }
+            .minByOrNull {
+                val d = it["duration"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                abs(d - seconds)
+            }
+            ?.get("syncedLyrics")?.jsonPrimitive?.contentOrNull
+    }
+
