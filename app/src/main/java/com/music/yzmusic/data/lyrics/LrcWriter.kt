@@ -41,3 +41,29 @@ internal fun List<LyricLine>.toLrc(): String {
  * file where the song has one, so it goes back where every provider that
  * doesn't mark it structurally had it: on the end of the lead.
  */
+private fun LyricLine.flattened(): String =
+    background?.let { (text + " " + it.text).trim() } ?: text
+
+/**
+ * The same lines as [toLrc], with the word timings kept — the "enhanced" A2
+ * extension, `<mm:ss.xx>` runs inside each line.
+ *
+ * This does **not** replace [toLrc], and the reason is the one that function
+ * documents: a reader without A2 does not ignore a word stamp, it shows it, so
+ * a file carrying only this reads as angle-bracket noise everywhere else. The
+ * two are written to different fields — plain LRC to the container's own lyrics
+ * atom, where every other player looks, and this to a YZ Music-specific one
+ * they don't read (see `Mp4Tagger`, `FlacTagger`, `WebmTagger`). Other players
+ * are unaffected; this app gets the timings back off the file instead of the
+ * network, which is what lets a downloaded song light up word by word offline.
+ *
+ * Empty when nothing here is word-synced: the plain field already says
+ * everything a line-synced source had, and a second copy of it would be bytes
+ * spent to learn nothing.
+ *
+ * Each line closes with a bare `<stamp>` at its end, which is what carries
+ * [LyricLine.endMs] across — without it the last word of every line would come
+ * back with no end, and the player reads a silence out of that.
+ */
+internal const val WORD_LYRICS_FIELD = "YZMUSIC_LYRICS"
+
