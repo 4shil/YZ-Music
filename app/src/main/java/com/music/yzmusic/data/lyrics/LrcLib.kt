@@ -131,3 +131,25 @@ object LrcLib {
      * YouTube Music titles are noisy — "(From "Raees")", "| Official Video",
      * "(Lyrical)" — and LRCLIB matches on the plain song name.
      */
+    private fun String.clean(): String = this
+        .replace(NOISE, " ")
+        .substringBefore(" | ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .ifBlank { this }
+
+    /**
+     * The `<mm:ss.xx>` runs of an "enhanced" A2 line, as words.
+     *
+     * Each run ends where the next one starts, which is why a line written by
+     * [toEnhancedLrc] closes with a bare stamp: that last one names no word, it
+     * just states where the previous one stopped. A run with no text is
+     * therefore a terminator rather than a word, here and in the files other
+     * A2 writers produce.
+     *
+     * Empty for a plain line, which is what keeps [LyricLine.isWordSynced]
+     * honest — a line-synced source stays line-synced through this.
+     */
+    private fun parseWordRuns(body: String): List<LyricWord> {
+        val marks = WORD_STAMP.findAll(body).toList()
+        if (marks.isEmpty()) return emptyList()
