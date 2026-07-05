@@ -91,3 +91,43 @@ object LrcLib {
     internal fun parseLrc(lrc: String): List<LyricLine> {
         val all = lrc.lineSequence().mapNotNull { line ->
             val match = STAMP.find(line) ?: return@mapNotNull null
+            val (minutes, seconds, fraction) = match.destructured
+            // Two digits mean centiseconds, three mean milliseconds.
+            val fractionMs = when (fraction.length) {
+                2 -> fraction.toLong() * 10
+                3 -> fraction.toLong()
+                else -> 0L
+            }
+            val body = line.substring(match.range.last + 1)
+            LyricLine(
+                timeMs = minutes.toLong() * 60_000 + seconds.toLong() * 1_000 + fractionMs,
+                // Stripped rather than rebuilt from the runs below: the spacing
+                // and punctuation between two words belong to the line, and
+                // re-joining the words with single spaces would quietly rewrite
+                // a line that never had them.
+                text = body.replace(WORD_STAMP, "").trim(),
+                words = parseWordRuns(body),
+            )
+        }.sortedBy { it.timeMs }.toList()
+
+        val kept = all.filterIndexed { index, line ->
+            if (!line.isGap) return@filterIndexed true
+            // A trailing stamp closes off the last line — that's the outro.
+            val next = all.getOrNull(index + 1) ?: return@filterIndexed true
+            next.timeMs - line.timeMs >= MIN_GAP_MS
+        }
+
+        // Nothing stands for the intro — LRC files start at the first sung
+        // word — so give the run-up its own break when it's long enough.
+        val first = kept.firstOrNull() ?: return kept
+        return if (!first.isGap && first.timeMs >= MIN_GAP_MS) {
+            listOf(LyricLine(0L, "")) + kept
+        } else {
+            kept
+        }
+    }
+
+    /**
+     * YouTube Music titles are noisy — "(From "Raees")", "| Official Video",
+     * "(Lyrical)" — and LRCLIB matches on the plain song name.
+     */
