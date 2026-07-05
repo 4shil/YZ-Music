@@ -139,3 +139,5 @@ private fun LyricLine.timedRuns(): List<LyricWord> {
 private fun stamp(timeMs: Long): String = "[" + clock(timeMs) + "]"
 
 /** The same clock inside angle brackets — one word's start, in A2. */
+private fun wordStamp(timeMs: Long): String = "<" + clock(timeMs) + ">"
+
