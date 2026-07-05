@@ -84,3 +84,5 @@ internal fun List<LyricLine>.toEnhancedLrc(): String {
  * about it truthfully.
  */
 private fun LyricLine.enhancedBody(): String {
+    val runs = timedRuns()
+    if (runs.isEmpty()) return flattened()
