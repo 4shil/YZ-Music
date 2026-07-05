@@ -13,3 +13,6 @@ internal const val MIN_GAP_MS = 4_000L
  * was due, which is the whole advantage over [LrcLib.parseLrc]'s stamp-to-stamp
  * guess. Without it there is nothing to measure silence against: the distance
  * to the next stamp is the line's own slot, and treating that as a break puts a
+ * note after every single line of a line-synced source.
+ */
+internal fun List<LyricLine>.withInstrumentalGaps(): List<LyricLine> {
