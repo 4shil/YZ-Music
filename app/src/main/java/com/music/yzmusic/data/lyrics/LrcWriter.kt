@@ -146,3 +146,7 @@ private fun clock(timeMs: Long): String {
     // and clamping is cheaper than a parser somewhere deciding what "[-1:.." is.
     val total = timeMs.coerceAtLeast(0L)
     val minutes = (total / 60_000).toString().padStart(2, '0')
+    val seconds = (total % 60_000 / 1_000).toString().padStart(2, '0')
+    val centiseconds = (total % 1_000 / 10).toString().padStart(2, '0')
+    return "$minutes:$seconds.$centiseconds"
+}
