@@ -16,3 +16,6 @@ internal const val MIN_GAP_MS = 4_000L
  * note after every single line of a line-synced source.
  */
 internal fun List<LyricLine>.withInstrumentalGaps(): List<LyricLine> {
+    if (isEmpty()) return this
+    val out = ArrayList<LyricLine>(size + 4)
+    // Nothing stands for the intro, so give the run-up its own break.
