@@ -110,3 +110,5 @@ private fun LyricLine.enhancedBody(): String {
  * line's text is made of, and emitting only the background's runs would write a
  * line that is missing everything before the bracket.
  */
+private fun LyricLine.timedRuns(): List<LyricWord> {
+    if (words.isEmpty()) return emptyList()
