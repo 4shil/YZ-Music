@@ -62,3 +62,30 @@ object LrcLib {
             .addQueryParameter("track_name", title)
             .addQueryParameter("artist_name", artist)
             .build()
+        val body = get(url.toString()) ?: return null
+        val hits = json.parseToJsonElement(body) as? JsonArray ?: return null
+        return hits.mapNotNull { it as? JsonObject }
+            .filter { it["syncedLyrics"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true }
+            .minByOrNull {
+                val d = it["duration"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                abs(d - seconds)
+            }
+            ?.get("syncedLyrics")?.jsonPrimitive?.contentOrNull
+    }
+
+    private fun get(url: String): String? {
+        val request = Request.Builder().url(url).header("User-Agent", AGENT).build()
+        Http.client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return null
+            return response.body?.string()
+        }
+    }
+
+    /**
+     * `[mm:ss.xx] words`. Metadata tags carry no timestamp and fall out on
+     * their own. A stamp with no words marks an instrumental break; those are
+     * kept, but only where the silence is long enough to be worth showing —
+     * otherwise the line would blink out between two sung phrases. A stamp
+     * with nothing after it closes the final line, so it always survives.
+     */
+    internal fun parseLrc(lrc: String): List<LyricLine> {
