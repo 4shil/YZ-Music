@@ -32,4 +32,3 @@ internal fun List<LyricLine>.withInstrumentalGaps(): List<LyricLine> {
     }
     return out
 }
-
