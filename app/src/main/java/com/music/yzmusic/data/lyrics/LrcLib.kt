@@ -110,3 +110,24 @@ object LrcLib {
             )
         }.sortedBy { it.timeMs }.toList()
 
+        val kept = all.filterIndexed { index, line ->
+            if (!line.isGap) return@filterIndexed true
+            // A trailing stamp closes off the last line — that's the outro.
+            val next = all.getOrNull(index + 1) ?: return@filterIndexed true
+            next.timeMs - line.timeMs >= MIN_GAP_MS
+        }
+
+        // Nothing stands for the intro — LRC files start at the first sung
+        // word — so give the run-up its own break when it's long enough.
+        val first = kept.firstOrNull() ?: return kept
+        return if (!first.isGap && first.timeMs >= MIN_GAP_MS) {
+            listOf(LyricLine(0L, "")) + kept
+        } else {
+            kept
+        }
+    }
+
+    /**
+     * YouTube Music titles are noisy — "(From "Raees")", "| Official Video",
+     * "(Lyrical)" — and LRCLIB matches on the plain song name.
+     */
