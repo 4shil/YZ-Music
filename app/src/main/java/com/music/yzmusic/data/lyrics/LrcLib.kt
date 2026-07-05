@@ -153,3 +153,35 @@ object LrcLib {
     private fun parseWordRuns(body: String): List<LyricWord> {
         val marks = WORD_STAMP.findAll(body).toList()
         if (marks.isEmpty()) return emptyList()
+        val runs = marks.mapIndexed { index, mark ->
+            val until = marks.getOrNull(index + 1)?.range?.first ?: body.length
+            msOf(mark) to body.substring(mark.range.last + 1, until)
+        }
+        return runs.mapIndexedNotNull { index, (startMs, text) ->
+            if (text.isBlank()) return@mapIndexedNotNull null
+            // The next run's stamp is this word's end — including when that run
+            // is the closing terminator, which is the only thing that gives the
+            // last word of a line an end at all.
+            val endMs = runs.getOrNull(index + 1)?.first ?: startMs
+            LyricWord(startMs = startMs, endMs = maxOf(endMs, startMs), text = text.trim())
+        }
+    }
+
+    private fun msOf(mark: MatchResult): Long {
+        val (minutes, seconds, fraction) = mark.destructured
+        val fractionMs = when (fraction.length) {
+            2 -> fraction.toLong() * 10
+            3 -> fraction.toLong()
+            else -> 0L
+        }
+        return minutes.toLong() * 60_000 + seconds.toLong() * 1_000 + fractionMs
+    }
+
+    private val STAMP = Regex("""\[(\d{1,2}):(\d{2})[.:](\d{2,3})]""")
+    private val WORD_STAMP = Regex("""<(\d{1,3}):(\d{2})[.:](\d{2,3})>""")
+    private val NOISE = Regex(
+        """\((?:from|feat\.?|official|lyrical|video|audio|remix)[^)]*\)|\[[^]]*]|""" +
+            """\b(?:official (?:video|audio|music video)|lyrical|full song|4k video)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+}
