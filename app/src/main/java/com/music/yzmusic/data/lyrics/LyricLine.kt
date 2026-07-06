@@ -77,3 +77,14 @@ data class LyricLine(
      * words is credited to the gap between them: it fills as the singer moves
      * on rather than jumping ahead of the next word's first letter.
      */
+    fun revealedChars(positionMs: Long): Float {
+        if (words.isEmpty()) return if (positionMs >= timeMs) text.length.toFloat() else 0f
+        var offset = 0
+        words.forEachIndexed { index, word ->
+            // Where this word sits in [text]. Built by walking rather than
+            // searching, so a word repeated in the line still lines up.
+            val start = text.indexOf(word.text, offset).takeIf { it >= 0 } ?: offset
+            val end = start + word.text.length
+            if (positionMs < word.startMs) return start.toFloat()
+            if (positionMs < word.endMs) {
+                val span = (word.endMs - word.startMs).coerceAtLeast(1L)
