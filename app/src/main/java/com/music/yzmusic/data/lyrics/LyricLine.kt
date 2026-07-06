@@ -125,3 +125,27 @@ data class LyricLine(
         if (positionMs < word.startMs) return 0f
 
         val held = (word.endMs - word.startMs).coerceAtLeast(1L)
+        val through = ((positionMs - word.startMs).toFloat() / held).coerceIn(0f, 1f)
+        val envelope = when {
+            through < GLOW_ATTACK -> through / GLOW_ATTACK
+            through > 1f - GLOW_RELEASE -> (1f - through) / GLOW_RELEASE
+            else -> 1f
+        }
+        val pace = ((held - GLOW_FAST_MS).toFloat() / (GLOW_SLOW_MS - GLOW_FAST_MS))
+            .coerceIn(0f, 1f)
+        return (GLOW_FLOOR + (1f - GLOW_FLOOR) * pace) * envelope.coerceIn(0f, 1f)
+    }
+}
+
+/** A word this short is patter; it gets [GLOW_FLOOR] and no more. */
+private const val GLOW_FAST_MS = 130L
+
+/** A word held this long gets the full bloom. */
+private const val GLOW_SLOW_MS = 800L
+
+/** What the quickest words still get, so patter doesn't go completely flat. */
+private const val GLOW_FLOOR = 0.22f
+
+/** Share of a word's span spent coming up, and going back down. */
+private const val GLOW_ATTACK = 0.18f
+private const val GLOW_RELEASE = 0.38f
