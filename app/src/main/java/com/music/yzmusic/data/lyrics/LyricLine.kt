@@ -96,3 +96,28 @@ data class LyricLine(
             // on the word's last letter.
             val next = words.getOrNull(index + 1)
             if (next != null && positionMs < next.startMs) {
+                val gapStart = text.indexOf(next.text, end).takeIf { it >= 0 } ?: end
+                val pause = (next.startMs - word.endMs).coerceAtLeast(1L)
+                val through = (positionMs - word.endMs).toFloat() / pause
+                return end + through * (gapStart - end)
+            }
+            offset = end
+        }
+        return text.length.toFloat()
+    }
+
+    /**
+     * How much bloom the word being sung has earned, 0..1.
+     *
+     * Two things decide it. How long the word is held sets the ceiling — a
+     * note carried for a second swells, a word rattled off in a tenth of one
+     * barely registers, which is the difference between a glow that belongs to
+     * the singing and a lamp dragged along under the text. Then an envelope
+     * across the word's own span rises as it lands and eases off as it goes,
+     * so each word blooms and lets go rather than the light being on
+     * throughout and stepping between brightnesses at every boundary.
+     *
+     * Zero between words and after the last one, which is what keeps the
+     * pauses dark and costs nothing to draw.
+     */
+    fun glowIntensity(positionMs: Long): Float {
