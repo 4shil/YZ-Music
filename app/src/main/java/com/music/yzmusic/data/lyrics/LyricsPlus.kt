@@ -76,3 +76,19 @@ object LyricsPlus {
         durationMs: Long,
         album: String?,
     ): List<LyricLine>? = withContext(Dispatchers.IO) {
+        val url = "$host/v2/lyrics/get".toHttpUrl().newBuilder()
+            .addQueryParameter("title", title)
+            .addQueryParameter("artist", artist)
+            .apply {
+                val seconds = durationMs / 1000
+                if (seconds > 0) addQueryParameter("duration", seconds.toString())
+                if (!album.isNullOrBlank()) addQueryParameter("album", album)
+            }
+            .build()
+
+        val body = lyricsGet(url.toString()) ?: return@withContext null
+        val response = runCatching { lyricsJson.decodeFromString<Response>(body) }.getOrNull()
+            ?: return@withContext null
+        parse(response).takeIf { it.isNotEmpty() }
+    }
+
