@@ -50,3 +50,7 @@ internal fun lyricsGetAuthorized(url: String, bearer: String): String? = runCatc
         .header("User-Agent", LYRICS_AGENT)
         .header("Accept", "application/json")
         .header("Authorization", "Bearer $bearer")
+        .header("Origin", "https://music.apple.com")
+        .header("Referer", "https://music.apple.com/")
+        .build()
+    client.newCall(request).execute().use { response ->
