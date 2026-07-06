@@ -96,3 +96,5 @@ data class LyricLine(
             // on the word's last letter.
             val next = words.getOrNull(index + 1)
             if (next != null && positionMs < next.startMs) {
+                val gapStart = text.indexOf(next.text, end).takeIf { it >= 0 } ?: end
+                val pause = (next.startMs - word.endMs).coerceAtLeast(1L)
