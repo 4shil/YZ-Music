@@ -125,3 +125,8 @@ object LyricsPlus {
         val words = mutableListOf<LyricWord>()
         val current = StringBuilder()
         var start = 0L
+        var end = 0L
+
+        syllables.forEach { syllable ->
+            val text = syllable.text ?: return@forEach
+            if (text.isBlank()) return@forEach
