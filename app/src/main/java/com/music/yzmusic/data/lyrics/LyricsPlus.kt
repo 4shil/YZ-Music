@@ -146,3 +146,9 @@ object LyricsPlus {
     @Serializable
     internal data class Response(
         val type: String? = null,
+        val lyrics: List<Line>? = null,
+    )
+
+    @Serializable
+    internal data class Line(
+        val time: Long? = null,
