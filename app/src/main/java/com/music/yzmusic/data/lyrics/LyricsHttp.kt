@@ -18,3 +18,7 @@ private const val LYRICS_TIMEOUT_SECONDS = 6L
 
 internal const val LYRICS_AGENT = "YZ Music (https://github.com/bitchord)"
 
+internal val lyricsJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+private val client by lazy {
+    // Derived from the shared client, so the connection pool and DNS stay
