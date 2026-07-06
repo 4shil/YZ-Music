@@ -22,3 +22,11 @@ internal val lyricsJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
 private val client by lazy {
     // Derived from the shared client, so the connection pool and DNS stay
+    // common — only the deadline differs.
+    Http.client.newBuilder()
+        .callTimeout(LYRICS_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .build()
+}
+
+/** Body of a successful GET, or null for any failure at all. */
