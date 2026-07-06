@@ -54,3 +54,7 @@ internal fun lyricsGetAuthorized(url: String, bearer: String): String? = runCatc
         .header("Referer", "https://music.apple.com/")
         .build()
     client.newCall(request).execute().use { response ->
+        if (response.isSuccessful) response.body?.string() else null
+    }
+}.getOrNull()
+
