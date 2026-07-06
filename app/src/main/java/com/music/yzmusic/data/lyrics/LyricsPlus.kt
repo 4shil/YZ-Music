@@ -45,3 +45,34 @@ object LyricsPlus {
             ?.let { listOf(it) + MIRRORS.filterNot { mirror -> mirror == it } }
             ?: MIRRORS
 
+        val pending = hosts.map { host ->
+            host to async(Dispatchers.IO) { fetch(host, title, artist, durationMs, album) }
+        }.toMutableList()
+
+        // Take the first mirror to answer with something usable rather than
+        // the first to answer at all — a mirror that 404s this track shouldn't
+        // beat one that has it.
+        try {
+            while (pending.isNotEmpty()) {
+                val (host, lines) = select {
+                    pending.forEach { (host, job) -> job.onAwait { host to it } }
+                }
+                pending.removeAll { it.first == host }
+                if (!lines.isNullOrEmpty()) {
+                    lastGood.set(host)
+                    return@coroutineScope lines
+                }
+            }
+            null
+        } finally {
+            pending.forEach { it.second.cancel() }
+        }
+    }
+
+    private suspend fun fetch(
+        host: String,
+        title: String,
+        artist: String,
+        durationMs: Long,
+        album: String?,
+    ): List<LyricLine>? = withContext(Dispatchers.IO) {
