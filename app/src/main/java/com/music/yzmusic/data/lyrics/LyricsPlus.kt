@@ -130,3 +130,19 @@ object LyricsPlus {
         syllables.forEach { syllable ->
             val text = syllable.text ?: return@forEach
             if (text.isBlank()) return@forEach
+            val time = syllable.time ?: return@forEach
+            if (current.isEmpty()) start = time
+            current.append(text.trim())
+            end = time + (syllable.duration ?: 0L)
+            if (text.last().isWhitespace()) {
+                words += LyricWord(start, end, current.toString())
+                current.setLength(0)
+            }
+        }
+        if (current.isNotEmpty()) words += LyricWord(start, end, current.toString())
+        return words
+    }
+
+    @Serializable
+    internal data class Response(
+        val type: String? = null,
