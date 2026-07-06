@@ -46,3 +46,7 @@ internal fun lyricsGet(url: String): String? = runCatching {
  * `Origin` at all the same way it answers a wrong one, with a 403.
  */
 internal fun lyricsGetAuthorized(url: String, bearer: String): String? = runCatching {
+    val request = Request.Builder().url(url)
+        .header("User-Agent", LYRICS_AGENT)
+        .header("Accept", "application/json")
+        .header("Authorization", "Bearer $bearer")
