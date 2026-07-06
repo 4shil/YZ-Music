@@ -84,3 +84,7 @@ data class LyricLine(
             // Where this word sits in [text]. Built by walking rather than
             // searching, so a word repeated in the line still lines up.
             val start = text.indexOf(word.text, offset).takeIf { it >= 0 } ?: offset
+            val end = start + word.text.length
+            if (positionMs < word.startMs) return start.toFloat()
+            if (positionMs < word.endMs) {
+                val span = (word.endMs - word.startMs).coerceAtLeast(1L)
