@@ -95,3 +95,33 @@ object LyricsPlus {
     internal fun parse(response: Response): List<LyricLine> =
         response.lyrics.orEmpty().mapNotNull { line ->
             val start = line.time ?: return@mapNotNull null
+            val words = mergeSyllables(line.syllabus.orEmpty())
+            when {
+                words.isNotEmpty() -> LyricLine(
+                    timeMs = minOf(start, words.first().startMs),
+                    text = words.joinToString(" ") { it.text },
+                    words = words,
+                )
+                // Some sources are only line-synced; still worth showing.
+                // The line's duration is the only end it gets, and without it
+                // an interlude can't be told from a slowly sung line.
+                !line.text.isNullOrBlank() -> LyricLine(
+                    timeMs = start,
+                    text = line.text.trim(),
+                    sungUntilMs = line.duration?.takeIf { it > 0 }?.let { start + it },
+                )
+                else -> null
+            }
+        }.sortedBy { it.timeMs }.withInstrumentalGaps()
+
+    /**
+     * Glues syllables back into words.
+     *
+     * The API's own spacing is the word boundary — it emits `"e"` then
+     * `"nough "`, and the trailing space is the only thing saying those are
+     * one word. Splitting on the syllable instead would render "e nough".
+     */
+    private fun mergeSyllables(syllables: List<Syllable>): List<LyricWord> {
+        val words = mutableListOf<LyricWord>()
+        val current = StringBuilder()
+        var start = 0L
