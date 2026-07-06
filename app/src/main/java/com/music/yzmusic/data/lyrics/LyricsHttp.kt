@@ -30,3 +30,11 @@ private val client by lazy {
 }
 
 /** Body of a successful GET, or null for any failure at all. */
+internal fun lyricsGet(url: String): String? = runCatching {
+    val request = Request.Builder().url(url)
+        .header("User-Agent", LYRICS_AGENT)
+        .header("Accept", "application/json")
+        .build()
+    client.newCall(request).execute().use { response ->
+        if (response.isSuccessful) response.body?.string() else null
+    }
