@@ -86,3 +86,12 @@ object LyricsPlus {
             }
             .build()
 
+        val body = lyricsGet(url.toString()) ?: return@withContext null
+        val response = runCatching { lyricsJson.decodeFromString<Response>(body) }.getOrNull()
+            ?: return@withContext null
+        parse(response).takeIf { it.isNotEmpty() }
+    }
+
+    internal fun parse(response: Response): List<LyricLine> =
+        response.lyrics.orEmpty().mapNotNull { line ->
+            val start = line.time ?: return@mapNotNull null
