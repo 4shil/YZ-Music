@@ -88,3 +88,11 @@ data class LyricLine(
             if (positionMs < word.startMs) return start.toFloat()
             if (positionMs < word.endMs) {
                 val span = (word.endMs - word.startMs).coerceAtLeast(1L)
+                val through = (positionMs - word.startMs).toFloat() / span
+                return start + through * word.text.length
+            }
+            // Past this word: the trailing space fills over the pause before
+            // the next one, so the highlight keeps creeping instead of resting
+            // on the word's last letter.
+            val next = words.getOrNull(index + 1)
+            if (next != null && positionMs < next.startMs) {
