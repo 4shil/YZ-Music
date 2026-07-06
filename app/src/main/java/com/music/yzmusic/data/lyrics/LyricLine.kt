@@ -36,3 +36,7 @@ data class LyricLine(
     val text: String,
     val words: List<LyricWord> = emptyList(),
     val sungUntilMs: Long? = null,
+    val background: LyricLine? = null,
+) {
+    val isGap: Boolean get() = text.isEmpty()
+
