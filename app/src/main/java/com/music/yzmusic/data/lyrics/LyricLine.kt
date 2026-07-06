@@ -62,3 +62,25 @@ data class LyricLine(
      * regularly holds a note past the lead's last word. Measured without it, a
      * break would be found in the middle of a line that is still going.
      */
+    val endMs: Long
+        get() {
+            val lead = words.lastOrNull()?.endMs ?: sungUntilMs ?: timeMs
+            return maxOf(lead, background?.endMs ?: lead)
+        }
+
+    /**
+     * How far through the line the singing has got, 0..1, as a fractional
+     * index into [text]. The sweep reveals up to this character.
+     *
+     * Within a word it interpolates across that word's own span, so a held
+     * note draws slowly and a rattled-off one snaps. Whitespace between two
+     * words is credited to the gap between them: it fills as the singer moves
+     * on rather than jumping ahead of the next word's first letter.
+     */
+    fun revealedChars(positionMs: Long): Float {
+        if (words.isEmpty()) return if (positionMs >= timeMs) text.length.toFloat() else 0f
+        var offset = 0
+        words.forEachIndexed { index, word ->
+            // Where this word sits in [text]. Built by walking rather than
+            // searching, so a word repeated in the line still lines up.
+            val start = text.indexOf(word.text, offset).takeIf { it >= 0 } ?: offset
