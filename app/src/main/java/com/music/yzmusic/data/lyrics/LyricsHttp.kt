@@ -57,4 +57,3 @@ internal fun lyricsGetAuthorized(url: String, bearer: String): String? = runCatc
         if (response.isSuccessful) response.body?.string() else null
     }
 }.getOrNull()
-
