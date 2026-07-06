@@ -159,3 +159,8 @@ object LyricsPlus {
 
     @Serializable
     internal data class Syllable(
+        val time: Long? = null,
+        val duration: Long? = null,
+        val text: String? = null,
+    )
+}
