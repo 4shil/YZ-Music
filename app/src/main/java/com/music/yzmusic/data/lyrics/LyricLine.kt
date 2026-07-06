@@ -40,3 +40,25 @@ data class LyricLine(
 ) {
     val isGap: Boolean get() = text.isEmpty()
 
+    val isWordSynced: Boolean get() = words.isNotEmpty()
+
+    /**
+     * Whether anything actually told us when the singing stops, rather than
+     * only when it starts. Word timings carry it, and so does a provider that
+     * stamps the line's own end ([sungUntilMs]).
+     *
+     * The distance to the next line's stamp is *not* evidence of an end: that
+     * distance is the line's own slot, and on a line-synced source it is
+     * routinely ten seconds for a line sung over all ten of them.
+     */
+    val hasKnownEnd: Boolean get() = words.isNotEmpty() || sungUntilMs != null
+
+    /**
+     * When the last word finishes — or the line's own end where the provider
+     * gave one, or [timeMs] when nothing did. Check [hasKnownEnd] before
+     * reading a silence out of this.
+     *
+     * The answering vocal counts: it is still this line being sung, and it
+     * regularly holds a note past the lead's last word. Measured without it, a
+     * break would be found in the middle of a line that is still going.
+     */
