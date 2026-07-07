@@ -73,3 +73,10 @@ object LyricsRepository {
             for ((source, job) in racing) {
                 val lines = runCatching { job.await() }.getOrNull() ?: continue
                 if (lines.any { it.isWordSynced }) return@coroutineScope result(source, lines)
+                if (!prioritizeSyllableSync) return@coroutineScope result(source, lines)
+                if (lineSynced == null) lineSynced = result(source, lines)
+            }
+            lineSynced
+        } finally {
+            // Whoever lost the race is no longer worth waiting on, and
+            // coroutineScope will not return while they are still running.
