@@ -121,3 +121,5 @@ object Musixmatch {
         return buildString {
             for (line in lines) {
                 if (line.text.isBlank()) continue
+                val totalMs = (line.time.total * 1000).toLong()
+                val minutes = totalMs / 1000 / 60
