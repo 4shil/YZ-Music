@@ -29,3 +29,7 @@ enum class LyricsSource(
         wordSynced = true,
     ),
     BETTER_LYRICS(
+        label = "BetterLyrics",
+        detail = "Apple Music timings, word by word",
+        wordSynced = true,
+    ),
