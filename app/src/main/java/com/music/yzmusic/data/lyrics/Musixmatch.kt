@@ -123,3 +123,15 @@ object Musixmatch {
                 if (line.text.isBlank()) continue
                 val totalMs = (line.time.total * 1000).toLong()
                 val minutes = totalMs / 1000 / 60
+                val seconds = (totalMs / 1000) % 60
+                val millis = totalMs % 1000
+                appendLine(
+                    "[" + "%02d:%02d.%03d".format(Locale.US, minutes, seconds, millis) + "]" + line.text,
+                )
+            }
+        }.trim()
+    }
+
+    /** Signs and issues [buildUrl]; on an auth failure, drops the token and retries once. */
+    private suspend fun signedGet(buildUrl: (token: String) -> okhttp3.HttpUrl): String? {
+        val token = getToken() ?: return null
