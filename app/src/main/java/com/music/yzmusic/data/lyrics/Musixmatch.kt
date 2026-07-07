@@ -69,3 +69,35 @@ object Musixmatch {
             score += 40.0
         }
         track.trackLength?.let { length ->
+            val diff = abs(length - seconds)
+            score += when {
+                diff <= 2 -> 30.0
+                diff <= 5 -> 15.0
+                diff <= 10 -> 5.0
+                else -> -20.0
+            }
+        }
+        return score
+    }
+
+    private suspend fun searchTrack(title: String, artist: String): List<Track>? {
+        val response = signedGet { token ->
+            "$BASE/track.search".toHttpUrl().newBuilder()
+                .addQueryParameter("app_id", "web-desktop-app-v1.0")
+                .addQueryParameter("q_track", title)
+                .addQueryParameter("q_artist", artist)
+                .addQueryParameter("f_has_lyrics", "1")
+                .addQueryParameter("s_track_rating", "desc")
+                .addQueryParameter("quorum_factor", "1")
+                .addQueryParameter("page_size", "10")
+                .addQueryParameter("page", "1")
+                .addQueryParameter("usertoken", token)
+                .build()
+        } ?: return null
+        val body = runCatching {
+            lyricsJson.decodeFromString<Envelope<TrackSearchBody>>(response)
+        }.getOrNull() ?: return null
+        return body.message.body?.trackList?.map { it.track }
+    }
+
+    private suspend fun fetchSubtitle(trackId: Long): String? {
