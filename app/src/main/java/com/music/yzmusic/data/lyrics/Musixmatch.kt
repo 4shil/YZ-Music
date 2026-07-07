@@ -101,3 +101,25 @@ object Musixmatch {
     }
 
     private suspend fun fetchSubtitle(trackId: Long): String? {
+        val response = signedGet { token ->
+            "$BASE/track.subtitle.get".toHttpUrl().newBuilder()
+                .addQueryParameter("app_id", "web-desktop-app-v1.0")
+                .addQueryParameter("track_id", trackId.toString())
+                .addQueryParameter("subtitle_format", "mxm")
+                .addQueryParameter("usertoken", token)
+                .build()
+        } ?: return null
+        return runCatching {
+            lyricsJson.decodeFromString<Envelope<SubtitleBody>>(response)
+        }.getOrNull()?.message?.body?.subtitle?.subtitleBody
+    }
+
+    /** Musixmatch's `mxm` subtitle JSON — a list of `{text, time:{total}}` — turned into LRC. */
+    private fun subtitleToLrc(subtitleBody: String): String {
+        val lines = runCatching { lyricsJson.decodeFromString<List<SubtitleLine>>(subtitleBody) }
+            .getOrNull() ?: return ""
+        return buildString {
+            for (line in lines) {
+                if (line.text.isBlank()) continue
+                val totalMs = (line.time.total * 1000).toLong()
+                val minutes = totalMs / 1000 / 60
