@@ -80,3 +80,17 @@ object LyricsRepository {
         } finally {
             // Whoever lost the race is no longer worth waiting on, and
             // coroutineScope will not return while they are still running.
+            racing.forEach { it.second.cancel() }
+        }
+    }
+
+    private suspend fun fetch(
+        source: LyricsSource,
+        videoId: String,
+        title: String,
+        artist: String,
+        durationMs: Long,
+        album: String?,
+    ): List<LyricLine>? = when (source) {
+        LyricsSource.BETTER_LYRICS -> BetterLyrics.lyrics(title, artist, durationMs, album)
+        LyricsSource.LYRICS_PLUS -> LyricsPlus.lyrics(title, artist, durationMs, album)
