@@ -37,3 +37,7 @@ enum class LyricsSource(
         label = "SimpMusic",
         detail = "Matched on the video, so never the wrong edit",
         wordSynced = true,
+    ),
+    KUGOU(
+        label = "KuGou",
+        detail = "Whole lines, strong outside the English catalogue",
