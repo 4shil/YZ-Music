@@ -53,3 +53,4 @@ enum class LyricsSource(
         detail = "Whole lines, from the biggest lyrics database there is",
         wordSynced = false,
     ),
+}
