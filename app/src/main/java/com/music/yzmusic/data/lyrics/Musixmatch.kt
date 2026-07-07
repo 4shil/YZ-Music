@@ -161,3 +161,14 @@ object Musixmatch {
         val url = "$BASE/token.get".toHttpUrl().newBuilder()
             .addQueryParameter("app_id", "web-desktop-app-v1.0")
             .build()
+        val body = lyricsGet(sign(url.toString())) ?: return null
+        return runCatching {
+            lyricsJson.decodeFromString<Envelope<TokenBody>>(body)
+        }.getOrNull()?.message?.body?.userToken
+    }
+
+    /** Musixmatch's web client signs `<url><UTC yyyyMMdd>` with HMAC-SHA256, base64-encoded. */
+    private fun sign(url: String): String {
+        val date = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date())
