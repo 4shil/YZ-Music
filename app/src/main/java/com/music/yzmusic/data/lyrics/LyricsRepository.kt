@@ -59,3 +59,10 @@ object LyricsRepository {
         album: String? = null,
         sources: Set<LyricsSource> = LyricsSource.entries.toSet(),
         order: List<LyricsSource> = LyricsSource.entries,
+        prioritizeSyllableSync: Boolean = false,
+    ): Result? = coroutineScope {
+        val sequence = order.filter { it in sources } +
+            LyricsSource.entries.filter { it in sources && it !in order }
+
+        val racing: List<Pair<LyricsSource, Deferred<List<LyricLine>?>>> = sequence.map { source ->
+            source to async(Dispatchers.IO) { fetch(source, videoId, title, artist, durationMs, album) }
