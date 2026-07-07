@@ -41,3 +41,7 @@ enum class LyricsSource(
     KUGOU(
         label = "KuGou",
         detail = "Whole lines, strong outside the English catalogue",
+        wordSynced = false,
+    ),
+    LRCLIB(
+        label = "LRCLIB",
