@@ -108,3 +108,6 @@ object LyricsRepository {
      * [TtmlLyrics] knows it structurally — [withBackgroundVocals] leaves that
      * one's own split alone.
      */
+    private fun result(source: LyricsSource, lines: List<LyricLine>) =
+        Result(source, lines.withBackgroundVocals())
+}
