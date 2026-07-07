@@ -38,3 +38,10 @@ object LyricsRepository {
 
     /**
      * [sources] is the user's pick from Settings; anything not in it is not
+     * contacted at all. An empty set means no lyrics, which is the same answer
+     * as switching the feature off. [order] is tried first-to-last; a source
+     * missing from it (an upgrade that added one after the order was last
+     * saved) falls in after everything named, in [LyricsSource]'s own order.
+     *
+     * [prioritizeSyllableSync] decides what happens once *something* has come
+     * back: off, the highest-priority source's own answer is taken as-is,
