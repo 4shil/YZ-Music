@@ -49,3 +49,7 @@ enum class LyricsSource(
         wordSynced = false,
     ),
     MUSIXMATCH(
+        label = "Musixmatch",
+        detail = "Whole lines, from the biggest lyrics database there is",
+        wordSynced = false,
+    ),
