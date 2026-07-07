@@ -33,3 +33,7 @@ enum class LyricsSource(
         detail = "Apple Music timings, word by word",
         wordSynced = true,
     ),
+    SIMP_MUSIC(
+        label = "SimpMusic",
+        detail = "Matched on the video, so never the wrong edit",
+        wordSynced = true,
