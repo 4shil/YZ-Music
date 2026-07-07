@@ -13,3 +13,11 @@ enum class LyricsSource(
     val label: String,
     val detail: String,
     /** Whether it can return per-word timings, or only whole lines. */
+    val wordSynced: Boolean,
+) {
+    // Declaration order is the default priority — [AppSettings.lyricsSourceOrder]
+    // and [AppSettings.lyricsSources] both fall back to [LyricsSource.entries]
+    // verbatim, so this list *is* the out-of-the-box experience.
+    LYRICS_PLUS(
+        label = "LyricsPlus",
+        detail = "Syllable by syllable, on community mirrors",
