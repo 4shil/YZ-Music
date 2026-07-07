@@ -25,3 +25,7 @@ enum class LyricsSource(
     ),
     PAXSENIX(
         label = "PaxSenix",
+        detail = "Apple Music timings again, on a second host",
+        wordSynced = true,
+    ),
+    BETTER_LYRICS(
