@@ -45,3 +45,16 @@ object Musixmatch {
         durationMs: Long,
     ): List<LyricLine>? = withContext(Dispatchers.IO) {
         val seconds = (durationMs / 1000).toInt()
+        val track = bestTrack(title, artist, seconds) ?: return@withContext null
+        val subtitle = if (track.hasSubtitles == 1) fetchSubtitle(track.trackId) else null
+        val lrc = subtitle?.let(::subtitleToLrc)?.takeIf { it.isNotBlank() } ?: return@withContext null
+        LrcLib.parseLrc(lrc).takeIf { it.isNotEmpty() }
+    }
+
+    private suspend fun bestTrack(title: String, artist: String, seconds: Int): Track? {
+        val tracks = searchTrack(title, artist) ?: return null
+        return tracks.maxByOrNull { score(it, title, artist, seconds) }
+    }
+
+    private fun score(track: Track, title: String, artist: String, seconds: Int): Double {
+        var score = 0.0
