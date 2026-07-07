@@ -21,3 +21,7 @@ enum class LyricsSource(
     LYRICS_PLUS(
         label = "LyricsPlus",
         detail = "Syllable by syllable, on community mirrors",
+        wordSynced = true,
+    ),
+    PAXSENIX(
+        label = "PaxSenix",
