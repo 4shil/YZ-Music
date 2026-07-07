@@ -45,3 +45,7 @@ enum class LyricsSource(
     ),
     LRCLIB(
         label = "LRCLIB",
+        detail = "Whole lines only, and always up",
+        wordSynced = false,
+    ),
+    MUSIXMATCH(
