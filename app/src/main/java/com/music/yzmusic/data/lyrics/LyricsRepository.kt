@@ -94,3 +94,17 @@ object LyricsRepository {
     ): List<LyricLine>? = when (source) {
         LyricsSource.BETTER_LYRICS -> BetterLyrics.lyrics(title, artist, durationMs, album)
         LyricsSource.LYRICS_PLUS -> LyricsPlus.lyrics(title, artist, durationMs, album)
+        LyricsSource.SIMP_MUSIC -> SimpMusicLyrics.lyrics(videoId, durationMs)
+        LyricsSource.LRCLIB -> LrcLib.lyrics(title, artist, durationMs)
+        LyricsSource.MUSIXMATCH -> Musixmatch.lyrics(title, artist, durationMs)
+        LyricsSource.PAXSENIX -> PaxSenix.lyrics(title, artist, durationMs, album)
+        LyricsSource.KUGOU -> KuGou.lyrics(title, artist, durationMs, album)
+    }
+
+    /**
+     * Whichever source won, its lines get the same last pass: the answering
+     * vocal split off the lead so it can be drawn under it. Done here rather
+     * than in each parser because most of them write it as a bracket and only
+     * [TtmlLyrics] knows it structurally — [withBackgroundVocals] leaves that
+     * one's own split alone.
+     */
