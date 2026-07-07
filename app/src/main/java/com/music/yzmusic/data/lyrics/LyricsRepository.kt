@@ -94,3 +94,10 @@ object LyricsRepository {
     ): List<LyricLine>? = when (source) {
         LyricsSource.BETTER_LYRICS -> BetterLyrics.lyrics(title, artist, durationMs, album)
         LyricsSource.LYRICS_PLUS -> LyricsPlus.lyrics(title, artist, durationMs, album)
+        LyricsSource.SIMP_MUSIC -> SimpMusicLyrics.lyrics(videoId, durationMs)
+        LyricsSource.LRCLIB -> LrcLib.lyrics(title, artist, durationMs)
+        LyricsSource.MUSIXMATCH -> Musixmatch.lyrics(title, artist, durationMs)
+        LyricsSource.PAXSENIX -> PaxSenix.lyrics(title, artist, durationMs, album)
+        LyricsSource.KUGOU -> KuGou.lyrics(title, artist, durationMs, album)
+    }
+
