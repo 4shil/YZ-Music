@@ -66,3 +66,10 @@ object LyricsRepository {
 
         val racing: List<Pair<LyricsSource, Deferred<List<LyricLine>?>>> = sequence.map { source ->
             source to async(Dispatchers.IO) { fetch(source, videoId, title, artist, durationMs, album) }
+        }
+
+        try {
+            var lineSynced: Result? = null
+            for ((source, job) in racing) {
+                val lines = runCatching { job.await() }.getOrNull() ?: continue
+                if (lines.any { it.isWordSynced }) return@coroutineScope result(source, lines)
