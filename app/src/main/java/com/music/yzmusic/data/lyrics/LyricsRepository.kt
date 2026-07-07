@@ -52,3 +52,10 @@ object LyricsRepository {
      * word-synced one, taking the top-priority source that has one.
      */
     suspend fun lyrics(
+        videoId: String,
+        title: String,
+        artist: String,
+        durationMs: Long,
+        album: String? = null,
+        sources: Set<LyricsSource> = LyricsSource.entries.toSet(),
+        order: List<LyricsSource> = LyricsSource.entries,
