@@ -47,3 +47,11 @@ object SimpMusicLyrics {
                 ?: track.syncedLyrics?.takeIf { it.isNotBlank() }
                     ?.let { LrcLib.parseLrc(it) }
                     ?.takeIf { it.isNotEmpty() }
+        }
+
+    @Serializable
+    internal data class Response(
+        val success: Boolean = false,
+        val data: List<Track>? = null,
+    )
+
