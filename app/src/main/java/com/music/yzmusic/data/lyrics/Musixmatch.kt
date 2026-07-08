@@ -172,3 +172,49 @@ object Musixmatch {
         val date = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(SIGNING_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        val raw = mac.doFinal("$url$date".toByteArray(Charsets.UTF_8))
+        val signature = Base64.getEncoder().encodeToString(raw)
+        return "$url&signature=${java.net.URLEncoder.encode(signature, "UTF-8")}&signature_protocol=sha256"
+    }
+
+    @Serializable
+    private data class Envelope<T>(val message: Message<T>)
+
+    @Serializable
+    private data class Message<T>(val header: Header, val body: T? = null)
+
+    @Serializable
+    private data class Header(@SerialName("status_code") val statusCode: Int = 0)
+
+    @Serializable
+    private data class TokenBody(@SerialName("user_token") val userToken: String)
+
+    @Serializable
+    private data class TrackSearchBody(@SerialName("track_list") val trackList: List<TrackWrapper> = emptyList())
+
+    @Serializable
+    private data class TrackWrapper(val track: Track)
+
+    @Serializable
+    private data class Track(
+        @SerialName("track_id") val trackId: Long,
+        @SerialName("track_name") val trackName: String,
+        @SerialName("artist_name") val artistName: String = "",
+        @SerialName("track_length") val trackLength: Int? = null,
+        @SerialName("has_subtitles") val hasSubtitles: Int = 0,
+    )
+
+    @Serializable
+    private data class SubtitleBody(val subtitle: Subtitle? = null)
+
+    @Serializable
+    private data class Subtitle(@SerialName("subtitle_body") val subtitleBody: String)
+
+    @Serializable
+    private data class SubtitleLine(val text: String, val time: SubtitleTime)
+
+    @Serializable
+    private data class SubtitleTime(val total: Double)
+}
