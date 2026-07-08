@@ -157,3 +157,8 @@ object PaxSenix {
 
     @Serializable
     private data class LyricsResponse(
+        val ttmlContent: String? = null,
+        val elrc: String? = null,
+        val elrcMultiPerson: String? = null,
+    )
+}
