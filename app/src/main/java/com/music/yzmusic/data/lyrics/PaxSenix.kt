@@ -89,3 +89,20 @@ object PaxSenix {
         val url = "$PROXY/apple-music/lyrics".toHttpUrl().newBuilder()
             .addQueryParameter("id", appleId)
             .build()
+        val body = lyricsGet(url.toString()) ?: return null
+        val response = runCatching { lyricsJson.decodeFromString<LyricsResponse>(body) }.getOrNull()
+            ?: return null
+
+        response.ttmlContent?.takeIf { it.isNotBlank() }?.let { ttml ->
+            TtmlLyrics.parse(ttml).takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        response.elrcMultiPerson?.takeIf { it.isNotBlank() }?.let { elrc ->
+            EnhancedLrc.parse(elrc).takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        response.elrc?.takeIf { it.isNotBlank() }?.let { elrc ->
+            EnhancedLrc.parse(elrc).takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        return null
+    }
+
+    /** [PROXY] itself needs no auth; only the Apple Music catalogue search does. */
