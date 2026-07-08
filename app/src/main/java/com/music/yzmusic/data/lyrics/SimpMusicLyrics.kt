@@ -23,3 +23,11 @@ object SimpMusicLyrics {
 
     private const val BASE = "https://api-lyrics.simpmusic.org/v1/"
 
+    /** Duration slack when the database holds several cuts of one video. */
+    private const val DURATION_TOLERANCE_SECONDS = 10
+
+    suspend fun lyrics(videoId: String, durationMs: Long): List<LyricLine>? =
+        withContext(Dispatchers.IO) {
+            if (videoId.isBlank()) return@withContext null
+            val body = lyricsGet(BASE + videoId) ?: return@withContext null
+            val response = runCatching { lyricsJson.decodeFromString<Response>(body) }.getOrNull()
