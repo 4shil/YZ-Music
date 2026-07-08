@@ -55,3 +55,29 @@ object PaxSenix {
         val name = track.attributes.name.trim().lowercase()
         val targetTitle = title.trim().lowercase()
         val artistName = track.attributes.artistName.trim().lowercase()
+        val targetArtist = artist.trim().lowercase()
+        var score = 0.0
+        score += when {
+            name == targetTitle -> 80.0
+            name.contains(targetTitle) || targetTitle.contains(name) -> 40.0
+            else -> 0.0
+        }
+        if (artistName.contains(targetArtist) || targetArtist.contains(artistName)) score += 40.0
+        return score
+    }
+
+    private fun String.cleaned(): String = replace(
+        Regex(
+            """\s*[(\[](official|video|audio|lyrics?|visualizer|hd|hq|4k|remaster\w*|live|version|""" +
+                """feat\.?|ft\.?)[^)\]]*[)\]]""",
+            RegexOption.IGNORE_CASE,
+        ),
+        "",
+    ).trim()
+
+    private suspend fun search(query: String): List<AppleTrack>? {
+        val token = getToken() ?: return null
+        val body = get(
+            "$APPLE_SEARCH?term=${java.net.URLEncoder.encode(query, "UTF-8")}&types=songs&limit=10&l=en-US",
+            bearer = token,
+        ) ?: return null
