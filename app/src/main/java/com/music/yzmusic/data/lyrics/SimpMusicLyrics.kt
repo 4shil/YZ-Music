@@ -59,3 +59,7 @@ object SimpMusicLyrics {
     internal data class Track(
         val duration: Int? = null,
         val richSyncLyrics: String? = null,
+        val syncedLyrics: String? = null,
+        val plainLyrics: String? = null,
+    )
+}
