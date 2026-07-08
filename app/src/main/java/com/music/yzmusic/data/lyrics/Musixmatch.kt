@@ -135,3 +135,29 @@ object Musixmatch {
     /** Signs and issues [buildUrl]; on an auth failure, drops the token and retries once. */
     private suspend fun signedGet(buildUrl: (token: String) -> okhttp3.HttpUrl): String? {
         val token = getToken() ?: return null
+        val first = lyricsGet(sign(buildUrl(token).toString()))
+        if (first != null && !looksUnauthorized(first)) return first
+
+        cachedToken.set(null)
+        val fresh = getToken() ?: return null
+        return lyricsGet(sign(buildUrl(fresh).toString()))
+    }
+
+    /** Musixmatch answers an expired token with HTTP 200 and a header status code, not a 401. */
+    private fun looksUnauthorized(body: String): Boolean =
+        runCatching { lyricsJson.decodeFromString<Envelope<kotlinx.serialization.json.JsonElement>>(body) }
+            .getOrNull()?.message?.header?.statusCode?.let { it == 401 || it == 402 } ?: false
+
+    /**
+     * A short critical section around one network call — cheap insurance
+     * against every source in the race minting its own token the first time
+     * this object is touched.
+     */
+    private suspend fun getToken(): String? = cachedToken.get() ?: tokenMutex.withLock {
+        cachedToken.get() ?: fetchToken()?.also { cachedToken.set(it) }
+    }
+
+    private fun fetchToken(): String? {
+        val url = "$BASE/token.get".toHttpUrl().newBuilder()
+            .addQueryParameter("app_id", "web-desktop-app-v1.0")
+            .build()
