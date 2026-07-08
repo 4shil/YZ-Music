@@ -55,3 +55,11 @@ object SimpMusicLyrics {
         val data: List<Track>? = null,
     )
 
+    @Serializable
+    internal data class Track(
+        val duration: Int? = null,
+        val richSyncLyrics: String? = null,
+        val syncedLyrics: String? = null,
+        val plainLyrics: String? = null,
+    )
+}
