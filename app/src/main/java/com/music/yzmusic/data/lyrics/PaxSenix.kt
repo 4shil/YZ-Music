@@ -55,3 +55,14 @@ object PaxSenix {
         val name = track.attributes.name.trim().lowercase()
         val targetTitle = title.trim().lowercase()
         val artistName = track.attributes.artistName.trim().lowercase()
+        val targetArtist = artist.trim().lowercase()
+        var score = 0.0
+        score += when {
+            name == targetTitle -> 80.0
+            name.contains(targetTitle) || targetTitle.contains(name) -> 40.0
+            else -> 0.0
+        }
+        if (artistName.contains(targetArtist) || targetArtist.contains(artistName)) score += 40.0
+        return score
+    }
+
