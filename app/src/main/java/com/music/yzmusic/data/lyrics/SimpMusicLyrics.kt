@@ -31,3 +31,7 @@ object SimpMusicLyrics {
             if (videoId.isBlank()) return@withContext null
             val body = lyricsGet(BASE + videoId) ?: return@withContext null
             val response = runCatching { lyricsJson.decodeFromString<Response>(body) }.getOrNull()
+            if (response == null || !response.success) return@withContext null
+
+            val seconds = (durationMs / 1000).toInt()
+            val track = response.data.orEmpty()
