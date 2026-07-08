@@ -110,3 +110,13 @@ object TtmlLyrics {
      * Spans marked [BACKGROUND_ROLE] and everything under them go to
      * [backing] instead of [out], which is what keeps the two voices apart.
      */
+    private fun collect(node: Node, out: MutableList<Piece>, backing: MutableList<Piece>) {
+        val children = node.childNodes
+        for (i in 0 until children.length) {
+            when (val child = children.item(i)) {
+                is Element -> {
+                    val role = child.getAttribute("ttm:role")
+                    if (role in SKIPPED_ROLES) continue
+                    // Inside a backing span every leaf is backing, so the sink
+                    // switches for the whole of that subtree — whether the
+                    // span holds its own syllables or is a single timed leaf.
