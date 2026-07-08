@@ -37,3 +37,8 @@ object PaxSenix {
         album: String? = null,
     ): List<LyricLine>? = withContext(Dispatchers.IO) {
         val seconds = (durationMs / 1000).toInt()
+        val query = listOfNotNull(title.cleaned(), artist.cleaned().takeIf { it.isNotBlank() })
+            .joinToString(" ")
+        val results = search(query) ?: return@withContext null
+        val best = results
+            .filter { track ->
