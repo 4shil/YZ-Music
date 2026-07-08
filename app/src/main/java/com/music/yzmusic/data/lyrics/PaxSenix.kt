@@ -106,3 +106,42 @@ object PaxSenix {
     }
 
     /** [PROXY] itself needs no auth; only the Apple Music catalogue search does. */
+    private fun get(url: String, bearer: String? = null): String? = if (bearer == null) {
+        lyricsGet(url)
+    } else {
+        lyricsGetAuthorized(url, bearer)
+    }
+
+    private suspend fun getToken(): String? = cachedToken.get() ?: tokenMutex.withLock {
+        cachedToken.get() ?: scrapeToken()?.also { cachedToken.set(it) }
+    }
+
+    /**
+     * Apple's web player carries its own bearer token inside one of its JS
+     * bundles rather than minting it per session, so getting one is a matter
+     * of reading the same file the player itself loads: the home page names
+     * its main script, and the token sits in that script as a complete JWT —
+     * three dot-separated segments, not just the leading fragment a looser
+     * match would stop at.
+     */
+    private fun scrapeToken(): String? {
+        val home = lyricsGet("https://music.apple.com/us/new") ?: return null
+        val scriptPath = INDEX_JS.find(home)?.value ?: return null
+        val script = lyricsGet("https://music.apple.com$scriptPath") ?: return null
+        return TOKEN.find(script)?.value
+    }
+
+    private val INDEX_JS = Regex("""/assets/index~[^"]+\.js""")
+    private val TOKEN = Regex("""eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+""")
+
+    @Serializable
+    private data class AppleSearchResponse(val results: Results = Results())
+
+    @Serializable
+    private data class Results(val songs: Songs? = null)
+
+    @Serializable
+    private data class Songs(val data: List<AppleTrack> = emptyList())
+
+    @Serializable
+    private data class AppleTrack(val id: String, val attributes: Attributes) {
