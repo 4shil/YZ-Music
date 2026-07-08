@@ -81,3 +81,32 @@ object TtmlLyrics {
             // there is nothing here to hang underneath — the bracket in the
             // text is all the separation the document gave.
             val text = paragraph.textContent?.trim().orEmpty()
+            val begin = time(paragraph.getAttribute("begin")) ?: return null
+            if (text.isEmpty()) return null
+            // The paragraph's own end is the only thing that says when the
+            // singing stops, so carry it — a break can't be found without it.
+            val end = time(paragraph.getAttribute("end"))?.takeIf { it > begin }
+            return LyricLine(timeMs = begin, text = text, sungUntilMs = end)
+        }
+
+        // Prefer the paragraph's own stamp: Apple sets it a hair before the
+        // first syllable on lines that open with a soft consonant, and that
+        // lead-in is when the line should appear.
+        val begin = time(paragraph.getAttribute("begin")) ?: words.first().startMs
+        return LyricLine(
+            timeMs = minOf(begin, words.first().startMs),
+            text = words.joinToString(" ") { it.text },
+            words = words,
+            background = backing,
+        )
+    }
+
+    /**
+     * Flattens a paragraph into timed spans and the whitespace between them.
+     * Nested spans (Apple wraps background vocals, and occasionally whole
+     * phrases, in an outer timed span) recurse to their leaves, so only the
+     * innermost timings — the ones actually per-syllable — survive.
+     *
+     * Spans marked [BACKGROUND_ROLE] and everything under them go to
+     * [backing] instead of [out], which is what keeps the two voices apart.
+     */
