@@ -51,3 +51,8 @@ object TtmlLyrics {
             // anything the document asks us to go and fetch.
             setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
         }
+        val document = factory.newDocumentBuilder().parse(InputSource(StringReader(ttml)))
+        val paragraphs = document.getElementsByTagName("p")
+
+        val lines = ArrayList<LyricLine>(paragraphs.length)
+        for (i in 0 until paragraphs.length) {
