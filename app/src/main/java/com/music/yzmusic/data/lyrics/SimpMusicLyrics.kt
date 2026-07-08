@@ -51,3 +51,11 @@ object SimpMusicLyrics {
 
     @Serializable
     internal data class Response(
+        val success: Boolean = false,
+        val data: List<Track>? = null,
+    )
+
+    @Serializable
+    internal data class Track(
+        val duration: Int? = null,
+        val richSyncLyrics: String? = null,
