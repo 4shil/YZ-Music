@@ -126,3 +126,34 @@ object PaxSenix {
      */
     private fun scrapeToken(): String? {
         val home = lyricsGet("https://music.apple.com/us/new") ?: return null
+        val scriptPath = INDEX_JS.find(home)?.value ?: return null
+        val script = lyricsGet("https://music.apple.com$scriptPath") ?: return null
+        return TOKEN.find(script)?.value
+    }
+
+    private val INDEX_JS = Regex("""/assets/index~[^"]+\.js""")
+    private val TOKEN = Regex("""eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+""")
+
+    @Serializable
+    private data class AppleSearchResponse(val results: Results = Results())
+
+    @Serializable
+    private data class Results(val songs: Songs? = null)
+
+    @Serializable
+    private data class Songs(val data: List<AppleTrack> = emptyList())
+
+    @Serializable
+    private data class AppleTrack(val id: String, val attributes: Attributes) {
+        val durationSeconds: Int? get() = attributes.durationInMillis?.let { (it / 1000).toInt() }
+    }
+
+    @Serializable
+    private data class Attributes(
+        val name: String,
+        val artistName: String,
+        @SerialName("durationInMillis") val durationInMillis: Long? = null,
+    )
+
+    @Serializable
+    private data class LyricsResponse(
