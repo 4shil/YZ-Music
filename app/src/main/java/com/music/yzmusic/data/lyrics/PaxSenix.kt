@@ -106,3 +106,23 @@ object PaxSenix {
     }
 
     /** [PROXY] itself needs no auth; only the Apple Music catalogue search does. */
+    private fun get(url: String, bearer: String? = null): String? = if (bearer == null) {
+        lyricsGet(url)
+    } else {
+        lyricsGetAuthorized(url, bearer)
+    }
+
+    private suspend fun getToken(): String? = cachedToken.get() ?: tokenMutex.withLock {
+        cachedToken.get() ?: scrapeToken()?.also { cachedToken.set(it) }
+    }
+
+    /**
+     * Apple's web player carries its own bearer token inside one of its JS
+     * bundles rather than minting it per session, so getting one is a matter
+     * of reading the same file the player itself loads: the home page names
+     * its main script, and the token sits in that script as a complete JWT —
+     * three dot-separated segments, not just the leading fragment a looser
+     * match would stop at.
+     */
+    private fun scrapeToken(): String? {
+        val home = lyricsGet("https://music.apple.com/us/new") ?: return null
