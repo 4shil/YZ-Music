@@ -64,3 +64,20 @@ object TtmlLyrics {
 
     private fun lineFrom(paragraph: Element): LyricLine? {
         val pieces = mutableListOf<Piece>()
+        val backingPieces = mutableListOf<Piece>()
+        collect(paragraph, pieces, backingPieces)
+        val words = mergeIntoWords(pieces)
+        val backing = mergeIntoWords(backingPieces).takeIf { it.isNotEmpty() }?.let {
+            LyricLine(
+                timeMs = it.first().startMs,
+                text = it.joinToString(" ") { word -> word.text },
+                words = it,
+            )
+        }
+
+        if (words.isEmpty()) {
+            // Line-synced TTML: a <p> with a stamp and bare text, no spans.
+            // textContent is the whole paragraph, backing vocal included, so
+            // there is nothing here to hang underneath — the bracket in the
+            // text is all the separation the document gave.
+            val text = paragraph.textContent?.trim().orEmpty()
