@@ -56,3 +56,11 @@ object TtmlLyrics {
 
         val lines = ArrayList<LyricLine>(paragraphs.length)
         for (i in 0 until paragraphs.length) {
+            val paragraph = paragraphs.item(i) as? Element ?: continue
+            lineFrom(paragraph)?.let(lines::add)
+        }
+        lines.sortedBy { it.timeMs }.withInstrumentalGaps()
+    }.getOrDefault(emptyList())
+
+    private fun lineFrom(paragraph: Element): LyricLine? {
+        val pieces = mutableListOf<Piece>()
