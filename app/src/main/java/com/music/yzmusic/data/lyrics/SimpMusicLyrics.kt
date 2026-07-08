@@ -35,3 +35,11 @@ object SimpMusicLyrics {
 
             val seconds = (durationMs / 1000).toInt()
             val track = response.data.orEmpty()
+                .filter { seconds <= 0 || abs((it.duration ?: 0) - seconds) <= DURATION_TOLERANCE_SECONDS }
+                .minByOrNull { abs((it.duration ?: 0) - seconds) }
+                ?: return@withContext null
+
+            // Word timing first; a line-synced answer from here is no better
+            // than LRCLIB's, but it is still better than nothing.
+            track.richSyncLyrics?.takeIf { it.isNotBlank() }
+                ?.let { EnhancedLrc.parse(it) }
