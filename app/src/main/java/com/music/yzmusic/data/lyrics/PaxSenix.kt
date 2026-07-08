@@ -145,3 +145,15 @@ object PaxSenix {
 
     @Serializable
     private data class AppleTrack(val id: String, val attributes: Attributes) {
+        val durationSeconds: Int? get() = attributes.durationInMillis?.let { (it / 1000).toInt() }
+    }
+
+    @Serializable
+    private data class Attributes(
+        val name: String,
+        val artistName: String,
+        @SerialName("durationInMillis") val durationInMillis: Long? = null,
+    )
+
+    @Serializable
+    private data class LyricsResponse(
