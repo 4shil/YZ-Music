@@ -42,3 +42,16 @@ object PaxSenix {
         val results = search(query) ?: return@withContext null
         val best = results
             .filter { track ->
+                val trackSeconds = track.durationSeconds
+                seconds <= 0 || trackSeconds == null || abs(trackSeconds - seconds) <= DURATION_TOLERANCE_SECONDS
+            }
+            .maxByOrNull { score(it, title, artist) }
+            ?: return@withContext null
+
+        fetchLyrics(best.id)
+    }
+
+    private fun score(track: AppleTrack, title: String, artist: String): Double {
+        val name = track.attributes.name.trim().lowercase()
+        val targetTitle = title.trim().lowercase()
+        val artistName = track.attributes.artistName.trim().lowercase()
