@@ -66,3 +66,26 @@ object PaxSenix {
         return score
     }
 
+    private fun String.cleaned(): String = replace(
+        Regex(
+            """\s*[(\[](official|video|audio|lyrics?|visualizer|hd|hq|4k|remaster\w*|live|version|""" +
+                """feat\.?|ft\.?)[^)\]]*[)\]]""",
+            RegexOption.IGNORE_CASE,
+        ),
+        "",
+    ).trim()
+
+    private suspend fun search(query: String): List<AppleTrack>? {
+        val token = getToken() ?: return null
+        val body = get(
+            "$APPLE_SEARCH?term=${java.net.URLEncoder.encode(query, "UTF-8")}&types=songs&limit=10&l=en-US",
+            bearer = token,
+        ) ?: return null
+        val response = runCatching { lyricsJson.decodeFromString<AppleSearchResponse>(body) }.getOrNull()
+        return response?.results?.songs?.data
+    }
+
+    private fun fetchLyrics(appleId: String): List<LyricLine>? {
+        val url = "$PROXY/apple-music/lyrics".toHttpUrl().newBuilder()
+            .addQueryParameter("id", appleId)
+            .build()
