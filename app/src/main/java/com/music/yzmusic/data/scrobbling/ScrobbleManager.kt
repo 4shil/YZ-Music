@@ -113,3 +113,59 @@ class ScrobbleManager(
         scrobbleRemainingMillis = 0
     }
 
+    private fun scrobbleSong(song: Song, durationSeconds: Int) {
+        scope.launch {
+            LastFM
+                .scrobble(
+                    artist = song.artist,
+                    track = song.title,
+                    duration = durationSeconds,
+                    timestamp = songStartedAt,
+                    album = song.albumName,
+                ).onSuccess {
+                    Log.d(TAG, "Scrobbled: ${song.title} by ${song.artist}")
+                }.onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.e(TAG, "Failed to scrobble: ${song.title}", throwable)
+                }
+        }
+    }
+
+    private fun updateNowPlaying(song: Song) {
+        scope.launch {
+            LastFM
+                .updateNowPlaying(
+                    artist = song.artist,
+                    track = song.title,
+                    album = song.albumName,
+                    duration = song.durationText?.let { parseDurationSeconds(it) },
+                ).onSuccess {
+                    Log.d(TAG, "Updated now playing: ${song.title}")
+                }.onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.e(TAG, "Failed to update now playing: ${song.title}", throwable)
+                }
+        }
+    }
+
+    fun onPlayerStateChanged(
+        isPlaying: Boolean,
+        song: Song?,
+        durationMs: Long? = null,
+    ) {
+        if (song == null) return
+        if (isPlaying) {
+            if (!songStarted) {
+                onSongStart(song, durationMs)
+            } else {
+                onSongResume(song)
+            }
+        } else {
+            onSongPause()
+        }
+    }
+
+    /**
+     * Parse "M:SS" or "MM:SS" duration text to total seconds.
+     */
+    private fun parseDurationSeconds(text: String): Int {
