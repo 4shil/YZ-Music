@@ -249,3 +249,24 @@ object LastFM {
         ).toString()
     }
 
+    private fun requireSessionKey(): String = runtimeConfig.sessionKey ?: throw LastFmException(9, "Session key missing")
+
+    private suspend inline fun <reified T> postAndDecode(
+        method: String,
+        sessionKey: String? = null,
+        extra: Map<String, String> = emptyMap(),
+    ): T =
+        json.decodeFromString(
+            postAndRead(
+                method = method,
+                sessionKey = sessionKey,
+                extra = extra,
+            ),
+        )
+
+    private suspend fun postAndRead(
+        method: String,
+        sessionKey: String? = null,
+        extra: Map<String, String> = emptyMap(),
+    ): String {
+        val config = runtimeConfig
