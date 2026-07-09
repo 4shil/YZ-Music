@@ -226,3 +226,47 @@ object LastFM {
     fun isInitialized(): Boolean = runtimeConfig.apiKey.isNotEmpty() && runtimeConfig.secret.isNotEmpty()
 
     fun normalizeEndpoint(endpoint: String): String {
+        val uri = URI(endpoint.trim())
+        val scheme = uri.scheme?.lowercase(Locale.ROOT)
+        require(scheme == "http" || scheme == "https")
+        require(!uri.host.isNullOrBlank())
+        require(uri.query == null && uri.fragment == null)
+
+        val path =
+            uri.path
+                ?.takeIf { it.isNotBlank() && it != "/" }
+                ?.trimEnd('/')
+                ?: "/2.0"
+
+        return URI(
+            scheme,
+            uri.userInfo,
+            uri.host,
+            uri.port,
+            "$path/",
+            null,
+            null,
+        ).toString()
+    }
+
+    private fun requireSessionKey(): String = runtimeConfig.sessionKey ?: throw LastFmException(9, "Session key missing")
+
+    private suspend inline fun <reified T> postAndDecode(
+        method: String,
+        sessionKey: String? = null,
+        extra: Map<String, String> = emptyMap(),
+    ): T =
+        json.decodeFromString(
+            postAndRead(
+                method = method,
+                sessionKey = sessionKey,
+                extra = extra,
+            ),
+        )
+
+    private suspend fun postAndRead(
+        method: String,
+        sessionKey: String? = null,
+        extra: Map<String, String> = emptyMap(),
+    ): String {
+        val config = runtimeConfig
