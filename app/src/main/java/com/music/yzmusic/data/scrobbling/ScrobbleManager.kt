@@ -13,3 +13,11 @@ import kotlin.math.roundToLong
 class ScrobbleManager(
     private val scope: CoroutineScope,
     var minSongDuration: Int = 30,
+    var scrobbleDelayPercent: Float = 0.5f,
+    var scrobbleDelaySeconds: Int = 180,
+) {
+    private var scrobbleJob: Job? = null
+    private var scrobbleRemainingMillis: Long = 0L
+    private var scrobbleTimerStartedAt: Long = 0L
+    private var songStartedAt: Long = 0L
+    private var songStarted = false
