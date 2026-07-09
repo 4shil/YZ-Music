@@ -72,3 +72,26 @@ object LastFM {
     }
 
     private fun Map<String, String>.apiSig(secret: String): String {
+        val sorted = toSortedMap()
+        val toHash = sorted.entries.joinToString("") { it.key + it.value } + secret
+        val digest = MessageDigest.getInstance("MD5").digest(toHash.toByteArray())
+        return digest.joinToString("") { "%02x".format(Locale.ROOT, it) }
+    }
+
+    private fun HttpRequestBuilder.lastfmParams(
+        method: String,
+        apiKey: String,
+        secret: String,
+        sessionKey: String? = null,
+        extra: Map<String, String> = emptyMap(),
+        format: String = "json",
+    ) {
+        headers.append(HttpHeaders.UserAgent, "YZ Music (https://github.com/4shil/YZ-Music)")
+        val paramsForSig =
+            mutableMapOf(
+                "method" to method,
+                "api_key" to apiKey,
+            ).apply {
+                sessionKey?.let { put("sk", it) }
+                putAll(extra)
+            }
