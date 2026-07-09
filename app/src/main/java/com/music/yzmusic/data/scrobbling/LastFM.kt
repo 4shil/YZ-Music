@@ -36,3 +36,39 @@ object LastFM {
 
     data class RuntimeConfig(
         val endpoint: String,
+        val apiKey: String,
+        val secret: String,
+        val sessionKey: String?,
+    )
+
+    @Volatile
+    private var runtimeConfig =
+        RuntimeConfig(
+            endpoint = DEFAULT_API_ENDPOINT,
+            apiKey = "",
+            secret = "",
+            sessionKey = null,
+        )
+
+    var sessionKey: String?
+        get() = runtimeConfig.sessionKey
+        set(value) {
+            runtimeConfig = runtimeConfig.copy(sessionKey = value)
+        }
+
+    private val json =
+        Json {
+            isLenient = true
+            ignoreUnknownKeys = true
+        }
+
+    private val client by lazy {
+        HttpClient(OkHttp) {
+            install(ContentNegotiation) {
+                json(json)
+            }
+            expectSuccess = false
+        }
+    }
+
+    private fun Map<String, String>.apiSig(secret: String): String {
