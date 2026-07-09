@@ -72,3 +72,8 @@ object ListenBrainzManager {
                 val releaseName = song.albumName.orEmpty()
                 val releasePart = if (releaseName.isBlank()) "" else "\"release_name\":\"${escapeJson(releaseName)}\","
                 var listenedAtStart = startMs / 1000L
+                val MIN_LISTEN_TS = 1033430400L
+                if (listenedAtStart < MIN_LISTEN_TS) {
+                    listenedAtStart = System.currentTimeMillis() / 1000L
+                }
+                val trackMetadata = """{"listened_at":$listenedAtStart,"track_metadata":{"artist_name":"${escapeJson(song.artist)}","track_name":"${escapeJson(song.title)}",$releasePart"additional_info":{${durationPart}"start_ms":$startMs,"end_ms":$endMs,"submission_client":"YZ Music"}}}"""
