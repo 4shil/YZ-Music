@@ -223,3 +223,6 @@ object LastFM {
 
     fun currentConfig(): RuntimeConfig = runtimeConfig
 
+    fun isInitialized(): Boolean = runtimeConfig.apiKey.isNotEmpty() && runtimeConfig.secret.isNotEmpty()
+
+    fun normalizeEndpoint(endpoint: String): String {
