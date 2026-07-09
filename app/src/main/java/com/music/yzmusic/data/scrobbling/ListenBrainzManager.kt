@@ -67,3 +67,8 @@ object ListenBrainzManager {
         if (token.isBlank() || song == null) return false
         return withContext(Dispatchers.IO) {
             try {
+                val durationMs = durationMsOverride ?: parseDurationMs(song.durationText)
+                val durationPart = if (durationMs > 0) "\"duration_ms\":$durationMs," else ""
+                val releaseName = song.albumName.orEmpty()
+                val releasePart = if (releaseName.isBlank()) "" else "\"release_name\":\"${escapeJson(releaseName)}\","
+                var listenedAtStart = startMs / 1000L
