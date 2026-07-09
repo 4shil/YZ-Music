@@ -270,3 +270,29 @@ object LastFM {
         extra: Map<String, String> = emptyMap(),
     ): String {
         val config = runtimeConfig
+        val response =
+            client.post(config.endpoint) {
+                lastfmParams(
+                    method = method,
+                    apiKey = config.apiKey,
+                    secret = config.secret,
+                    sessionKey = sessionKey,
+                    extra = extra,
+                )
+            }
+
+        val responseText = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            throw LastFmException(response.status.value, response.status.description)
+        }
+        if (responseText.contains("\"error\"")) {
+            val error = json.decodeFromString<LastFmError>(responseText)
+            throw LastFmException(error.error, error.message)
+        }
+        return responseText
+    }
+
+    const val DEFAULT_SCROBBLE_DELAY_PERCENT = 0.5f
+    const val DEFAULT_SCROBBLE_MIN_SONG_DURATION = 30
+    const val DEFAULT_SCROBBLE_DELAY_SECONDS = 180
+}
