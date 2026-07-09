@@ -120,3 +120,13 @@ object TtmlLyrics {
                     // Inside a backing span every leaf is backing, so the sink
                     // switches for the whole of that subtree — whether the
                     // span holds its own syllables or is a single timed leaf.
+                    val sink = if (role == BACKGROUND_ROLE) backing else out
+                    val begin = time(child.getAttribute("begin"))
+                    val end = time(child.getAttribute("end"))
+                    if (begin != null && end != null && !hasTimedChild(child)) {
+                        sink += Piece.Timed(child.textContent.orEmpty(), begin, end)
+                    } else {
+                        collect(child, sink, backing)
+                    }
+                }
+                else -> if (child.nodeType == Node.TEXT_NODE) {
