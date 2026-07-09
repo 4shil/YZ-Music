@@ -155,3 +155,47 @@ object TtmlLyrics {
     private fun mergeIntoWords(pieces: List<Piece>): List<LyricWord> {
         val words = mutableListOf<LyricWord>()
         val current = StringBuilder()
+        var start = 0L
+        var end = 0L
+        // Untimed text is punctuation hanging off a span, or a line that was
+        // never word-timed at all. Either way it can't carry a word of its
+        // own — a word needs a span to get its timing from.
+        var timed = false
+
+        fun flush() {
+            val text = current.toString().trim()
+            current.setLength(0)
+            if (text.isNotEmpty() && timed) words += LyricWord(start, end, text)
+            timed = false
+        }
+
+        pieces.forEach { piece ->
+            when (piece) {
+                is Piece.Text -> when {
+                    piece.text.isBlank() -> flush()
+                    // Trailing punctuation belongs to the word it follows;
+                    // anything before the first span has no timing to join.
+                    timed -> current.append(piece.text)
+                    else -> Unit
+                }
+                is Piece.Timed -> {
+                    if (piece.text.isBlank()) return@forEach
+                    // Leading whitespace closes off whatever came before it.
+                    if (piece.text.first().isWhitespace()) flush()
+                    if (current.isEmpty()) start = piece.start
+                    current.append(piece.text.trim())
+                    end = piece.end
+                    timed = true
+                    if (piece.text.last().isWhitespace()) flush()
+                }
+            }
+        }
+        flush()
+        return words
+    }
+
+    /**
+     * TTML clock values: `27.395`, `1:05.20`, `1:02:03.4`, or a plain number
+     * with a `s`/`ms` unit. Returned in milliseconds.
+     */
+    internal fun time(value: String?): Long? {
