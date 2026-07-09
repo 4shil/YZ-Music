@@ -105,3 +105,7 @@ object ListenBrainzManager {
         }
     }
 
+    private fun parseDurationMs(text: String?): Long {
+        if (text == null) return 0L
+        val parts = text.split(":")
+        if (parts.size != 2) return 0L
