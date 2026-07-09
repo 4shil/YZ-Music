@@ -191,3 +191,38 @@ object LastFM {
         )
     }
 
+    fun initialize(
+        apiKey: String,
+        secret: String,
+    ) {
+        require(apiKey.isNotBlank() && secret.isNotBlank()) {
+            "Last.fm API credentials are not configured for this build"
+        }
+        configure(
+            endpoint = runtimeConfig.endpoint,
+            apiKey = apiKey,
+            secret = secret,
+            sessionKey = runtimeConfig.sessionKey,
+        )
+    }
+
+    fun configure(
+        endpoint: String,
+        apiKey: String,
+        secret: String,
+        sessionKey: String? = runtimeConfig.sessionKey,
+    ) {
+        runtimeConfig =
+            RuntimeConfig(
+                endpoint = normalizeEndpoint(endpoint),
+                apiKey = apiKey,
+                secret = secret,
+                sessionKey = sessionKey,
+            )
+    }
+
+    fun currentConfig(): RuntimeConfig = runtimeConfig
+
+    fun isInitialized(): Boolean = runtimeConfig.apiKey.isNotEmpty() && runtimeConfig.secret.isNotEmpty()
+
+    fun normalizeEndpoint(endpoint: String): String {
