@@ -87,3 +87,29 @@ class ScrobbleManager(
     private fun pauseScrobbleTimer() {
         scrobbleJob?.cancel()
         if (scrobbleTimerStartedAt != 0L) {
+            val elapsed = System.currentTimeMillis() - scrobbleTimerStartedAt
+            scrobbleRemainingMillis -= elapsed
+            if (scrobbleRemainingMillis < 0) scrobbleRemainingMillis = 0
+            scrobbleTimerStartedAt = 0L
+        }
+    }
+
+    private fun resumeScrobbleTimer(song: Song) {
+        if (scrobbleRemainingMillis <= 0) return
+        scrobbleJob?.cancel()
+        scrobbleTimerStartedAt = System.currentTimeMillis()
+        scrobbleJob =
+            scope.launch {
+                delay(scrobbleRemainingMillis)
+                val durationSeconds = song.durationText?.let { parseDurationSeconds(it) } ?: 0
+                scrobbleSong(song, durationSeconds)
+                scrobbleJob = null
+            }
+    }
+
+    private fun stopScrobbleTimer() {
+        scrobbleJob?.cancel()
+        scrobbleJob = null
+        scrobbleRemainingMillis = 0
+    }
+
