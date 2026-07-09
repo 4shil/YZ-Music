@@ -95,3 +95,50 @@ object LastFM {
                 sessionKey?.let { put("sk", it) }
                 putAll(extra)
             }
+        val apiSig = paramsForSig.apiSig(secret)
+
+        setBody(
+            FormDataContent(
+                Parameters.build {
+                    paramsForSig.forEach { (key, value) -> append(key, value) }
+                    append("api_sig", apiSig)
+                    append("format", format)
+                },
+            ),
+        )
+    }
+
+    suspend fun getToken() =
+        runCatching {
+            postAndDecode<TokenResponse>(
+                method = "auth.getToken",
+            )
+        }
+
+    suspend fun getSession(token: String) =
+        runCatching {
+            postAndDecode<Authentication>(
+                method = "auth.getSession",
+                extra = mapOf("token" to token),
+            )
+        }
+
+    fun getAuthUrl(token: String): String {
+        val config = runtimeConfig
+        return if (config.endpoint == LIBREFM_API_ENDPOINT) {
+            "https://libre.fm/api/auth?api_key=${config.apiKey}&token=$token"
+        } else {
+            "https://www.last.fm/api/auth/?api_key=${config.apiKey}&token=$token"
+        }
+    }
+
+    suspend fun getMobileSession(
+        username: String,
+        password: String,
+    ) = runCatching {
+        postAndDecode<Authentication>(
+            method = "auth.getMobileSession",
+            extra = mapOf("username" to username, "password" to password),
+        )
+    }
+
