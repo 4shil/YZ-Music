@@ -142,3 +142,52 @@ object LastFM {
         )
     }
 
+    class LastFmException(
+        val code: Int,
+        override val message: String,
+    ) : Exception(message)
+
+    suspend fun updateNowPlaying(
+        artist: String,
+        track: String,
+        album: String? = null,
+        trackNumber: Int? = null,
+        duration: Int? = null,
+    ) = runCatching {
+        postAndRead(
+            method = "track.updateNowPlaying",
+            sessionKey = requireSessionKey(),
+            extra =
+                buildMap {
+                    put("artist", artist)
+                    put("track", track)
+                    album?.let { put("album", it) }
+                    trackNumber?.let { put("trackNumber", it.toString()) }
+                    duration?.let { put("duration", it.toString()) }
+                },
+        )
+    }
+
+    suspend fun scrobble(
+        artist: String,
+        track: String,
+        timestamp: Long,
+        album: String? = null,
+        trackNumber: Int? = null,
+        duration: Int? = null,
+    ) = runCatching {
+        postAndRead(
+            method = "track.scrobble",
+            sessionKey = requireSessionKey(),
+            extra =
+                buildMap {
+                    put("artist[0]", artist)
+                    put("track[0]", track)
+                    put("timestamp[0]", timestamp.toString())
+                    album?.let { put("album[0]", it) }
+                    trackNumber?.let { put("trackNumber[0]", it.toString()) }
+                    duration?.let { put("duration[0]", it.toString()) }
+                },
+        )
+    }
+
