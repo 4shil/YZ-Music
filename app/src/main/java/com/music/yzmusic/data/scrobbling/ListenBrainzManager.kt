@@ -77,3 +77,6 @@ object ListenBrainzManager {
                     listenedAtStart = System.currentTimeMillis() / 1000L
                 }
                 val trackMetadata = """{"listened_at":$listenedAtStart,"track_metadata":{"artist_name":"${escapeJson(song.artist)}","track_name":"${escapeJson(song.title)}",$releasePart"additional_info":{${durationPart}"start_ms":$startMs,"end_ms":$endMs,"submission_client":"YZ Music"}}}"""
+                val bodyJson = "{\"listen_type\":\"single\",\"payload\":[$trackMetadata]}"
+                Log.d(TAG, "submitFinished: $bodyJson")
+                val body = bodyJson.toRequestBody("application/json".toMediaType())
