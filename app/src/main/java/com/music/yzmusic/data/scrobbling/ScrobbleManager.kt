@@ -68,3 +68,22 @@ class ScrobbleManager(
 
         if (resolvedDurationSeconds <= minSongDuration) return
 
+        val thresholdMs = (resolvedDurationSeconds * 1000L * scrobbleDelayPercent).roundToLong()
+        scrobbleRemainingMillis = min(thresholdMs, scrobbleDelaySeconds * 1000L)
+
+        if (scrobbleRemainingMillis <= 0) {
+            scrobbleSong(song, resolvedDurationSeconds)
+            return
+        }
+        scrobbleTimerStartedAt = System.currentTimeMillis()
+        scrobbleJob =
+            scope.launch {
+                delay(scrobbleRemainingMillis)
+                scrobbleSong(song, resolvedDurationSeconds)
+                scrobbleJob = null
+            }
+    }
+
+    private fun pauseScrobbleTimer() {
+        scrobbleJob?.cancel()
+        if (scrobbleTimerStartedAt != 0L) {
