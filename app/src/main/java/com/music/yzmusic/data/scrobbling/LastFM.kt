@@ -36,3 +36,17 @@ object LastFM {
 
     data class RuntimeConfig(
         val endpoint: String,
+        val apiKey: String,
+        val secret: String,
+        val sessionKey: String?,
+    )
+
+    @Volatile
+    private var runtimeConfig =
+        RuntimeConfig(
+            endpoint = DEFAULT_API_ENDPOINT,
+            apiKey = "",
+            secret = "",
+            sessionKey = null,
+        )
+
