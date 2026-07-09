@@ -152,3 +152,6 @@ object TtmlLyrics {
      * part of a span's own text — and its span runs from the first syllable's
      * start to the last one's end.
      */
+    private fun mergeIntoWords(pieces: List<Piece>): List<LyricWord> {
+        val words = mutableListOf<LyricWord>()
+        val current = StringBuilder()
