@@ -31,3 +31,29 @@ class ScrobbleManager(
         songStarted = false
     }
 
+    fun onSongStart(
+        song: Song?,
+        durationMs: Long? = null,
+    ) {
+        if (song == null) return
+        songStartedAt = System.currentTimeMillis() / 1000
+        songStarted = true
+        startScrobbleTimer(song, durationMs)
+        if (useNowPlaying) {
+            updateNowPlaying(song)
+        }
+    }
+
+    fun onSongResume(song: Song) {
+        resumeScrobbleTimer(song)
+    }
+
+    fun onSongPause() {
+        pauseScrobbleTimer()
+    }
+
+    fun onSongStop() {
+        stopScrobbleTimer()
+        songStarted = false
+    }
+
