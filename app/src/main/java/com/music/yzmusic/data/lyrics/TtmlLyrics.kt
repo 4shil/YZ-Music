@@ -130,3 +130,25 @@ object TtmlLyrics {
                     }
                 }
                 else -> if (child.nodeType == Node.TEXT_NODE) {
+                    val text = child.textContent.orEmpty()
+                    if (text.isNotEmpty()) out += Piece.Text(text)
+                }
+            }
+        }
+    }
+
+    private fun hasTimedChild(element: Element): Boolean {
+        val children = element.childNodes
+        for (i in 0 until children.length) {
+            val child = children.item(i) as? Element ?: continue
+            if (child.getAttribute("begin").isNotEmpty() || hasTimedChild(child)) return true
+        }
+        return false
+    }
+
+    /**
+     * Glues syllables back into words. A word ends at the first whitespace
+     * after it — whether that whitespace is a text node between two spans or
+     * part of a span's own text — and its span runs from the first syllable's
+     * start to the last one's end.
+     */
