@@ -32,3 +32,41 @@ object ListenBrainzManager {
                 val bodyJson = "{\"listen_type\":\"playing_now\",\"payload\":[$trackMetadata]}"
                 Log.d(TAG, "submitPlayingNow: $bodyJson")
                 val body = bodyJson.toRequestBody("application/json".toMediaType())
+                val request =
+                    Request.Builder()
+                        .url(API_URL)
+                        .post(body)
+                        .addHeader("Content-Type", "application/json")
+                        .addHeader("Authorization", "Token $token")
+                        .build()
+
+                Http.client.newCall(request).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        Log.d(TAG, "playing_now submitted for ${song.title}")
+                        true
+                    } else {
+                        val bodyText = try { resp.body?.string() ?: "" } catch (_: Exception) { "" }
+                        Log.w(TAG, "playing_now submit failed: ${resp.code} - $bodyText")
+                        false
+                    }
+                }
+            } catch (ex: Exception) {
+                Log.e(TAG, "submitPlayingNow failed", ex)
+                false
+            }
+        }
+    }
+
+    suspend fun submitFinished(
+        token: String,
+        song: Song?,
+        startMs: Long,
+        endMs: Long,
+        durationMsOverride: Long? = null,
+    ): Boolean {
+        if (token.isBlank() || song == null) return false
+        return withContext(Dispatchers.IO) {
+            try {
+                val durationMs = durationMsOverride ?: parseDurationMs(song.durationText)
+                val durationPart = if (durationMs > 0) "\"duration_ms\":$durationMs," else ""
+                val releaseName = song.albumName.orEmpty()
