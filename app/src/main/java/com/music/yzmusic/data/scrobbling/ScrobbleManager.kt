@@ -169,3 +169,14 @@ class ScrobbleManager(
      * Parse "M:SS" or "MM:SS" duration text to total seconds.
      */
     private fun parseDurationSeconds(text: String): Int {
+        val parts = text.split(":")
+        if (parts.size != 2) return 0
+        val minutes = parts[0].toIntOrNull() ?: return 0
+        val seconds = parts[1].toIntOrNull() ?: return 0
+        return minutes * 60 + seconds
+    }
+
+    companion object {
+        private const val TAG = "ScrobbleManager"
+    }
+}
