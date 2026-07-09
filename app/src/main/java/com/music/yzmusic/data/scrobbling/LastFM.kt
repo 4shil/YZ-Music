@@ -50,3 +50,25 @@ object LastFM {
             sessionKey = null,
         )
 
+    var sessionKey: String?
+        get() = runtimeConfig.sessionKey
+        set(value) {
+            runtimeConfig = runtimeConfig.copy(sessionKey = value)
+        }
+
+    private val json =
+        Json {
+            isLenient = true
+            ignoreUnknownKeys = true
+        }
+
+    private val client by lazy {
+        HttpClient(OkHttp) {
+            install(ContentNegotiation) {
+                json(json)
+            }
+            expectSuccess = false
+        }
+    }
+
+    private fun Map<String, String>.apiSig(secret: String): String {
