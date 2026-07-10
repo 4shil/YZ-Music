@@ -794,3 +794,43 @@ object AppSettings {
         prefs.edit().putString(KEY_LASTFM_API_KEY, value).apply()
     }
 
+    fun setLastfmSecret(value: String) {
+        lastfmSecret.value = value
+        prefs.edit().putString(KEY_LASTFM_SECRET, value).apply()
+    }
+
+    fun setLastfmEndpoint(value: String) {
+        lastfmEndpoint.value = value
+        prefs.edit().putString(KEY_LASTFM_ENDPOINT, value).apply()
+    }
+
+    fun setSpotifySpdcToken(value: String) {
+        spotifySpdcToken.value = value
+        prefs.edit().putString(KEY_SPOTIFY_SPDC_TOKEN, value).apply()
+    }
+
+    fun setLastfmScrobbleEnabled(value: Boolean) {
+        lastfmScrobbleEnabled.value = value
+        if (!value) lastfmNowPlaying.value = false
+        prefs.edit()
+            .putBoolean(KEY_LASTFM_SCROBBLE_ENABLED, value)
+            .putBoolean(KEY_LASTFM_NOW_PLAYING, if (value) lastfmNowPlaying.value else false)
+            .apply()
+    }
+
+    fun setLastfmNowPlaying(value: Boolean) {
+        if (!lastfmScrobbleEnabled.value && value) return
+        lastfmNowPlaying.value = value
+        prefs.edit().putBoolean(KEY_LASTFM_NOW_PLAYING, value).apply()
+    }
+
+    fun setScrobbleMinDuration(value: Int) {
+        scrobbleMinDuration.value = value
+        prefs.edit().putInt(KEY_SCROBBLE_MIN_DURATION, value).apply()
+    }
+
+    fun setScrobbleDelayPercent(value: Float) {
+        scrobbleDelayPercent.value = value
+        prefs.edit().putFloat(KEY_SCROBBLE_DELAY_PERCENT, value).apply()
+    }
+
