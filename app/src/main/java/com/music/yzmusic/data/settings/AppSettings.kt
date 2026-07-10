@@ -347,3 +347,17 @@ object AppSettings {
     val discordAdvancedMode = MutableStateFlow(false)
 
     val discordStatus = MutableStateFlow("online")
+    val discordActivityType = MutableStateFlow("listening")
+
+    /** Overrides the "Listening to ___" line; empty means the app's own name. */
+    val discordActivityName = MutableStateFlow("")
+
+    val discordButton1Text = MutableStateFlow("")
+    val discordButton1Visible = MutableStateFlow(true)
+    val discordButton2Text = MutableStateFlow("")
+    val discordButton2Visible = MutableStateFlow(true)
+
+    /** The notice about what connecting an account actually does has been read. */
+    val discordInfoDismissed = MutableStateFlow(false)
+
+    /** Published by PlaybackService so the UI can open the system equalizer. */
