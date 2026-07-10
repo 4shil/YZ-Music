@@ -682,3 +682,83 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_DONT_REPEAT_SUGGESTIONS, value).apply()
     }
 
+    fun setConvertVideoToAudio(value: Boolean) {
+        convertVideoToAudio.value = value
+        prefs.edit().putBoolean(KEY_CONVERT_VIDEO_TO_AUDIO, value).apply()
+    }
+
+    fun setReduceDynamicBlur(value: Boolean) {
+        reduceDynamicBlur.value = value
+        prefs.edit().putBoolean(KEY_REDUCE_BLUR, value).apply()
+    }
+
+    fun setSyncedLyrics(value: Boolean) {
+        syncedLyrics.value = value
+        prefs.edit().putBoolean(KEY_SYNCED_LYRICS, value).apply()
+    }
+
+    fun setLyricsSources(value: Set<LyricsSource>) {
+        lyricsSources.value = value
+        prefs.edit().putString(KEY_LYRICS_SOURCES, value.joinToString(",") { it.name }).apply()
+    }
+
+    /**
+     * Stored as a joined list of names rather than a string set: a name that
+     * no longer exists — a source dropped in a later build — has to fall out
+     * quietly, and the default when nothing has been saved is "all of them",
+     * which a missing key and an empty set would otherwise be unable to tell
+     * apart.
+     */
+    private fun readLyricsSources(): Set<LyricsSource> {
+        val stored = prefs.getString(KEY_LYRICS_SOURCES, null)
+            ?: return LyricsSource.entries.toSet()
+        return stored.split(",")
+            .mapNotNull { name -> LyricsSource.entries.firstOrNull { it.name == name } }
+            .toSet()
+    }
+
+    fun setLyricsSourceOrder(value: List<LyricsSource>) {
+        lyricsSourceOrder.value = value
+        prefs.edit().putString(KEY_LYRICS_SOURCE_ORDER, value.joinToString(",") { it.name }).apply()
+    }
+
+    /**
+     * A named source dropped from the stored order — an upgrade reordered
+     * since it was saved — falls out on read; one added since is appended, in
+     * [LyricsSource]'s own declared order, so a fresh install and an upgraded
+     * one agree on where a new source lands until the user says otherwise.
+     */
+    private fun readLyricsSourceOrder(): List<LyricsSource> {
+        val stored = prefs.getString(KEY_LYRICS_SOURCE_ORDER, null)
+            ?: return LyricsSource.entries
+        val saved = stored.split(",")
+            .mapNotNull { name -> LyricsSource.entries.firstOrNull { it.name == name } }
+        return saved + LyricsSource.entries.filter { it !in saved }
+    }
+
+    fun setPrioritizeSyllableSync(value: Boolean) {
+        prioritizeSyllableSync.value = value
+        prefs.edit().putBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, value).apply()
+    }
+
+    /**
+     * Puts the source list, its order and [prioritizeSyllableSync] back the
+     * way a fresh install finds them. [syncedLyrics] itself is left alone —
+     * this is "start over on *which* lyrics", not "turn lyrics off".
+     */
+    fun resetLyricsSourceSettings() {
+        setLyricsSources(LyricsSource.entries.toSet())
+        setLyricsSourceOrder(LyricsSource.entries)
+        setPrioritizeSyllableSync(false)
+    }
+
+    fun setAnimatedCanvas(value: Boolean) {
+        animatedCanvas.value = value
+        prefs.edit().putBoolean(KEY_ANIMATED_CANVAS, value).apply()
+    }
+
+    fun setCanvasOverCellular(value: Boolean) {
+        canvasOverCellular.value = value
+        prefs.edit().putBoolean(KEY_CANVAS_OVER_CELLULAR, value).apply()
+    }
+
