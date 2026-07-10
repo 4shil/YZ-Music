@@ -310,3 +310,40 @@ object AppSettings {
     val lastfmEndpoint = MutableStateFlow("")
     val lastfmScrobbleEnabled = MutableStateFlow(false)
     val lastfmNowPlaying = MutableStateFlow(false)
+    val scrobbleMinDuration = MutableStateFlow(30)
+    val scrobbleDelayPercent = MutableStateFlow(0.5f)
+    val scrobbleDelaySeconds = MutableStateFlow(180)
+    val listenBrainzEnabled = MutableStateFlow(false)
+    val listenBrainzToken = MutableStateFlow("")
+    val spotifySpdcToken = MutableStateFlow("")
+
+    // ── Discord Rich Presence ───────────────────────────────────────────
+
+    /**
+     * The connected Discord account's token, mirrored out of [AuthStore] so
+     * [PlaybackService][com.music.yzmusic.playback.PlaybackService] can pick
+     * up a login without polling for one. Empty means not connected.
+     *
+     * Only the mirror is here — the persisted copy is encrypted, because unlike
+     * a scrobbler key this one is the account itself.
+     */
+    val discordToken = MutableStateFlow("")
+
+    /**
+     * Who the token belongs to, cached at login. Kept so the settings screen
+     * can show the account without a round trip every time it opens, and can
+     * still show it offline.
+     */
+    val discordUsername = MutableStateFlow("")
+    val discordName = MutableStateFlow("")
+    val discordAvatar = MutableStateFlow("")
+
+    val discordRpcEnabled = MutableStateFlow(true)
+
+    /** Put the track title on the bold profile line, in place of the artist. */
+    val discordUseDetails = MutableStateFlow(false)
+
+    /** Reveals the presence-shape controls: status, activity type/name, buttons. */
+    val discordAdvancedMode = MutableStateFlow(false)
+
+    val discordStatus = MutableStateFlow("online")
