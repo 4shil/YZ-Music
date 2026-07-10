@@ -40,3 +40,8 @@ object SearchHistory {
     }
 
     /**
+     * Re-reads the list off disk.
+     *
+     * This shares its preference file with [AppSettings], so an import replaces
+     * what is stored here without ever calling [record] — and the flow above
+     * would otherwise go on serving the list the old device had.
