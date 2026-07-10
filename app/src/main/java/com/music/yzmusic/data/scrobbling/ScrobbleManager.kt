@@ -21,3 +21,30 @@ class ScrobbleManager(
     private var scrobbleTimerStartedAt: Long = 0L
     private var songStartedAt: Long = 0L
     private var songStarted = false
+    var useNowPlaying = true
+
+    fun destroy() {
+        scrobbleJob?.cancel()
+        scrobbleRemainingMillis = 0L
+        scrobbleTimerStartedAt = 0L
+        songStartedAt = 0L
+        songStarted = false
+    }
+
+    fun onSongStart(
+        song: Song?,
+        durationMs: Long? = null,
+    ) {
+        if (song == null) return
+        songStartedAt = System.currentTimeMillis() / 1000
+        songStarted = true
+        startScrobbleTimer(song, durationMs)
+        if (useNowPlaying) {
+            updateNowPlaying(song)
+        }
+    }
+
+    fun onSongResume(song: Song) {
+        resumeScrobbleTimer(song)
+    }
+
