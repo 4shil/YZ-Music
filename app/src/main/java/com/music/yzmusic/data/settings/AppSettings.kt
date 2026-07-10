@@ -188,3 +188,67 @@ object AppSettings {
      * [YtMusicRepository.resolveAudio][com.music.yzmusic.data.YtMusicRepository.resolveAudio],
      * which checks this before ever running the swap.
      */
+    val convertVideoToAudio = MutableStateFlow(true)
+
+    /** Drops haze blur (status bar, mini player, bottom fade, lyrics focus) for a solid-fill look. */
+    val reduceDynamicBlur = MutableStateFlow(false)
+
+    /**
+     * Plays a looping video behind the cover art on the player when one is
+     * published for the track — Spotify's Canvas, Apple's motion artwork.
+     *
+     * Costs a video stream on top of the audio one and reaches three
+     * services that have nothing to do with playback, so it stays a switch —
+     * but it is the better default, and most tracks resolve to no canvas at
+     * all. See [CanvasRepository][com.music.yzmusic.data.canvas.CanvasRepository].
+     */
+    val animatedCanvas = MutableStateFlow(true)
+
+    /**
+     * Whether [animatedCanvas] is allowed to actually stream on a metered
+     * connection, as distinct from the switch that turns the feature off
+     * altogether.
+     *
+     * Off by default. A canvas clip loops for as long as its track plays,
+     * and every loop past the first re-fetches the same few seconds of video
+     * — see [CanvasCache][com.music.yzmusic.data.canvas.CanvasCache] for why
+     * that costs network at all rather than being answered from a buffer —
+     * so a few-second clip behind a four-minute track on cellular is not a
+     * flat video cost, it is that cost repeated dozens of times per song.
+     * That is the shape of the reported 8GB day: still art costs nothing
+     * here and stays up regardless of this setting.
+     */
+    val canvasOverCellular = MutableStateFlow(false)
+
+    /**
+     * Blows the player's cover art out to a full-bleed banner running off the
+     * top of the screen, rather than sitting it in a square card.
+     *
+     * The treatment motion artwork has always had, applied to still sleeves too.
+     * Off restores the card: the sleeve keeps its corners, its shadow and its
+     * shrink-while-paused, and only a clip goes full-bleed. Phones only either
+     * way — see the hero notes in
+     * [NowPlayingScreen][com.music.yzmusic.ui.player.NowPlayingScreen].
+     */
+    val fullBleedArtwork = MutableStateFlow(true)
+
+    /**
+     * Time-synced lyrics on the player, lit up as they are sung.
+     *
+     * On by default — it is most of the point of the player screen — but it
+     * reaches third-party lyric databases for every track played, so it stays
+     * a switch, and [lyricsSources] narrows which of them get asked.
+     */
+    val syncedLyrics = MutableStateFlow(true)
+
+    /** The databases [syncedLyrics] may ask. Empty is the same as off. */
+    val lyricsSources = MutableStateFlow(LyricsSource.entries.toSet())
+
+    /**
+     * The order [lyricsSources] are asked in — see [LyricsRepository][com.music.yzmusic.data.lyrics.LyricsRepository]:
+     * every enabled source is asked at once, but a higher-priority one still
+     * pending is never preempted by a lower one that happened to answer first.
+     * Reordered from Settings, so this is a full permutation of
+     * [LyricsSource.entries] rather than a subset — enabling and ordering are
+     * independent choices.
+     */
