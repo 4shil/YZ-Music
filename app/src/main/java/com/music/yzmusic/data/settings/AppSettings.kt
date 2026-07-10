@@ -537,3 +537,78 @@ object AppSettings {
     }
 
     private fun readQuality(key: String): AudioQuality {
+        val stored = prefs.getString(key, null) ?: return AudioQuality.HIGH
+        return runCatching { AudioQuality.valueOf(stored) }.getOrDefault(AudioQuality.HIGH)
+    }
+
+    /**
+     * Write down what the download path was already doing, before it starts
+     * being asked instead.
+     *
+     * Download quality used to be derived rather than chosen: a lossless copy
+     * was kept when `SourceResolver.requestForNow()` said Lossless, which meant
+     * a download quietly turned on the lossless preference and off again with
+     * it. Someone who switched that off on the Sources screen was getting AAC
+     * downloads on purpose, and defaulting them to Lossless now would answer a
+     * question they had already answered — with thirty-five megabytes a track.
+     *
+     * The ceilings are deliberately *not* consulted. They were only in that
+     * derivation because there was nowhere else to say "not on mobile data",
+     * and [wifiOnlyDownloads] is now where that is said.
+     */
+    private fun migrateDownloadQuality() {
+        if (prefs.contains(KEY_QUALITY_DOWNLOAD)) return
+        // Was derived from the old `losslessAudio` switch, which defaulted to
+        // on; LOSSLESS is what that produced for all but the few installs that
+        // had turned it off, and is the default a fresh install gets anyway.
+        prefs.edit().putString(KEY_QUALITY_DOWNLOAD, DownloadQuality.LOSSLESS.name).apply()
+    }
+
+    private fun readDownloadQuality(): DownloadQuality {
+        val stored = prefs.getString(KEY_QUALITY_DOWNLOAD, null) ?: return DownloadQuality.LOSSLESS
+        return runCatching { DownloadQuality.valueOf(stored) }.getOrDefault(DownloadQuality.LOSSLESS)
+    }
+
+    /**
+     * Track the active network so [effectiveAudioQuality] can answer without
+     * touching ConnectivityManager. Stream resolution happens off the main
+     * thread mid-playback; a callback keeps that lookup off the hot path and
+     * lets the settings page show which ceiling is currently in force.
+     */
+    private fun watchConnection(context: Context) {
+        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val refresh = {
+            meteredConnection.value = runCatching {
+                if (manager.activeNetwork == null) null else manager.isActiveNetworkMetered
+            }.getOrNull()
+        }
+        refresh()
+        runCatching {
+            manager.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) = refresh()
+                    override fun onLost(network: Network) = refresh()
+                    override fun onCapabilitiesChanged(
+                        network: Network,
+                        capabilities: NetworkCapabilities,
+                    ) = refresh()
+                },
+            )
+        }
+    }
+
+    fun setAutoplay(value: Boolean) {
+        autoplay.value = value
+        prefs.edit().putBoolean(KEY_AUTOPLAY, value).apply()
+    }
+
+    fun setAudioQualityWifi(value: AudioQuality) {
+        audioQualityWifi.value = value
+        prefs.edit().putString(KEY_QUALITY_WIFI, value.name).apply()
+    }
+
+    fun setAudioQualityCellular(value: AudioQuality) {
+        audioQualityCellular.value = value
+        prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
+    }
+
