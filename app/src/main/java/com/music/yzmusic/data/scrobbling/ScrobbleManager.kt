@@ -48,3 +48,12 @@ class ScrobbleManager(
         resumeScrobbleTimer(song)
     }
 
+    fun onSongPause() {
+        pauseScrobbleTimer()
+    }
+
+    fun onSongStop() {
+        stopScrobbleTimer()
+        songStarted = false
+    }
+
