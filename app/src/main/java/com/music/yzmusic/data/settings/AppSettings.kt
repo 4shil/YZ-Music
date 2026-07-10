@@ -834,3 +834,80 @@ object AppSettings {
         prefs.edit().putFloat(KEY_SCROBBLE_DELAY_PERCENT, value).apply()
     }
 
+    fun setScrobbleDelaySeconds(value: Int) {
+        scrobbleDelaySeconds.value = value
+        prefs.edit().putInt(KEY_SCROBBLE_DELAY_SECONDS, value).apply()
+    }
+
+    fun setListenBrainzEnabled(value: Boolean) {
+        listenBrainzEnabled.value = value
+        prefs.edit().putBoolean(KEY_LISTENBRAINZ_ENABLED, value).apply()
+    }
+
+    fun setListenBrainzToken(value: String) {
+        listenBrainzToken.value = value
+        prefs.edit().putString(KEY_LISTENBRAINZ_TOKEN, value).apply()
+    }
+
+    /** Writes through to the encrypted store; pass "" to disconnect. */
+    fun setDiscordToken(value: String) {
+        discordToken.value = value
+        authStore.discordToken = value.ifEmpty { null }
+    }
+
+    fun setDiscordAccount(username: String, name: String, avatar: String?) {
+        discordUsername.value = username
+        discordName.value = name
+        discordAvatar.value = avatar.orEmpty()
+        prefs.edit()
+            .putString(KEY_DISCORD_USERNAME, username)
+            .putString(KEY_DISCORD_NAME, name)
+            .putString(KEY_DISCORD_AVATAR, avatar.orEmpty())
+            .apply()
+    }
+
+    fun setDiscordRpcEnabled(value: Boolean) {
+        discordRpcEnabled.value = value
+        prefs.edit().putBoolean(KEY_DISCORD_RPC_ENABLED, value).apply()
+    }
+
+    fun setDiscordUseDetails(value: Boolean) {
+        discordUseDetails.value = value
+        prefs.edit().putBoolean(KEY_DISCORD_USE_DETAILS, value).apply()
+    }
+
+    fun setDiscordAdvancedMode(value: Boolean) {
+        discordAdvancedMode.value = value
+        prefs.edit().putBoolean(KEY_DISCORD_ADVANCED_MODE, value).apply()
+    }
+
+    fun setDiscordStatus(value: String) {
+        discordStatus.value = value
+        prefs.edit().putString(KEY_DISCORD_STATUS, value).apply()
+    }
+
+    fun setDiscordActivityType(value: String) {
+        discordActivityType.value = value
+        prefs.edit().putString(KEY_DISCORD_ACTIVITY_TYPE, value).apply()
+    }
+
+    fun setDiscordActivityName(value: String) {
+        discordActivityName.value = value
+        prefs.edit().putString(KEY_DISCORD_ACTIVITY_NAME, value).apply()
+    }
+
+    fun setDiscordButton1Text(value: String) {
+        discordButton1Text.value = value
+        prefs.edit().putString(KEY_DISCORD_BUTTON_1_TEXT, value).apply()
+    }
+
+    fun setDiscordButton1Visible(value: Boolean) {
+        discordButton1Visible.value = value
+        prefs.edit().putBoolean(KEY_DISCORD_BUTTON_1_VISIBLE, value).apply()
+    }
+
+    fun setDiscordButton2Text(value: String) {
+        discordButton2Text.value = value
+        prefs.edit().putString(KEY_DISCORD_BUTTON_2_TEXT, value).apply()
+    }
+
