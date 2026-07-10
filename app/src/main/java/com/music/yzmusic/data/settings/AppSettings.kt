@@ -585,3 +585,30 @@ object AppSettings {
         refresh()
         runCatching {
             manager.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) = refresh()
+                    override fun onLost(network: Network) = refresh()
+                    override fun onCapabilitiesChanged(
+                        network: Network,
+                        capabilities: NetworkCapabilities,
+                    ) = refresh()
+                },
+            )
+        }
+    }
+
+    fun setAutoplay(value: Boolean) {
+        autoplay.value = value
+        prefs.edit().putBoolean(KEY_AUTOPLAY, value).apply()
+    }
+
+    fun setAudioQualityWifi(value: AudioQuality) {
+        audioQualityWifi.value = value
+        prefs.edit().putString(KEY_QUALITY_WIFI, value.name).apply()
+    }
+
+    fun setAudioQualityCellular(value: AudioQuality) {
+        audioQualityCellular.value = value
+        prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
+    }
+
