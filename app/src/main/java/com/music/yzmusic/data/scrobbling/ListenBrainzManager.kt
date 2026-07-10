@@ -105,3 +105,14 @@ object ListenBrainzManager {
         }
     }
 
+    private fun parseDurationMs(text: String?): Long {
+        if (text == null) return 0L
+        val parts = text.split(":")
+        if (parts.size != 2) return 0L
+        val minutes = parts[0].toLongOrNull() ?: return 0L
+        val seconds = parts[1].toLongOrNull() ?: return 0L
+        return (minutes * 60 + seconds) * 1000
+    }
+
+    private fun escapeJson(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+}
