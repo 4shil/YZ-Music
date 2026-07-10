@@ -762,3 +762,35 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_CANVAS_OVER_CELLULAR, value).apply()
     }
 
+    fun setFullBleedArtwork(value: Boolean) {
+        fullBleedArtwork.value = value
+        prefs.edit().putBoolean(KEY_FULL_BLEED_ARTWORK, value).apply()
+    }
+
+    /** Clamped to [DEFAULT_CACHE_LIMIT_BYTES]..[MAX_CACHE_LIMIT_BYTES] — the floor is the default, not zero. */
+    fun setAudioCacheLimitBytes(value: Long) {
+        val clamped = value.coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
+        audioCacheLimitBytes.value = clamped
+        prefs.edit().putLong(KEY_CACHE_LIMIT, clamped).apply()
+    }
+
+    fun setLastfmEnabled(value: Boolean) {
+        lastfmEnabled.value = value
+        prefs.edit().putBoolean(KEY_LASTFM_ENABLED, value).apply()
+    }
+
+    fun setLastfmUsername(value: String) {
+        lastfmUsername.value = value
+        prefs.edit().putString(KEY_LASTFM_USERNAME, value).apply()
+    }
+
+    fun setLastfmSessionKey(value: String) {
+        lastfmSessionKey.value = value
+        prefs.edit().putString(KEY_LASTFM_SESSION_KEY, value).apply()
+    }
+
+    fun setLastfmApiKey(value: String) {
+        lastfmApiKey.value = value
+        prefs.edit().putString(KEY_LASTFM_API_KEY, value).apply()
+    }
+
