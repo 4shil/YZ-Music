@@ -57,3 +57,14 @@ class ScrobbleManager(
         songStarted = false
     }
 
+    private fun startScrobbleTimer(
+        song: Song,
+        durationMs: Long? = null,
+    ) {
+        scrobbleJob?.cancel()
+        val resolvedDurationSeconds = durationMs?.toInt()?.div(1000)
+            ?: song.durationText?.let { parseDurationSeconds(it) }
+            ?: return
+
+        if (resolvedDurationSeconds <= minSongDuration) return
+
