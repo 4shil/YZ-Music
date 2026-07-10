@@ -74,4 +74,3 @@ object SearchHistory {
 
     private const val KEY_HISTORY = "search_history"
 }
-
