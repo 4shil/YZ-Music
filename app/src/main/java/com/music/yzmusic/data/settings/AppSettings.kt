@@ -612,3 +612,73 @@ object AppSettings {
         prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
     }
 
+    fun setDownloadQuality(value: DownloadQuality) {
+        downloadQuality.value = value
+        prefs.edit().putString(KEY_QUALITY_DOWNLOAD, value.name).apply()
+    }
+
+    fun setWifiOnlyDownloads(value: Boolean) {
+        wifiOnlyDownloads.value = value
+        prefs.edit().putBoolean(KEY_WIFI_ONLY_DOWNLOADS, value).apply()
+    }
+
+    fun setCrossfadeSeconds(value: Int) {
+        crossfadeSeconds.value = value
+        prefs.edit().putInt(KEY_CROSSFADE, value).apply()
+    }
+
+    fun setSmartFadeEnabled(value: Boolean) {
+        smartFadeEnabled.value = value
+        prefs.edit().putBoolean(KEY_SMART_FADE, value).apply()
+    }
+
+    fun setSkipSilence(value: Boolean) {
+        skipSilence.value = value
+        prefs.edit().putBoolean(KEY_SKIP_SILENCE, value).apply()
+    }
+
+    fun setSpatialAudio(value: Boolean) {
+        spatialAudio.value = value
+        prefs.edit().putBoolean(KEY_SPATIAL_AUDIO, value).apply()
+    }
+
+    fun setPlaybackSpeed(value: Float) {
+        playbackSpeed.value = value
+        prefs.edit().putFloat(KEY_SPEED, value).apply()
+    }
+
+    fun setShowNerdStats(value: Boolean) {
+        showNerdStats.value = value
+        prefs.edit().putBoolean(KEY_NERD_STATS, value).apply()
+    }
+
+    fun setThemeMode(value: ThemeMode) {
+        themeMode.value = value
+        prefs.edit().putString(KEY_THEME, value.name).apply()
+    }
+
+    fun setReduceAnimation(value: Boolean) {
+        reduceAnimation.value = value
+        prefs.edit().putBoolean(KEY_REDUCE_ANIMATION, value).apply()
+    }
+
+    fun setStopOnTaskRemoved(value: Boolean) {
+        stopOnTaskRemoved.value = value
+        prefs.edit().putBoolean(KEY_STOP_ON_TASK_REMOVED, value).apply()
+    }
+
+    fun setHideVolumeBar(value: Boolean) {
+        hideVolumeBar.value = value
+        prefs.edit().putBoolean(KEY_HIDE_VOLUME_BAR, value).apply()
+    }
+
+    fun setSwipeToPlayNext(value: Boolean) {
+        swipeToPlayNext.value = value
+        prefs.edit().putBoolean(KEY_SWIPE_TO_PLAY_NEXT, value).apply()
+    }
+
+    fun setDontRepeatSuggestions(value: Boolean) {
+        dontRepeatSuggestions.value = value
+        prefs.edit().putBoolean(KEY_DONT_REPEAT_SUGGESTIONS, value).apply()
+    }
+
