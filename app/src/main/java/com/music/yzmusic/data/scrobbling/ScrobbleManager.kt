@@ -101,3 +101,15 @@ class ScrobbleManager(
         scrobbleJob =
             scope.launch {
                 delay(scrobbleRemainingMillis)
+                val durationSeconds = song.durationText?.let { parseDurationSeconds(it) } ?: 0
+                scrobbleSong(song, durationSeconds)
+                scrobbleJob = null
+            }
+    }
+
+    private fun stopScrobbleTimer() {
+        scrobbleJob?.cancel()
+        scrobbleJob = null
+        scrobbleRemainingMillis = 0
+    }
+
