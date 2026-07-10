@@ -612,3 +612,38 @@ object AppSettings {
         prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
     }
 
+    fun setDownloadQuality(value: DownloadQuality) {
+        downloadQuality.value = value
+        prefs.edit().putString(KEY_QUALITY_DOWNLOAD, value.name).apply()
+    }
+
+    fun setWifiOnlyDownloads(value: Boolean) {
+        wifiOnlyDownloads.value = value
+        prefs.edit().putBoolean(KEY_WIFI_ONLY_DOWNLOADS, value).apply()
+    }
+
+    fun setCrossfadeSeconds(value: Int) {
+        crossfadeSeconds.value = value
+        prefs.edit().putInt(KEY_CROSSFADE, value).apply()
+    }
+
+    fun setSmartFadeEnabled(value: Boolean) {
+        smartFadeEnabled.value = value
+        prefs.edit().putBoolean(KEY_SMART_FADE, value).apply()
+    }
+
+    fun setSkipSilence(value: Boolean) {
+        skipSilence.value = value
+        prefs.edit().putBoolean(KEY_SKIP_SILENCE, value).apply()
+    }
+
+    fun setSpatialAudio(value: Boolean) {
+        spatialAudio.value = value
+        prefs.edit().putBoolean(KEY_SPATIAL_AUDIO, value).apply()
+    }
+
+    fun setPlaybackSpeed(value: Float) {
+        playbackSpeed.value = value
+        prefs.edit().putFloat(KEY_SPEED, value).apply()
+    }
+
