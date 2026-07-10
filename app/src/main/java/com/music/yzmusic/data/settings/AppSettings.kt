@@ -127,3 +127,64 @@ object AppSettings {
     val wifiOnlyDownloads = MutableStateFlow(true)
 
     /** Whether the active network charges for data. `null` while offline. */
+    val meteredConnection = MutableStateFlow<Boolean?>(null)
+
+    // `losslessAudio` used to live here, behind a "Prefer lossless" switch on
+    // the Sources screen. It is gone: sources are asked for their best and each
+    // degrades on its own terms, so the switch's only real effect was to ask a
+    // module for a worse file than it was holding. See
+    // [SourceResolver.requestForNow][com.music.yzmusic.data.sources.SourceResolver.requestForNow],
+    // which now reads [effectiveAudioQuality] and nothing else.
+
+    val crossfadeSeconds = MutableStateFlow(0)
+
+    /**
+     * Lets Automix's analyzer decide the transition's timing and length
+     * from each track's tempo, energy and structure, replacing the fixed
+     * [crossfadeSeconds] window rather than needing it set to anything first
+     * — [crossfadeSeconds] only matters here as a fallback while a pair is
+     * still being analysed. Off by default: analysis costs a background
+     * decode per track.
+     *
+     * See [com.music.yzmusic.playback.smart.TransitionPlanner].
+     */
+    val smartFadeEnabled = MutableStateFlow(false)
+    val skipSilence = MutableStateFlow(false)
+
+    /**
+     * Widens stereo output via [com.music.yzmusic.playback.SpatialAudioProcessor],
+     * a stereo widening + cross-feed effect running inside ExoPlayer's own
+     * pipeline. Not true object-based spatial audio — YouTube only ever hands
+     * us a stereo stream, so there's no Atmos-style source to render.
+     */
+    val spatialAudio = MutableStateFlow(false)
+    val playbackSpeed = MutableStateFlow(1.0f)
+    val themeMode = MutableStateFlow(ThemeMode.DARK)
+
+    /** Keep playing similar music once the queue runs out. */
+    val autoplay = MutableStateFlow(true)
+
+    /** Put the playing track's codec, bitrate and sample rate on the player. */
+    val showNerdStats = MutableStateFlow(false)
+
+    /** Freezes the main player's mesh gradient instead of letting it drift/crossfade. */
+    val reduceAnimation = MutableStateFlow(false)
+
+    /** Stop playback when the app is swiped away from the recent apps screen. */
+    val stopOnTaskRemoved = MutableStateFlow(false)
+
+    /** Hides the volume slider on the main player, leaving the rest of the layout to reflow. */
+    val hideVolumeBar = MutableStateFlow(false)
+
+    /** Swiping a song row plays it next instead of adding it to the end of the queue. */
+    val swipeToPlayNext = MutableStateFlow(false)
+
+    /** Once a song has been suggested or played this session, AutoPlay won't offer it again. */
+    val dontRepeatSuggestions = MutableStateFlow(false)
+
+    /**
+     * Leaves a music-video upload as itself instead of swapping it for its
+     * catalogue audio release. See
+     * [YtMusicRepository.resolveAudio][com.music.yzmusic.data.YtMusicRepository.resolveAudio],
+     * which checks this before ever running the swap.
+     */
