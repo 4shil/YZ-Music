@@ -682,3 +682,49 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_DONT_REPEAT_SUGGESTIONS, value).apply()
     }
 
+    fun setConvertVideoToAudio(value: Boolean) {
+        convertVideoToAudio.value = value
+        prefs.edit().putBoolean(KEY_CONVERT_VIDEO_TO_AUDIO, value).apply()
+    }
+
+    fun setReduceDynamicBlur(value: Boolean) {
+        reduceDynamicBlur.value = value
+        prefs.edit().putBoolean(KEY_REDUCE_BLUR, value).apply()
+    }
+
+    fun setSyncedLyrics(value: Boolean) {
+        syncedLyrics.value = value
+        prefs.edit().putBoolean(KEY_SYNCED_LYRICS, value).apply()
+    }
+
+    fun setLyricsSources(value: Set<LyricsSource>) {
+        lyricsSources.value = value
+        prefs.edit().putString(KEY_LYRICS_SOURCES, value.joinToString(",") { it.name }).apply()
+    }
+
+    /**
+     * Stored as a joined list of names rather than a string set: a name that
+     * no longer exists — a source dropped in a later build — has to fall out
+     * quietly, and the default when nothing has been saved is "all of them",
+     * which a missing key and an empty set would otherwise be unable to tell
+     * apart.
+     */
+    private fun readLyricsSources(): Set<LyricsSource> {
+        val stored = prefs.getString(KEY_LYRICS_SOURCES, null)
+            ?: return LyricsSource.entries.toSet()
+        return stored.split(",")
+            .mapNotNull { name -> LyricsSource.entries.firstOrNull { it.name == name } }
+            .toSet()
+    }
+
+    fun setLyricsSourceOrder(value: List<LyricsSource>) {
+        lyricsSourceOrder.value = value
+        prefs.edit().putString(KEY_LYRICS_SOURCE_ORDER, value.joinToString(",") { it.name }).apply()
+    }
+
+    /**
+     * A named source dropped from the stored order — an upgrade reordered
+     * since it was saved — falls out on read; one added since is appended, in
+     * [LyricsSource]'s own declared order, so a fresh install and an upgraded
+     * one agree on where a new source lands until the user says otherwise.
+     */
