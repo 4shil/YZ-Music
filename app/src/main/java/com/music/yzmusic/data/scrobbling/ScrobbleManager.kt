@@ -148,3 +148,24 @@ class ScrobbleManager(
         }
     }
 
+    fun onPlayerStateChanged(
+        isPlaying: Boolean,
+        song: Song?,
+        durationMs: Long? = null,
+    ) {
+        if (song == null) return
+        if (isPlaying) {
+            if (!songStarted) {
+                onSongStart(song, durationMs)
+            } else {
+                onSongResume(song)
+            }
+        } else {
+            onSongPause()
+        }
+    }
+
+    /**
+     * Parse "M:SS" or "MM:SS" duration text to total seconds.
+     */
+    private fun parseDurationSeconds(text: String): Int {
