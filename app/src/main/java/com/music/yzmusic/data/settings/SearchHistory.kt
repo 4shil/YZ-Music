@@ -25,3 +25,13 @@ object SearchHistory {
     /** Deep enough to be useful, shallow enough that the list stays scannable. */
     private const val MAX_ENTRIES = 20
 
+    private lateinit var prefs: SharedPreferences
+    private val json = Json
+    private val serializer = ListSerializer(String.serializer())
+
+    private val _recent = MutableStateFlow<List<String>>(emptyList())
+
+    /** Most recent first. */
+    val recent: StateFlow<List<String>> = _recent.asStateFlow()
+
+    fun init(context: Context) {
