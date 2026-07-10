@@ -49,3 +49,81 @@ enum class DownloadQuality(
     val label: String,
     val detail: String,
     /** Roughly what one four-minute track costs at this rung, sans unit context. */
+    val perTrack: String,
+    /** Whether a source's bit-exact file is worth keeping, or a transcode will do. */
+    val keepsLossless: Boolean,
+) {
+    STANDARD(128, "Standard", "~128 kbps AAC · fits more on the device", "~4 MB", false),
+    HIGH(Int.MAX_VALUE, "High", "Best AAC on offer, usually ~256 kbps", "~8 MB", false),
+    LOSSLESS(
+        Int.MAX_VALUE,
+        "Lossless",
+        "Bit-exact if a source has it, best AAC if not",
+        "~35 MB",
+        true,
+    ),
+}
+
+enum class ThemeMode(val label: String) {
+    SYSTEM("System"), LIGHT("Light"), DARK("Dark")
+}
+
+/**
+ * App settings, backed by SharedPreferences and exposed as flows.
+ *
+ * PlaybackService runs in the same process as the UI, so it observes these
+ * same flows and applies changes to the live ExoPlayer instance immediately —
+ * no restart, no rebinding.
+ */
+object AppSettings {
+
+    private lateinit var prefs: SharedPreferences
+
+    /** Only for the Discord token — everything else on here is plain prefs. */
+    private lateinit var authStore: AuthStore
+
+    /**
+     * Quality ceilings, one per kind of connection — the point of the split is
+     * that Wi-Fi can stay on High while mobile data is capped. Both default to
+     * High; the mobile plan is the user's to budget, not ours to assume.
+     */
+    val audioQualityWifi = MutableStateFlow(AudioQuality.HIGH)
+    val audioQualityCellular = MutableStateFlow(AudioQuality.HIGH)
+
+    /**
+     * What a saved file should be, answered on its own terms.
+     *
+     * Kept apart from the two ceilings above on purpose. Those are about what
+     * this minute's connection costs, and a download outlives the minute it was
+     * started in — capping a permanent file at whichever network happened to be
+     * in hand bakes a temporary decision into a lasting artefact, and the
+     * reverse (a High ceiling on Wi-Fi implying 35MB FLACs of everything) is
+     * just as wrong in the other direction.
+     *
+     * Data spend on a download is [wifiOnlyDownloads]' problem, not this
+     * setting's, which is what lets this one be purely about the file.
+     *
+     * Defaults to [DownloadQuality.LOSSLESS] because that is what the download
+     * path already did on an uncapped connection, and [migrateDownloadQuality]
+     * keeps it that way for the people it didn't.
+     */
+    val downloadQuality = MutableStateFlow(DownloadQuality.LOSSLESS)
+
+    /**
+     * Refuse to start a download while the connection charges for data.
+     *
+     * Metered rather than literally-Wi-Fi, the same test [effectiveAudioQuality]
+     * makes, because the thing worth protecting is the bill and not the radio: a
+     * tethered hotspot is Wi-Fi that costs money, and an unmetered home
+     * connection is worth using whether or not it arrives over Wi-Fi.
+     *
+     * On by default, and that is a deliberate change of behaviour for anyone
+     * updating. [downloadQuality] defaulting to Lossless means a tap that used
+     * to spend four megabytes of mobile data can now spend thirty-five, and of
+     * the two ways to get that wrong — silently overspending a data plan, or
+     * refusing with a sentence naming the switch that would allow it — only the
+     * second is recoverable by the person it happens to.
+     */
+    val wifiOnlyDownloads = MutableStateFlow(true)
+
+    /** Whether the active network charges for data. `null` while offline. */
