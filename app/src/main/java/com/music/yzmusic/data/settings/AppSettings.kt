@@ -303,3 +303,10 @@ object AppSettings {
     val scrobblingAvailable = true
 
     val lastfmEnabled = MutableStateFlow(false)
+    val lastfmUsername = MutableStateFlow("")
+    val lastfmSessionKey = MutableStateFlow("")
+    val lastfmApiKey = MutableStateFlow("")
+    val lastfmSecret = MutableStateFlow("")
+    val lastfmEndpoint = MutableStateFlow("")
+    val lastfmScrobbleEnabled = MutableStateFlow(false)
+    val lastfmNowPlaying = MutableStateFlow(false)
