@@ -65,3 +65,13 @@ object SearchHistory {
         save(_recent.value.filterNot { it.equals(query, ignoreCase = true) })
     }
 
+    fun clear() = save(emptyList())
+
+    private fun save(value: List<String>) {
+        _recent.value = value
+        prefs.edit().putString(KEY_HISTORY, json.encodeToString(serializer, value)).apply()
+    }
+
+    private const val KEY_HISTORY = "search_history"
+}
+
