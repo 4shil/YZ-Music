@@ -80,3 +80,28 @@ object ListenBrainzManager {
                 val bodyJson = "{\"listen_type\":\"single\",\"payload\":[$trackMetadata]}"
                 Log.d(TAG, "submitFinished: $bodyJson")
                 val body = bodyJson.toRequestBody("application/json".toMediaType())
+                val request =
+                    Request.Builder()
+                        .url(API_URL)
+                        .post(body)
+                        .addHeader("Content-Type", "application/json")
+                        .addHeader("Authorization", "Token $token")
+                        .build()
+
+                Http.client.newCall(request).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        Log.d(TAG, "finished listen submitted for ${song.title}")
+                        true
+                    } else {
+                        val bodyText = try { resp.body?.string() ?: "" } catch (_: Exception) { "" }
+                        Log.w(TAG, "finished listen submit failed: ${resp.code} - $bodyText")
+                        false
+                    }
+                }
+            } catch (ex: Exception) {
+                Log.e(TAG, "submitFinished failed", ex)
+                false
+            }
+        }
+    }
+
