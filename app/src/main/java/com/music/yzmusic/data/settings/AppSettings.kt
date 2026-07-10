@@ -252,3 +252,61 @@ object AppSettings {
      * [LyricsSource.entries] rather than a subset — enabling and ordering are
      * independent choices.
      */
+    val lyricsSourceOrder = MutableStateFlow<List<LyricsSource>>(LyricsSource.entries)
+
+    /**
+     * Off, the highest-priority source to answer at all is taken as the
+     * lyrics, word-synced or not. On, a merely line-synced answer is held as
+     * a fallback while the rest of [lyricsSourceOrder] is still checked for a
+     * word-synced one — worth the extra network calls to some, not to others,
+     * which is why it defaults off rather than being how [LyricsRepository]
+     * always behaved.
+     */
+    val prioritizeSyllableSync = MutableStateFlow(false)
+
+    /** Disk budget for cached audio. [AudioCache][com.music.yzmusic.playback.AudioCache] evicts past it. */
+    val audioCacheLimitBytes = MutableStateFlow(DEFAULT_CACHE_LIMIT_BYTES)
+
+    // ── Replay ──────────────────────────────────────────────────────────────
+
+    /**
+     * Whether Replay may work out a genre chart.
+     *
+     * Its own switch because it is the one part of Replay that isn't purely
+     * local: everything else on that page is counted on this device and never
+     * leaves it, while a genre has to be looked up by artist name — see
+     * [ArtistFacts][com.music.yzmusic.data.stats.ArtistFacts]. On by default,
+     * since it sends a name and nothing else and the answer is what makes a
+     * quarter of the page exist; off, the genre chart simply isn't drawn.
+     */
+    val replayGenres = MutableStateFlow(true)
+
+    // ── Library ─────────────────────────────────────────────────────────────
+
+    /**
+     * Browse ids of the playlists pinned to the top of the Library tab, in the
+     * order they were pinned.
+     *
+     * A [List] rather than a [Set]: pin order is part of what a pin means here —
+     * the whole point is a small, hand-picked front row, and a set would leave
+     * that order to hash iteration. Capped at [MAX_PINNED_PLAYLISTS] by
+     * [togglePinnedPlaylist], the only way this is ever written.
+     */
+    val pinnedPlaylists = MutableStateFlow<List<String>>(emptyList())
+
+    /** How many playlists [pinnedPlaylists] can hold at once. */
+    const val MAX_PINNED_PLAYLISTS = 5
+
+    // ── Scrobbling ──────────────────────────────────────────────────────
+
+    /** One release gate shared by the settings UI and the playback service. */
+    val scrobblingAvailable = true
+
+    val lastfmEnabled = MutableStateFlow(false)
+    val lastfmUsername = MutableStateFlow("")
+    val lastfmSessionKey = MutableStateFlow("")
+    val lastfmApiKey = MutableStateFlow("")
+    val lastfmSecret = MutableStateFlow("")
+    val lastfmEndpoint = MutableStateFlow("")
+    val lastfmScrobbleEnabled = MutableStateFlow(false)
+    val lastfmNowPlaying = MutableStateFlow(false)
