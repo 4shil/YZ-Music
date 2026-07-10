@@ -361,3 +361,72 @@ object AppSettings {
     val discordInfoDismissed = MutableStateFlow(false)
 
     /** Published by PlaybackService so the UI can open the system equalizer. */
+    val audioSessionId = MutableStateFlow(0)
+
+    /**
+     * True only while a Automix transition that is actually *mixing* is
+     * audible — one that beat-matched, cued the incoming track into its
+     * arrangement, or rode a filter.
+     *
+     * Deliberately not "a crossfade is running". The fallback case, where
+     * neither track was analysed in time and the incoming one starts from 0:00
+     * under a plain equal-power fade, is exactly what this must stay dark for:
+     * the whole point is that seeing it means the analysis landed and did
+     * something a plain crossfade could not.
+     */
+    val smartMixInProgress = MutableStateFlow(false)
+
+    /**
+     * How much of the *upcoming* transition has been analysed, for stats for
+     * nerds. Published by the crossfade controller, which is the only thing
+     * that knows which two tracks the next transition is between.
+     */
+    val smartAnalysis = MutableStateFlow(SmartAnalysis())
+
+    /**
+     * Where on the *playing* track the next transition is planned to happen, as
+     * fractions of its duration, or null when there is nothing worth drawing.
+     *
+     * Only published once both tracks are measured. Before that the planner is
+     * still working from a fallback window that moves as evidence arrives, and
+     * a marker that slides around the bar would be worse than no marker.
+     */
+    val smartTransitionWindow = MutableStateFlow<TransitionWindow?>(null)
+
+    /** The ceiling that applies to a stream started right now. */
+    val effectiveAudioQuality: AudioQuality
+        get() = if (meteredConnection.value == true) {
+            audioQualityCellular.value
+        } else {
+            audioQualityWifi.value
+        }
+
+    /**
+     * Whether a download may start on the connection in hand.
+     *
+     * A null [meteredConnection] means there is no active network, and that is
+     * deliberately allowed through: a download with nothing to download over
+     * fails on the network and says so, which is true, where refusing it here
+     * would blame a Wi-Fi setting for an outage.
+     */
+    val downloadsAllowedNow: Boolean
+        get() = !wifiOnlyDownloads.value || meteredConnection.value != true
+
+    fun init(context: Context) {
+        prefs = context.getSharedPreferences("yzmusic_settings", Context.MODE_PRIVATE)
+        authStore = AuthStore(context)
+        readAll()
+        watchConnection(context)
+    }
+
+    /**
+     * Re-reads every setting off disk.
+     *
+     * The one caller is an import ([Backup][com.music.yzmusic.data.stats.Backup]),
+     * which writes the whole preference file underneath these flows. Nothing
+     * else in the app changes a preference without going through the setter
+     * beside it, so nothing else has a reason to ask.
+     *
+     * Deliberately not re-registering the network callback: that watches the
+     * device, not the preferences, and a second one would have both firing.
+     */
