@@ -60,3 +60,8 @@ object SearchHistory {
         val deduped = _recent.value.filterNot { it.equals(term, ignoreCase = true) }
         save((listOf(term) + deduped).take(MAX_ENTRIES))
     }
+
+    fun remove(query: String) {
+        save(_recent.value.filterNot { it.equals(query, ignoreCase = true) })
+    }
+
