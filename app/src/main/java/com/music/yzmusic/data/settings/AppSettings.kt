@@ -728,3 +728,37 @@ object AppSettings {
      * [LyricsSource]'s own declared order, so a fresh install and an upgraded
      * one agree on where a new source lands until the user says otherwise.
      */
+    private fun readLyricsSourceOrder(): List<LyricsSource> {
+        val stored = prefs.getString(KEY_LYRICS_SOURCE_ORDER, null)
+            ?: return LyricsSource.entries
+        val saved = stored.split(",")
+            .mapNotNull { name -> LyricsSource.entries.firstOrNull { it.name == name } }
+        return saved + LyricsSource.entries.filter { it !in saved }
+    }
+
+    fun setPrioritizeSyllableSync(value: Boolean) {
+        prioritizeSyllableSync.value = value
+        prefs.edit().putBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, value).apply()
+    }
+
+    /**
+     * Puts the source list, its order and [prioritizeSyllableSync] back the
+     * way a fresh install finds them. [syncedLyrics] itself is left alone —
+     * this is "start over on *which* lyrics", not "turn lyrics off".
+     */
+    fun resetLyricsSourceSettings() {
+        setLyricsSources(LyricsSource.entries.toSet())
+        setLyricsSourceOrder(LyricsSource.entries)
+        setPrioritizeSyllableSync(false)
+    }
+
+    fun setAnimatedCanvas(value: Boolean) {
+        animatedCanvas.value = value
+        prefs.edit().putBoolean(KEY_ANIMATED_CANVAS, value).apply()
+    }
+
+    fun setCanvasOverCellular(value: Boolean) {
+        canvasOverCellular.value = value
+        prefs.edit().putBoolean(KEY_CANVAS_OVER_CELLULAR, value).apply()
+    }
+
