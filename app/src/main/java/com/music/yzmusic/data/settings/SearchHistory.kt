@@ -50,3 +50,8 @@ object SearchHistory {
         if (!this::prefs.isInitialized) return
         _recent.value = runCatching {
             json.decodeFromString(serializer, prefs.getString(KEY_HISTORY, null) ?: "[]")
+        }.getOrDefault(emptyList())
+    }
+
+    /** Records [query], or moves it back to the top if it's already there. */
+    fun record(query: String) {
