@@ -430,3 +430,158 @@ object AppSettings {
      * Deliberately not re-registering the network callback: that watches the
      * device, not the preferences, and a second one would have both firing.
      */
+    fun reload() {
+        if (!this::prefs.isInitialized) return
+        readAll()
+    }
+
+    private fun readAll() {
+        migrateSingleQuality()
+        audioQualityWifi.value = readQuality(KEY_QUALITY_WIFI)
+        audioQualityCellular.value = readQuality(KEY_QUALITY_CELLULAR)
+        migrateDownloadQuality()
+        downloadQuality.value = readDownloadQuality()
+        wifiOnlyDownloads.value = prefs.getBoolean(KEY_WIFI_ONLY_DOWNLOADS, true)
+        crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
+        smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
+        skipSilence.value = prefs.getBoolean(KEY_SKIP_SILENCE, false)
+        spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
+        playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
+        themeMode.value = runCatching {
+            ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
+        }.getOrDefault(ThemeMode.DARK)
+        autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
+        showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
+        reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
+        stopOnTaskRemoved.value = prefs.getBoolean(KEY_STOP_ON_TASK_REMOVED, false)
+        hideVolumeBar.value = prefs.getBoolean(KEY_HIDE_VOLUME_BAR, false)
+        swipeToPlayNext.value = prefs.getBoolean(KEY_SWIPE_TO_PLAY_NEXT, false)
+        dontRepeatSuggestions.value = prefs.getBoolean(KEY_DONT_REPEAT_SUGGESTIONS, false)
+        convertVideoToAudio.value = prefs.getBoolean(KEY_CONVERT_VIDEO_TO_AUDIO, true)
+        reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, false)
+        animatedCanvas.value = prefs.getBoolean(KEY_ANIMATED_CANVAS, true)
+        canvasOverCellular.value = prefs.getBoolean(KEY_CANVAS_OVER_CELLULAR, false)
+        fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
+        syncedLyrics.value = prefs.getBoolean(KEY_SYNCED_LYRICS, true)
+        lyricsSources.value = readLyricsSources()
+        lyricsSourceOrder.value = readLyricsSourceOrder()
+        prioritizeSyllableSync.value = prefs.getBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, false)
+        audioCacheLimitBytes.value = prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES)
+            .coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
+        lastfmEnabled.value = prefs.getBoolean(KEY_LASTFM_ENABLED, false)
+        lastfmUsername.value = prefs.getString(KEY_LASTFM_USERNAME, "").orEmpty()
+        lastfmSessionKey.value = prefs.getString(KEY_LASTFM_SESSION_KEY, "").orEmpty()
+        lastfmApiKey.value = prefs.getString(KEY_LASTFM_API_KEY, "").orEmpty().ifBlank { BuildConfig.LASTFM_API_KEY }
+        lastfmSecret.value = prefs.getString(KEY_LASTFM_SECRET, "").orEmpty().ifBlank { BuildConfig.LASTFM_SECRET }
+        lastfmEndpoint.value = prefs.getString(KEY_LASTFM_ENDPOINT, "").orEmpty()
+        lastfmScrobbleEnabled.value = prefs.getBoolean(KEY_LASTFM_SCROBBLE_ENABLED, false)
+        lastfmNowPlaying.value = prefs.getBoolean(KEY_LASTFM_NOW_PLAYING, false) && lastfmScrobbleEnabled.value
+        scrobbleMinDuration.value = prefs.getInt(KEY_SCROBBLE_MIN_DURATION, 30)
+        scrobbleDelayPercent.value = prefs.getFloat(KEY_SCROBBLE_DELAY_PERCENT, 0.5f)
+        scrobbleDelaySeconds.value = prefs.getInt(KEY_SCROBBLE_DELAY_SECONDS, 180)
+        listenBrainzEnabled.value = prefs.getBoolean(KEY_LISTENBRAINZ_ENABLED, false)
+        listenBrainzToken.value = prefs.getString(KEY_LISTENBRAINZ_TOKEN, "").orEmpty()
+        spotifySpdcToken.value = prefs.getString(KEY_SPOTIFY_SPDC_TOKEN, "").orEmpty()
+        replayGenres.value = prefs.getBoolean(KEY_REPLAY_GENRES, true)
+        pinnedPlaylists.value = readPinnedPlaylists()
+        discordToken.value = authStore.discordToken.orEmpty()
+        discordUsername.value = prefs.getString(KEY_DISCORD_USERNAME, "").orEmpty()
+        discordName.value = prefs.getString(KEY_DISCORD_NAME, "").orEmpty()
+        discordAvatar.value = prefs.getString(KEY_DISCORD_AVATAR, "").orEmpty()
+        discordRpcEnabled.value = prefs.getBoolean(KEY_DISCORD_RPC_ENABLED, true)
+        discordUseDetails.value = prefs.getBoolean(KEY_DISCORD_USE_DETAILS, false)
+        discordAdvancedMode.value = prefs.getBoolean(KEY_DISCORD_ADVANCED_MODE, false)
+        discordStatus.value = prefs.getString(KEY_DISCORD_STATUS, "online").orEmpty()
+        discordActivityType.value = prefs.getString(KEY_DISCORD_ACTIVITY_TYPE, "listening").orEmpty()
+        discordActivityName.value = prefs.getString(KEY_DISCORD_ACTIVITY_NAME, "").orEmpty()
+        discordButton1Text.value = prefs.getString(KEY_DISCORD_BUTTON_1_TEXT, "").orEmpty()
+        discordButton1Visible.value = prefs.getBoolean(KEY_DISCORD_BUTTON_1_VISIBLE, true)
+        discordButton2Text.value = prefs.getString(KEY_DISCORD_BUTTON_2_TEXT, "").orEmpty()
+        discordButton2Visible.value = prefs.getBoolean(KEY_DISCORD_BUTTON_2_VISIBLE, true)
+        discordInfoDismissed.value = prefs.getBoolean(KEY_DISCORD_INFO_DISMISSED, false)
+    }
+
+    /**
+     * True the first time this is called after [currentVersionCode] rises above
+     * whatever was last recorded — i.e. once per update, on the first launch
+     * after it installs. A fresh install has nothing to compare against, so
+     * the very first call seeds the stored value from [currentVersionCode]
+     * rather than reporting an update.
+     *
+     * YZ Music ships sideloaded (see [com.music.yzmusic.data.AppUpdateChecker]),
+     * so installing a new APK over the old one is the only "update" there is —
+     * app data, this pref included, survives it exactly like a Play Store
+     * update. Call once per process start, before anything reads a cache that
+     * an update should invalidate.
+     */
+    fun consumeVersionUpdate(currentVersionCode: Int): Boolean {
+        val last = prefs.getInt(KEY_LAST_VERSION_CODE, currentVersionCode)
+        if (last != currentVersionCode) {
+            prefs.edit().putInt(KEY_LAST_VERSION_CODE, currentVersionCode).apply()
+        }
+        return currentVersionCode > last
+    }
+
+    /**
+     * A ceiling saved when there was only one applies to both connections.
+     * Someone who picked Low to protect a data plan would not thank us for
+     * quietly putting Wi-Fi *and* mobile back on High.
+     */
+    private fun migrateSingleQuality() {
+        val legacy = prefs.getString(KEY_QUALITY_LEGACY, null) ?: return
+        prefs.edit()
+            .putString(KEY_QUALITY_WIFI, legacy)
+            .putString(KEY_QUALITY_CELLULAR, legacy)
+            .remove(KEY_QUALITY_LEGACY)
+            .apply()
+    }
+
+    private fun readQuality(key: String): AudioQuality {
+        val stored = prefs.getString(key, null) ?: return AudioQuality.HIGH
+        return runCatching { AudioQuality.valueOf(stored) }.getOrDefault(AudioQuality.HIGH)
+    }
+
+    /**
+     * Write down what the download path was already doing, before it starts
+     * being asked instead.
+     *
+     * Download quality used to be derived rather than chosen: a lossless copy
+     * was kept when `SourceResolver.requestForNow()` said Lossless, which meant
+     * a download quietly turned on the lossless preference and off again with
+     * it. Someone who switched that off on the Sources screen was getting AAC
+     * downloads on purpose, and defaulting them to Lossless now would answer a
+     * question they had already answered — with thirty-five megabytes a track.
+     *
+     * The ceilings are deliberately *not* consulted. They were only in that
+     * derivation because there was nowhere else to say "not on mobile data",
+     * and [wifiOnlyDownloads] is now where that is said.
+     */
+    private fun migrateDownloadQuality() {
+        if (prefs.contains(KEY_QUALITY_DOWNLOAD)) return
+        // Was derived from the old `losslessAudio` switch, which defaulted to
+        // on; LOSSLESS is what that produced for all but the few installs that
+        // had turned it off, and is the default a fresh install gets anyway.
+        prefs.edit().putString(KEY_QUALITY_DOWNLOAD, DownloadQuality.LOSSLESS.name).apply()
+    }
+
+    private fun readDownloadQuality(): DownloadQuality {
+        val stored = prefs.getString(KEY_QUALITY_DOWNLOAD, null) ?: return DownloadQuality.LOSSLESS
+        return runCatching { DownloadQuality.valueOf(stored) }.getOrDefault(DownloadQuality.LOSSLESS)
+    }
+
+    /**
+     * Track the active network so [effectiveAudioQuality] can answer without
+     * touching ConnectivityManager. Stream resolution happens off the main
+     * thread mid-playback; a callback keeps that lookup off the hot path and
+     * lets the settings page show which ceiling is currently in force.
+     */
+    private fun watchConnection(context: Context) {
+        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val refresh = {
+            meteredConnection.value = runCatching {
+                if (manager.activeNetwork == null) null else manager.isActiveNetworkMetered
+            }.getOrNull()
+        }
+        refresh()
+        runCatching {
+            manager.registerDefaultNetworkCallback(
