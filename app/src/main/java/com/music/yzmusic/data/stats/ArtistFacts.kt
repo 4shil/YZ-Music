@@ -132,3 +132,25 @@ object ArtistFacts {
     // genre this time round. Asking here would put a round trip per artist
     // behind a page that opens with fifty of them on it.
 
+    fun genresFor(artist: String): List<String> {
+        if (!genresAvailable) return emptyList()
+        return known[key(artist)]?.genres.orEmpty()
+    }
+
+    /** A picture of the artist, or null to fall back to whatever the row has. */
+    fun imageFor(artist: String): String? = known[key(artist)]?.image
+
+    /** The artist's page, so a chart row opens it without searching first. */
+    fun browseIdFor(artist: String): String? = known[key(artist)]?.browseId
+
+    /**
+     * An artist was played. Looks them up if anything about them is missing.
+     *
+     * Called from the recording path rather than from the Replay page, so the
+     * answers accumulate quietly while music plays and the page has them in hand
+     * when it opens.
+     */
+    fun noticed(artist: String) {
+        if (!ready) return
+        val key = key(artist)
+        if (key.isEmpty() || key.length > MAX_NAME_LENGTH) return
