@@ -132,3 +132,4 @@ object Backup {
 
     @Serializable
     data class BackupFile(
+        val app: String = APP_TAG,
