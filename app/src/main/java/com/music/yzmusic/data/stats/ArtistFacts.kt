@@ -150,3 +150,7 @@ object ArtistFacts {
      * answers accumulate quietly while music plays and the page has them in hand
      * when it opens.
      */
+    fun noticed(artist: String) {
+        if (!ready) return
+        val key = key(artist)
+        if (key.isEmpty() || key.length > MAX_NAME_LENGTH) return
