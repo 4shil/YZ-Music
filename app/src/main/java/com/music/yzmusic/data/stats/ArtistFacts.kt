@@ -154,3 +154,14 @@ object ArtistFacts {
         if (!ready) return
         val key = key(artist)
         if (key.isEmpty() || key.length > MAX_NAME_LENGTH) return
+        val entry = known[key]
+        if (entry != null && !entry.wants()) return
+        if (!queued.add(key)) return
+        requests.trySend(artist.trim())
+    }
+
+    /** What is still worth asking about for this artist. */
+    private fun StoredArtist.wants(): Boolean {
+        // A miss is remembered too, or an artist neither service has heard of is
+        // asked about on every play forever. It expires, because the reason for
+        // a miss is as often a dropped connection as an unknown artist.
