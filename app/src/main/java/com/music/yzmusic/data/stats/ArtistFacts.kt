@@ -165,3 +165,47 @@ object ArtistFacts {
         // A miss is remembered too, or an artist neither service has heard of is
         // asked about on every play forever. It expires, because the reason for
         // a miss is as often a dropped connection as an unknown artist.
+        val wantsCard = browseId == null &&
+            System.currentTimeMillis() - cardAt > TimeUnit.DAYS.toMillis(RETRY_DAYS)
+        val wantsGenres = genresAvailable && genres.isEmpty() &&
+            System.currentTimeMillis() - genresAt > TimeUnit.DAYS.toMillis(RETRY_DAYS)
+        return wantsCard || wantsGenres
+    }
+
+    // ── The lookups ─────────────────────────────────────────────────────────
+
+    /**
+     * One artist at a time, spaced out.
+     *
+     * Serial and slow on purpose: this is background enrichment for a page that
+     * may not be opened for months, and it shares [Http.client] and the Innertube
+     * session with playback. Nothing here is worth a millisecond of a stream's
+     * latency.
+     */
+    private suspend fun worker() {
+        for (name in requests) {
+            val existing = known[key(name)]
+            if (existing?.browseId == null) {
+                runCatching { fetchCard(name) }
+                    .onFailure { Log.w(TAG, "Artist lookup failed for $name", it) }
+            }
+            if (genresAvailable && existing?.genres.isNullOrEmpty()) {
+                runCatching { fetchGenres(name) }
+                    .onFailure { Log.w(TAG, "Genre lookup failed for $name", it) }
+            }
+            // Published straight away so an open Replay picks the answer up;
+            // the disk copy follows on its own timer, above.
+            _revision.value++
+            delay(REQUEST_SPACING_MS)
+        }
+    }
+
+    /**
+     * The artist's picture and page, off a YouTube Music artist search.
+     *
+     * A search rather than a browse, because a browse needs the id and the id is
+     * half of what this is for. The top artist hit for a name is the artist:
+     * that is the same lookup the app already makes to find a video's catalogue
+     * release, and the same one a person would make.
+     */
+    private suspend fun fetchCard(name: String) {
