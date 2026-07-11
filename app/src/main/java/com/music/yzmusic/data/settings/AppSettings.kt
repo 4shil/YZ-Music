@@ -947,3 +947,217 @@ object AppSettings {
     }
 
     private fun readPinnedPlaylists(): List<String> {
+        val stored = prefs.getString(KEY_PINNED_PLAYLISTS, null) ?: return emptyList()
+        return stored.split(",").filter { it.isNotBlank() }
+    }
+
+    /** Forgets the account: token and cached profile. */
+    fun clearDiscordAccount() {
+        setDiscordToken("")
+        setDiscordAccount("", "", null)
+    }
+
+    // ── Backup ──────────────────────────────────────────────────────────────
+
+    /**
+     * Every stored preference, for an export.
+     *
+     * Read off the preference file wholesale rather than assembled from the
+     * flows above, so a setting added in a later build is in the backup the day
+     * it is added instead of the day somebody remembers to list it here. What is
+     * *left out* is therefore the part worth stating explicitly, and it is
+     * [SECRETS]: an export is a file the user is about to put in Drive or a
+     * chat, and a scrobbler session key or an API secret in it is a credential
+     * that has left the device in plain text. Signing back in after a restore is
+     * a minute; a leaked session key is not recoverable at all.
+     *
+     * The Discord token is not here for the same reason and one more: it never
+     * reaches this file. It lives in the encrypted store — see [AuthStore] — and
+     * so does the YouTube cookie, which means neither can be exported by
+     * accident.
+     */
+    fun exportPrefs(): Map<String, Any?> {
+        if (!this::prefs.isInitialized) return emptyMap()
+        return prefs.all.filterKeys { it !in SECRETS && it !in DEVICE_LOCAL }
+    }
+
+    /**
+     * Replaces the preference file with [values] and re-reads it.
+     *
+     * A replace, not a merge: a partial restore leaves a device holding half of
+     * one configuration and half of another, which is the one outcome nobody
+     * asked for. Keys in [SECRETS] survive untouched — they were never in the
+     * file being restored from, and clearing them would sign the user out of
+     * services the backup has nothing to say about.
+     */
+    fun importPrefs(values: Map<String, Any?>) {
+        if (!this::prefs.isInitialized) return
+        val kept = prefs.all.filterKeys { it in SECRETS || it in DEVICE_LOCAL }
+        prefs.edit().apply {
+            clear()
+            val incoming = values.filterKeys { it !in SECRETS && it !in DEVICE_LOCAL }
+            (kept + incoming).forEach { (key, value) ->
+                when (value) {
+                    is Boolean -> putBoolean(key, value)
+                    is Int -> putInt(key, value)
+                    is Long -> putLong(key, value)
+                    is Float -> putFloat(key, value)
+                    is String -> putString(key, value)
+                    is Set<*> -> putStringSet(key, value.filterIsInstance<String>().toSet())
+                    else -> Unit
+                }
+            }
+        }.apply()
+        reload()
+    }
+
+    /**
+     * Preferences an export must not carry — credentials, not configuration.
+     * See [exportPrefs].
+     */
+    private val SECRETS = setOf(
+        KEY_LASTFM_SESSION_KEY,
+        KEY_LASTFM_API_KEY,
+        KEY_LASTFM_SECRET,
+        KEY_LISTENBRAINZ_TOKEN,
+    )
+
+    /**
+     * Preferences that describe *this device* rather than this configuration,
+     * and so are neither exported nor overwritten by an import.
+     *
+     * [Downloads][com.music.yzmusic.download.Downloads] keeps its record of
+     * what is saved in this same preference file, and that record is a list of
+     * files on this phone's storage. Carrying it into a backup would restore a
+     * folder full of tracks that are not here; clearing it on import would leave
+     * the files on disk with nothing pointing at them, which is worse — the
+     * Downloads page would read as empty while the space stayed used.
+     */
+    private val DEVICE_LOCAL = setOf(
+        "downloaded_tracks",
+        "downloaded_tracks_metadata",
+        "downloaded_collections",
+        KEY_LAST_VERSION_CODE,
+    )
+
+    const val DEFAULT_CACHE_LIMIT_BYTES = 512L * 1024 * 1024
+    const val MAX_CACHE_LIMIT_BYTES = 10L * 1024 * 1024 * 1024
+
+    private const val KEY_QUALITY_LEGACY = "audio_quality"
+    private const val KEY_QUALITY_WIFI = "audio_quality_wifi"
+    private const val KEY_QUALITY_CELLULAR = "audio_quality_cellular"
+    private const val KEY_QUALITY_DOWNLOAD = "audio_quality_download"
+    private const val KEY_WIFI_ONLY_DOWNLOADS = "wifi_only_downloads"
+    private const val KEY_LOSSLESS = "lossless_audio"
+    private const val KEY_CROSSFADE = "crossfade_seconds"
+    private const val KEY_SMART_FADE = "smart_fade_enabled"
+    private const val KEY_SKIP_SILENCE = "skip_silence"
+    private const val KEY_SPATIAL_AUDIO = "spatial_audio"
+    private const val KEY_SPEED = "playback_speed"
+    private const val KEY_THEME = "theme_mode"
+    private const val KEY_AUTOPLAY = "autoplay"
+    private const val KEY_NERD_STATS = "show_nerd_stats"
+    private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
+    private const val KEY_REDUCE_ANIMATION = "reduce_animation"
+    private const val KEY_STOP_ON_TASK_REMOVED = "stop_on_task_removed"
+    private const val KEY_HIDE_VOLUME_BAR = "hide_volume_bar"
+    private const val KEY_SWIPE_TO_PLAY_NEXT = "swipe_to_play_next"
+    private const val KEY_DONT_REPEAT_SUGGESTIONS = "dont_repeat_suggestions"
+    private const val KEY_CONVERT_VIDEO_TO_AUDIO = "convert_video_to_audio"
+    private const val KEY_REDUCE_BLUR = "reduce_dynamic_blur"
+    private const val KEY_ANIMATED_CANVAS = "animated_canvas"
+    private const val KEY_CANVAS_OVER_CELLULAR = "canvas_over_cellular"
+    private const val KEY_FULL_BLEED_ARTWORK = "full_bleed_artwork"
+    private const val KEY_SYNCED_LYRICS = "synced_lyrics"
+    private const val KEY_LYRICS_SOURCES = "lyrics_sources"
+    private const val KEY_LYRICS_SOURCE_ORDER = "lyrics_source_order"
+    private const val KEY_PRIORITIZE_SYLLABLE_SYNC = "prioritize_syllable_sync"
+    private const val KEY_REPLAY_GENRES = "replay_genres"
+    private const val KEY_PINNED_PLAYLISTS = "pinned_playlists"
+
+    private const val KEY_LASTFM_ENABLED = "lastfm_enabled"
+    private const val KEY_LASTFM_USERNAME = "lastfm_username"
+    private const val KEY_LASTFM_SESSION_KEY = "lastfm_session_key"
+    private const val KEY_LASTFM_API_KEY = "lastfm_api_key"
+    private const val KEY_LASTFM_SECRET = "lastfm_secret"
+    private const val KEY_LASTFM_ENDPOINT = "lastfm_endpoint"
+    private const val KEY_LASTFM_SCROBBLE_ENABLED = "lastfm_scrobble_enabled"
+    private const val KEY_LASTFM_NOW_PLAYING = "lastfm_now_playing"
+    private const val KEY_SCROBBLE_MIN_DURATION = "scrobble_min_duration"
+    private const val KEY_SCROBBLE_DELAY_PERCENT = "scrobble_delay_percent"
+    private const val KEY_SCROBBLE_DELAY_SECONDS = "scrobble_delay_seconds"
+    private const val KEY_LISTENBRAINZ_ENABLED = "listenbrainz_enabled"
+    private const val KEY_LISTENBRAINZ_TOKEN = "listenbrainz_token"
+    private const val KEY_SPOTIFY_SPDC_TOKEN = "spotify_spdc_token"
+
+    private const val KEY_DISCORD_USERNAME = "discord_username"
+    private const val KEY_DISCORD_NAME = "discord_name"
+    private const val KEY_DISCORD_AVATAR = "discord_avatar"
+    private const val KEY_DISCORD_RPC_ENABLED = "discord_rpc_enabled"
+    private const val KEY_DISCORD_USE_DETAILS = "discord_use_details"
+    private const val KEY_DISCORD_ADVANCED_MODE = "discord_advanced_mode"
+    private const val KEY_DISCORD_STATUS = "discord_status"
+    private const val KEY_DISCORD_ACTIVITY_TYPE = "discord_activity_type"
+    private const val KEY_DISCORD_ACTIVITY_NAME = "discord_activity_name"
+    private const val KEY_DISCORD_BUTTON_1_TEXT = "discord_button_1_text"
+    private const val KEY_DISCORD_BUTTON_1_VISIBLE = "discord_button_1_visible"
+    private const val KEY_DISCORD_BUTTON_2_TEXT = "discord_button_2_text"
+    private const val KEY_DISCORD_BUTTON_2_VISIBLE = "discord_button_2_visible"
+    private const val KEY_DISCORD_INFO_DISMISSED = "discord_info_dismissed"
+    private const val KEY_LAST_VERSION_CODE = "last_version_code"
+}
+
+/**
+ * Where one track stands in Automix's analysis.
+ *
+ * The three no-result states are kept apart because they call for different
+ * reactions: [WAITING] resolves itself once bytes arrive, [ANALYSING] resolves
+ * itself in a few seconds, and [FAILED] never resolves at all. From outside
+ * they look identical, which is precisely why the line has to say which.
+ */
+enum class TrackAnalysisState {
+    /** Nothing in flight and no result — usually waiting on bytes to arrive. */
+    WAITING,
+
+    /** Decode and inference running now; a result is a few seconds away. */
+    ANALYSING,
+
+    /** Measured, with a tempo the planner can actually use. */
+    ANALYSED,
+
+    /**
+     * Measured off the track's opening, with the whole-track pass running now to
+     * replace those numbers with better ones.
+     *
+     * Its own state rather than either neighbour, because it is genuinely both:
+     * reporting [ANALYSING] made a track that was already usable look like it
+     * had gone backwards, and reporting [ANALYSED] would hide that the cue and
+     * the tempo are about to move.
+     */
+    REFINING,
+
+    /**
+     * Tried and came back with nothing usable — a decode error, or audio that
+     * yielded no tempo. Distinct from [WAITING] because nothing further will
+     * happen on its own: waiting is a matter of time, this is not.
+     */
+    FAILED,
+}
+
+/**
+ * Both sides of the next transition, for stats for nerds.
+ *
+ * A transition needs *both* tracks measured before it can beat-match or cue the
+ * incoming one into its arrangement, so reporting them separately is what makes
+ * a plain crossfade explicable rather than mysterious.
+ */
+data class SmartAnalysis(
+    val current: TrackAnalysisState = TrackAnalysisState.WAITING,
+    val next: TrackAnalysisState = TrackAnalysisState.WAITING,
+)
+
+/**
+ * A span of the playing track, in fractions of its duration, that the next
+ * transition is planned to occupy.
+ */
+data class TransitionWindow(val start: Float, val end: Float)
