@@ -35,3 +35,8 @@ object SearchHistory {
     val recent: StateFlow<List<String>> = _recent.asStateFlow()
 
     fun init(context: Context) {
+        prefs = context.getSharedPreferences("yzmusic_settings", Context.MODE_PRIVATE)
+        reload()
+    }
+
+    /**
