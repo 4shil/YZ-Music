@@ -30,3 +30,8 @@ object SearchHistory {
     private val serializer = ListSerializer(String.serializer())
 
     private val _recent = MutableStateFlow<List<String>>(emptyList())
+
+    /** Most recent first. */
+    val recent: StateFlow<List<String>> = _recent.asStateFlow()
+
+    fun init(context: Context) {
