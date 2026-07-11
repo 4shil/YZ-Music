@@ -233,3 +233,15 @@ object ArtistFacts {
             "&artist=${Uri.encode(name)}" +
             "&api_key=${Uri.encode(BuildConfig.LASTFM_API_KEY)}" +
             "&autocorrect=1&format=json"
+        val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
+        val body = Http.client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return
+            response.body?.string()
+        } ?: return
+
+        val tags = runCatching {
+            Json.parseToJsonElement(body).jsonObject["toptags"]
+                ?.jsonObject?.get("tag")?.jsonArray
+                ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.content }
+        }.getOrNull().orEmpty()
+
