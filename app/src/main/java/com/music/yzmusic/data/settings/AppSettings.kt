@@ -911,3 +911,39 @@ object AppSettings {
         prefs.edit().putString(KEY_DISCORD_BUTTON_2_TEXT, value).apply()
     }
 
+    fun setDiscordButton2Visible(value: Boolean) {
+        discordButton2Visible.value = value
+        prefs.edit().putBoolean(KEY_DISCORD_BUTTON_2_VISIBLE, value).apply()
+    }
+
+    fun setDiscordInfoDismissed(value: Boolean) {
+        discordInfoDismissed.value = value
+        prefs.edit().putBoolean(KEY_DISCORD_INFO_DISMISSED, value).apply()
+    }
+
+    fun setReplayGenres(value: Boolean) {
+        replayGenres.value = value
+        prefs.edit().putBoolean(KEY_REPLAY_GENRES, value).apply()
+    }
+
+    /**
+     * Pins or unpins [browseId], returning whether it is pinned afterwards.
+     *
+     * Pinning past [MAX_PINNED_PLAYLISTS] is refused rather than evicting the
+     * oldest pin: a silent swap would mean a playlist someone pinned on purpose
+     * disappears from the row without them ever having touched it, the moment
+     * they pin a sixth. Unpinning always succeeds.
+     */
+    fun togglePinnedPlaylist(browseId: String): Boolean {
+        val current = pinnedPlaylists.value
+        val updated = when {
+            browseId in current -> current - browseId
+            current.size >= MAX_PINNED_PLAYLISTS -> return false
+            else -> current + browseId
+        }
+        pinnedPlaylists.value = updated
+        prefs.edit().putString(KEY_PINNED_PLAYLISTS, updated.joinToString(",")).apply()
+        return browseId in updated
+    }
+
+    private fun readPinnedPlaylists(): List<String> {
