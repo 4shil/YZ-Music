@@ -295,3 +295,20 @@ object ArtistFacts {
         if (!ready || !dirty) return
         dirty = false
         runCatching {
+            val stored = Stored(
+                artists = known.values
+                    .sortedByDescending { maxOf(it.cardAt, it.genresAt) }
+                    .take(MAX_ARTISTS),
+            )
+            file.writeText(json.encodeToString(Stored.serializer(), stored))
+        }.onFailure { Log.w(TAG, "Could not write artist cache", it) }
+    }
+
+    @Serializable
+    private data class Stored(val version: Int = 2, val artists: List<StoredArtist> = emptyList())
+
+    @Serializable
+    data class StoredArtist(
+        val key: String,
+        val genres: List<String> = emptyList(),
+        val genresAt: Long = 0L,
