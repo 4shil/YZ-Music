@@ -132,3 +132,29 @@ object ListeningRecorder {
     /** Ids already sent for, so a track on repeat is asked about once. */
     private val asked = ConcurrentHashMap.newKeySet<String>()
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * [song] with whatever the lookup has found so far.
+     *
+     * Returns the song unchanged while the request is in flight rather than
+     * holding the sample back: a few seconds filed without an album is a few
+     * seconds missing from the album chart, and blocking the sampler on a
+     * network call would be a few seconds missing from everything.
+     */
+    private fun enriched(song: Song): Song {
+        extras[song.videoId]?.let { extra ->
+            return song.copy(
+                artistId = song.artistId ?: extra.artistId,
+                albumId = song.albumId ?: extra.albumId,
+                albumName = song.albumName ?: extra.albumName,
+            )
+        }
+        if (song.albumName != null && song.artistId != null) return song
+        // Only tracks YouTube can answer for. A file on the device and a
+        // source-module track both carry ids this endpoint has never heard of,
+        // and asking would be a failed request per play, forever.
+        if (song.localUri != null || song.videoId.length != YOUTUBE_ID_LENGTH) return song
+        if (asked.add(song.videoId)) {
+            scope.launch {
+                YtMusicRepository.trackLinks(song.videoId).getOrNull()?.let {
