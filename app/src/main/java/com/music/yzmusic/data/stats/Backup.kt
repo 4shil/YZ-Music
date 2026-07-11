@@ -138,3 +138,13 @@ object Backup {
         val versionName: String = "",
         val exportedAt: String = "",
         val settings: Map<String, PrefValue> = emptyMap(),
+        val listening: List<StoredBucket> = emptyList(),
+    )
+
+    /** One preference, with the type it has to be restored as. */
+    @Serializable
+    data class PrefValue(
+        val type: String,
+        val value: String? = null,
+        val values: List<String> = emptyList(),
+    ) {
