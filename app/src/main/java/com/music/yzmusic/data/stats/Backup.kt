@@ -47,3 +47,19 @@ object Backup {
     }
 
     /** A suggested filename, dated so successive exports don't collide. */
+    fun suggestedName(): String =
+        "yzmusic-backup-${DateTimeFormatter.ofPattern("yyyy-MM-dd").format(
+            Instant.now().atZone(ZoneId.systemDefault()),
+        )}.json"
+
+    /**
+     * Writes a backup to [target], a document the user picked.
+     *
+     * Through the content resolver rather than a [java.io.File] because the
+     * destination is wherever they chose — Drive, a USB stick, a folder this app
+     * has no path to and no permission for. The picker grants access to that one
+     * document and nothing else, which is the correct amount.
+     */
+    suspend fun exportTo(context: Context, target: Uri): Result<Int> = withContext(Dispatchers.IO) {
+        runCatching {
+            val buckets = ListeningStats.exportAll()
