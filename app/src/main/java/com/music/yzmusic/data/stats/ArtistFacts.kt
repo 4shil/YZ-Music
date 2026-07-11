@@ -264,3 +264,34 @@ object ArtistFacts {
      * "rnb" — because splitting one genre across two rows is the same failure as
      * admitting "seen live", just less obvious on the page.
      */
+    private fun canonical(tag: String): String? {
+        val cleaned = tag.trim().lowercase(Locale.ROOT)
+            .replace('-', ' ')
+            .replace("&", "and")
+            .replace(Regex("[^a-z0-9 ]"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (cleaned.isEmpty()) return null
+        return VOCABULARY[cleaned] ?: VOCABULARY[ALIASES[cleaned] ?: return null]
+    }
+
+    private fun key(artist: String): String = artist.trim().lowercase(Locale.ROOT)
+
+    // ── Persistence ─────────────────────────────────────────────────────────
+
+    private fun load() {
+        if (!ready || !file.exists()) return
+        runCatching {
+            json.decodeFromString(Stored.serializer(), file.readText())
+        }.onSuccess { stored ->
+            stored.artists.forEach { known[it.key] = it }
+        }.onFailure {
+            Log.w(TAG, "Discarding unreadable artist cache", it)
+            file.delete()
+        }
+    }
+
+    private fun save() {
+        if (!ready || !dirty) return
+        dirty = false
+        runCatching {
