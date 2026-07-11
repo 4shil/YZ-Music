@@ -115,3 +115,20 @@ object Backup {
 
     /** What an import turned out to contain, for the line shown afterwards. */
     data class Summary(
+        val months: Int,
+        val settings: Int,
+        val from: String,
+        val at: String,
+    )
+
+    private const val APP_TAG = "yzmusic"
+
+    /**
+     * Bump when the shape below stops being readable by an older build. A file
+     * from a *newer* schema is refused rather than partially read; one from an
+     * older schema is read as-is, since every field has a default.
+     */
+    private const val SCHEMA_VERSION = 1
+
+    @Serializable
+    data class BackupFile(
