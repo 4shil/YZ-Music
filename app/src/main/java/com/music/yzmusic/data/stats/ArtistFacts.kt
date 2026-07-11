@@ -101,3 +101,34 @@ object ArtistFacts {
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision.asStateFlow()
 
+    fun init(context: Context) {
+        file = File(context.filesDir, FILE_NAME)
+        scope.launch {
+            load()
+            worker()
+        }
+        // Writes are on a timer rather than one per answer. The cache holds
+        // every artist ever played, so rewriting it after each lookup meant a
+        // few hundred kilobytes per artist during a backfill — for a file that
+        // is only read once, at launch.
+        scope.launch {
+            while (true) {
+                delay(SAVE_INTERVAL_MS)
+                save()
+            }
+        }
+    }
+
+    private val ready: Boolean get() = this::file.isInitialized
+
+    /** Whether a genre chart can be drawn at all on this build and these settings. */
+    val genresAvailable: Boolean
+        get() = AppSettings.replayGenres.value && BuildConfig.LASTFM_API_KEY.isNotBlank()
+
+    // ── Reading ─────────────────────────────────────────────────────────────
+    //
+    // None of these reach the network. The Replay is drawn from what is already
+    // known, and an artist that isn't yet simply keeps the track's sleeve and no
+    // genre this time round. Asking here would put a round trip per artist
+    // behind a page that opens with fifty of them on it.
+
