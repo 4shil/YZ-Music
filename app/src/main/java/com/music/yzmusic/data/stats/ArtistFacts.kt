@@ -228,3 +228,8 @@ object ArtistFacts {
         dirty = true
     }
 
+    private fun fetchGenres(name: String) {
+        val url = "https://ws.audioscrobbler.com/2.0/?method=artist.gettoptags" +
+            "&artist=${Uri.encode(name)}" +
+            "&api_key=${Uri.encode(BuildConfig.LASTFM_API_KEY)}" +
+            "&autocorrect=1&format=json"
