@@ -93,3 +93,16 @@ object ListeningRecorder {
     /**
      * Playback stopped, paused, or moved on.
      *
+     * Forgetting the current track is what makes the *next* tick anchor rather
+     * than contribute: without it, a player paused for an afternoon would hand
+     * [MAX_STEP_MS] of listening to whatever was on screen when it resumed.
+     */
+    @Synchronized
+    fun onStopped() {
+        currentId = null
+        playedThisTrack = 0L
+        playCounted = false
+        samplesSinceFlush = 0
+        ListeningStats.flush()
+    }
+
