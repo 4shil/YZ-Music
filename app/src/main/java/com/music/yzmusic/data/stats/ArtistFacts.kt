@@ -209,3 +209,22 @@ object ArtistFacts {
      * release, and the same one a person would make.
      */
     private suspend fun fetchCard(name: String) {
+        val hit = YtMusicRepository.search(name, SearchFilter.ARTISTS).getOrNull()
+            ?.filterIsInstance<SearchResult.Browse>()
+            ?.firstOrNull()
+            ?.item
+        val entry = known[key(name)] ?: StoredArtist(key = key(name))
+        known[key(name)] = entry.copy(
+            // Only when the hit is actually this artist. A search for a name
+            // nobody has heard of still returns *something*, and filing a
+            // stranger's photograph under someone else's name is worse than
+            // keeping the sleeve.
+            image = hit?.thumbnailUrl?.takeIf { hit.title.equals(name, ignoreCase = true) }
+                ?: entry.image,
+            browseId = hit?.browseId?.takeIf { hit.title.equals(name, ignoreCase = true) }
+                ?: entry.browseId,
+            cardAt = System.currentTimeMillis(),
+        )
+        dirty = true
+    }
+
