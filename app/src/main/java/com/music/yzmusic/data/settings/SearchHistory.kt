@@ -70,3 +70,8 @@ object SearchHistory {
     private fun save(value: List<String>) {
         _recent.value = value
         prefs.edit().putString(KEY_HISTORY, json.encodeToString(serializer, value)).apply()
+    }
+
+    private const val KEY_HISTORY = "search_history"
+}
+
