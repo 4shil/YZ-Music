@@ -133,3 +133,6 @@ object Backup {
     @Serializable
     data class BackupFile(
         val app: String = APP_TAG,
+        val version: Int = SCHEMA_VERSION,
+        /** Which build wrote it — for the reader, not for any logic here. */
+        val versionName: String = "",
