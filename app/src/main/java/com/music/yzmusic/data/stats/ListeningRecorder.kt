@@ -158,3 +158,16 @@ object ListeningRecorder {
         if (asked.add(song.videoId)) {
             scope.launch {
                 YtMusicRepository.trackLinks(song.videoId).getOrNull()?.let {
+                    extras[song.videoId] = it
+                }
+            }
+        }
+        return song
+    }
+
+    /**
+     * The most a single tick may contribute.
+     *
+     * A shade over the sampler's interval, so an ordinary tick that arrived late
+     * — a busy main thread, a device coming out of doze — is still counted in
+     * full, while the unbounded gap across a pause is not.
