@@ -184,3 +184,5 @@ object ListeningRecorder {
     private const val FLUSH_EVERY = 6
 
     /** What a YouTube video id looks like, and nothing else this app plays does. */
+    private const val YOUTUBE_ID_LENGTH = 11
+}
