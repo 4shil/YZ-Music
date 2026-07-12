@@ -115,3 +115,5 @@ object Backup {
 
     /** What an import turned out to contain, for the line shown afterwards. */
     data class Summary(
+        val months: Int,
+        val settings: Int,
