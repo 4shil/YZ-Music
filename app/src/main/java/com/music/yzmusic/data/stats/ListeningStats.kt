@@ -219,3 +219,68 @@ object ListeningStats {
     }
 
     /** The open month as bytes-to-be, or null when nothing has changed. */
+    private fun pending(): Pair<String, StoredBucket>? {
+        if (!ready) return null
+        return synchronized(lock) {
+            if (!dirty) return null
+            val bucket = open ?: return null
+            dirty = false
+            bucket.key to bucket.snapshot()
+        }
+    }
+
+    /**
+     * Serialises a month and swaps it into place.
+     *
+     * Never on the caller's thread. The caller is the playback service's
+     * sampler, which runs on the main thread — see its `reportProgress` — so
+     * encoding a month of listening and writing it there was a JSON pass and a
+     * file write on the UI thread every thirty seconds of playback, growing
+     * with the size of the month.
+     *
+     * Written aside and renamed, so a kill mid-write leaves the previous
+     * month rather than a truncated one.
+     */
+    private suspend fun write(key: String, snapshot: StoredBucket) = writeLock.withLock {
+        runCatching {
+            directory.mkdirs()
+            val file = File(directory, "$key.json")
+            val temporary = File(directory, "$key.json.tmp")
+            temporary.writeText(json.encodeToString(StoredBucket.serializer(), snapshot))
+            if (!temporary.renameTo(file)) {
+                // renameTo will not replace on some filesystems; the delete is
+                // the only thing standing between that and a .tmp per flush.
+                if (file.delete() && temporary.renameTo(file)) Unit else temporary.delete()
+            }
+            version++
+        }.onFailure { Log.w(TAG, "Could not write listening bucket $key", it) }
+    }
+
+    /** The bucket for [month], loading or creating it and retiring the last one. */
+    private fun bucketFor(month: YearMonth): OpenBucket {
+        val key = month.toString()
+        open?.takeIf { it.key == key }?.let { return it }
+        // The month rolled over mid-session. Whatever the last one still held
+        // has to reach disk before it is dropped on the floor.
+        open?.let { previous ->
+            val stale = previous.snapshot()
+            writer.launch { write(previous.key, stale) }
+        }
+        val loaded = read(key) ?: StoredBucket(month = key)
+        return OpenBucket.of(key, loaded).also {
+            open = it
+            prune()
+        }
+    }
+
+    // ── Reading ─────────────────────────────────────────────────────────────
+
+    /**
+     * The Replay for [period], merged off disk.
+     *
+     * Off the main thread and off the open bucket both: the months it needs are
+     * files, and the one being written to is flushed first so that the page
+     * agrees with what has just been playing.
+     */
+    suspend fun summary(period: ReplayPeriod): ReplaySummary = withContext(Dispatchers.IO) {
+        flushAndAwait()
