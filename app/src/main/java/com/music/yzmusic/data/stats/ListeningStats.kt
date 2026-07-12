@@ -427,3 +427,38 @@ object ListeningStats {
     private class OpenBucket(
         val key: String,
         val tracks: MutableMap<String, TrackEntry>,
+        val artists: MutableMap<String, NameEntry>,
+        val albums: MutableMap<String, NameEntry>,
+        val hours: LongArray,
+        val days: MutableMap<Int, Long>,
+    ) {
+        fun snapshot() = StoredBucket(
+            month = key,
+            tracks = tracks.values.toList(),
+            artists = artists.map { (key, entry) -> entry.copy(key = key) },
+            albums = albums.map { (key, entry) -> entry.copy(key = key) },
+            hours = hours.toList(),
+            days = days.toMap(),
+        )
+
+        companion object {
+            fun of(key: String, stored: StoredBucket) = OpenBucket(
+                key = key,
+                tracks = stored.tracks.associateByTo(LinkedHashMap()) { it.id },
+                // Re-keyed on the lead artist, so entries a previous build
+                // filed under a whole credit fold into the person on read
+                // instead of sitting beside them forever.
+                artists = stored.artists
+                    .map { it.copy(name = primaryArtist(it.name) ?: it.name) }
+                    .mergedBy(LinkedHashMap()) { it.name.lowercase(Locale.ROOT) },
+                albums = stored.albums.mergedBy(LinkedHashMap()) { albumKey(it.name, it.sub.orEmpty()) },
+                hours = LongArray(24) { stored.hours.getOrElse(it) { 0L } },
+                days = stored.days.toMutableMap(),
+            )
+        }
+    }
+
+    /** Several months added together, on the way to a [ReplaySummary]. */
+    private class MergedBucket {
+        val tracks = HashMap<String, TrackEntry>()
+        val artists = HashMap<String, NameEntry>()
