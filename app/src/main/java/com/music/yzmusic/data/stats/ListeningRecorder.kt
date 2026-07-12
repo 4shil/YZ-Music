@@ -106,3 +106,16 @@ object ListeningRecorder {
         ListeningStats.flush()
     }
 
+    // ── Filling in what the queue didn't carry ──────────────────────────────
+
+    /**
+     * What a lookup found out about a track, by video id.
+     *
+     * ## Why a lookup is needed at all
+     *
+     * Most tracks reach the player without an album. A row off the home feed,
+     * a search hit, an AutoPlay suggestion — none of them state one, because
+     * nothing on those surfaces draws one. That is invisible everywhere else in
+     * the app and fatal here: an album chart counted off what the queue carries
+     * is empty for almost everybody, and the artist rows have no page to open.
+     *
