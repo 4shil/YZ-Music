@@ -462,3 +462,28 @@ object ListeningStats {
     private class MergedBucket {
         val tracks = HashMap<String, TrackEntry>()
         val artists = HashMap<String, NameEntry>()
+        val albums = HashMap<String, NameEntry>()
+        val hours = LongArray(24)
+        val days = HashMap<String, Long>()
+        var earliest: String? = null
+
+        fun add(bucket: StoredBucket) {
+            bucket.tracks.forEach { entry ->
+                tracks.merge(entry.id, entry.copy()) { a, b -> a.also { it.absorb(b) } }
+            }
+            bucket.artists.forEach { entry ->
+                val lead = entry.copy(name = primaryArtist(entry.name) ?: entry.name)
+                artists.merge(lead.name.lowercase(Locale.ROOT), lead) { a, b -> a.also { it.absorb(b) } }
+            }
+            bucket.albums.forEach { entry ->
+                val key = albumKey(entry.name, entry.sub.orEmpty())
+                albums.merge(key, entry.copy()) { a, b -> a.also { it.absorb(b) } }
+            }
+            repeat(24) { hours[it] += bucket.hours.getOrElse(it) { 0L } }
+            bucket.days.forEach { (day, ms) ->
+                val date = "${bucket.month}-%02d".format(day)
+                days[date] = (days[date] ?: 0L) + ms
+            }
+            if (earliest == null || bucket.month < earliest!!) earliest = bucket.month
+        }
+
