@@ -145,3 +145,16 @@ object ListeningRecorder {
     private fun enriched(song: Song): Song {
         extras[song.videoId]?.let { extra ->
             return song.copy(
+                artistId = song.artistId ?: extra.artistId,
+                albumId = song.albumId ?: extra.albumId,
+                albumName = song.albumName ?: extra.albumName,
+            )
+        }
+        if (song.albumName != null && song.artistId != null) return song
+        // Only tracks YouTube can answer for. A file on the device and a
+        // source-module track both carry ids this endpoint has never heard of,
+        // and asking would be a failed request per play, forever.
+        if (song.localUri != null || song.videoId.length != YOUTUBE_ID_LENGTH) return song
+        if (asked.add(song.videoId)) {
+            scope.launch {
+                YtMusicRepository.trackLinks(song.videoId).getOrNull()?.let {
