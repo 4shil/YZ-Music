@@ -63,3 +63,55 @@ object Backup {
     suspend fun exportTo(context: Context, target: Uri): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
             val buckets = ListeningStats.exportAll()
+            val file = BackupFile(
+                versionName = BuildConfig.VERSION_NAME,
+                exportedAt = Instant.now().toString(),
+                settings = AppSettings.exportPrefs().mapNotNull { (key, value) ->
+                    PrefValue.of(value)?.let { key to it }
+                }.toMap(),
+                listening = buckets,
+            )
+            val text = json.encodeToString(BackupFile.serializer(), file)
+            context.contentResolver.openOutputStream(target, "wt")
+                ?.use { it.write(text.toByteArray()) }
+                ?: error("Couldn't open that file for writing")
+            buckets.size
+        }
+    }
+
+    /**
+     * Reads [source] and replaces this device's settings and listening with it.
+     *
+     * Validated before anything is written: a file that isn't one of ours, or is
+     * from a schema this build can't read, is refused whole. A half-applied
+     * import is worse than a refused one — it leaves settings from two devices
+     * mixed together with nothing to say which came from where.
+     */
+    suspend fun importFrom(context: Context, source: Uri): Result<Summary> = withContext(Dispatchers.IO) {
+        runCatching {
+            val text = context.contentResolver.openInputStream(source)
+                ?.use { it.readBytes().decodeToString() }
+                ?: error("Couldn't open that file")
+            val file = runCatching { json.decodeFromString(BackupFile.serializer(), text) }
+                .getOrElse { error("That doesn't look like a YZ Music backup") }
+            require(file.app == APP_TAG || file.app == "bitchord") { "That backup is from another app" }
+            require(file.version <= SCHEMA_VERSION) {
+                "That backup was written by a newer version of YZ Music"
+            }
+
+            ListeningStats.importAll(file.listening)
+            AppSettings.importPrefs(file.settings.mapValues { it.value.decoded() })
+            // Shares AppSettings' preference file, so it has already been
+            // overwritten by the line above — it just doesn't know yet.
+            SearchHistory.reload()
+            Summary(
+                months = file.listening.size,
+                settings = file.settings.size,
+                from = file.versionName,
+                at = file.exportedAt,
+            )
+        }
+    }
+
+    /** What an import turned out to contain, for the line shown afterwards. */
+    data class Summary(
