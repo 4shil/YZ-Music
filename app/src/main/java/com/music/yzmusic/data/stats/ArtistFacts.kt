@@ -245,3 +245,33 @@ object ArtistFacts {
                 ?.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.content }
         }.getOrNull().orEmpty()
 
+        val genres = tags.asSequence()
+            .mapNotNull { canonical(it) }
+            .distinct()
+            .take(MAX_GENRES_PER_ARTIST)
+            .toList()
+
+        val entry = known[key(name)] ?: StoredArtist(key = key(name))
+        known[key(name)] = entry.copy(genres = genres, genresAt = System.currentTimeMillis())
+        dirty = true
+    }
+
+    /**
+     * A tag as a genre, or null if it isn't one.
+     *
+     * Matched against [VOCABULARY] after normalising punctuation and a handful
+     * of spellings that are the same genre — "hip-hop" and "hip hop", "r&b" and
+     * "rnb" — because splitting one genre across two rows is the same failure as
+     * admitting "seen live", just less obvious on the page.
+     */
+    private fun canonical(tag: String): String? {
+        val cleaned = tag.trim().lowercase(Locale.ROOT)
+            .replace('-', ' ')
+            .replace("&", "and")
+            .replace(Regex("[^a-z0-9 ]"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (cleaned.isEmpty()) return null
+        return VOCABULARY[cleaned] ?: VOCABULARY[ALIASES[cleaned] ?: return null]
+    }
+
