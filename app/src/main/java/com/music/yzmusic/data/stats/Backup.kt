@@ -136,3 +136,5 @@ object Backup {
         val version: Int = SCHEMA_VERSION,
         /** Which build wrote it — for the reader, not for any logic here. */
         val versionName: String = "",
+        val exportedAt: String = "",
+        val settings: Map<String, PrefValue> = emptyMap(),
