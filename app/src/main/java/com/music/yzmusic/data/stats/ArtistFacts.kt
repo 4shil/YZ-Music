@@ -275,3 +275,38 @@ object ArtistFacts {
         return VOCABULARY[cleaned] ?: VOCABULARY[ALIASES[cleaned] ?: return null]
     }
 
+    private fun key(artist: String): String = artist.trim().lowercase(Locale.ROOT)
+
+    // ── Persistence ─────────────────────────────────────────────────────────
+
+    private fun load() {
+        if (!ready || !file.exists()) return
+        runCatching {
+            json.decodeFromString(Stored.serializer(), file.readText())
+        }.onSuccess { stored ->
+            stored.artists.forEach { known[it.key] = it }
+        }.onFailure {
+            Log.w(TAG, "Discarding unreadable artist cache", it)
+            file.delete()
+        }
+    }
+
+    private fun save() {
+        if (!ready || !dirty) return
+        dirty = false
+        runCatching {
+            val stored = Stored(
+                artists = known.values
+                    .sortedByDescending { maxOf(it.cardAt, it.genresAt) }
+                    .take(MAX_ARTISTS),
+            )
+            file.writeText(json.encodeToString(Stored.serializer(), stored))
+        }.onFailure { Log.w(TAG, "Could not write artist cache", it) }
+    }
+
+    @Serializable
+    private data class Stored(val version: Int = 2, val artists: List<StoredArtist> = emptyList())
+
+    @Serializable
+    data class StoredArtist(
+        val key: String,
