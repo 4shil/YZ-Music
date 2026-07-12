@@ -310,3 +310,134 @@ object ArtistFacts {
     @Serializable
     data class StoredArtist(
         val key: String,
+        val genres: List<String> = emptyList(),
+        val genresAt: Long = 0L,
+        val image: String? = null,
+        val browseId: String? = null,
+        val cardAt: Long = 0L,
+    )
+
+    private const val TAG = "YZMusicArtists"
+    private const val FILE_NAME = "artist_facts.json"
+    private const val USER_AGENT = "YZ Music/${BuildConfig.VERSION_NAME}"
+    private const val MAX_NAME_LENGTH = 120
+    private const val MAX_GENRES_PER_ARTIST = 2
+    private const val MAX_ARTISTS = 4_000
+    private const val REQUEST_SPACING_MS = 1_500L
+    private const val SAVE_INTERVAL_MS = 5_000L
+    private const val RETRY_DAYS = 14L
+
+    /**
+     * Genres whose display name isn't just their words capitalised.
+     *
+     * Declared before [VOCABULARY] because that is where it is read: an object's
+     * properties initialise in source order, and a lookup table consulted by an
+     * earlier initialiser is still null when it runs.
+     */
+    private val SPELLINGS = mapOf(
+        "randb" to "R&B",
+        "edm" to "EDM",
+        "lo fi" to "Lo-Fi",
+        "hip hop" to "Hip-Hop",
+        "k pop" to "K-Pop",
+        "j pop" to "J-Pop",
+        "j rock" to "J-Rock",
+        "c pop" to "C-Pop",
+        "drum and bass" to "Drum & Bass",
+        "singer songwriter" to "Singer-Songwriter",
+        "post punk" to "Post-Punk",
+        "post rock" to "Post-Rock",
+        "bossa nova" to "Bossa Nova",
+    )
+
+    /**
+     * The genres a chart may name, mapped from their normalised form to how they
+     * are spelt on screen.
+     *
+     * A fixed list rather than a heuristic because the failure mode of a
+     * heuristic here is silent and permanent: a tag that slips through becomes a
+     * row on someone's Replay, and there is no signal anywhere that it was
+     * wrong. Adding to this list is cheap; letting it grow itself is not.
+     */
+    private val VOCABULARY: Map<String, String> = listOf(
+        "pop", "rock", "hip hop", "rap", "randb", "soul", "funk", "jazz", "blues",
+        "country", "folk", "indie", "indie pop", "indie rock", "alternative",
+        "alternative rock", "metal", "heavy metal", "punk", "punk rock", "hardcore",
+        "electronic", "house", "deep house", "techno", "trance", "dubstep",
+        "drum and bass", "edm", "ambient", "lo fi", "synthpop", "disco",
+        "classical", "opera", "soundtrack", "instrumental", "acoustic",
+        "reggae", "reggaeton", "dancehall", "ska", "latin", "salsa", "bossa nova",
+        "afrobeats", "afrobeat", "k pop", "j pop", "j rock", "c pop",
+        "bollywood", "punjabi", "desi", "bhangra", "hindi", "sufi", "ghazal",
+        "singer songwriter", "emo", "grunge", "shoegaze", "psychedelic",
+        "progressive rock", "hard rock", "garage rock", "post punk", "new wave",
+        "gospel", "christian", "world", "experimental", "trap", "drill", "grime",
+        "phonk", "hyperpop", "chillout", "downtempo", "jungle", "garage",
+        "bluegrass", "americana", "swing", "big band", "motown", "britpop",
+        "dream pop", "art pop", "noise", "industrial", "gothic", "doom metal",
+        "black metal", "death metal", "thrash metal", "metalcore", "post rock",
+        "math rock", "jam band", "surf rock", "rockabilly", "boom bap",
+        "cloud rap", "conscious hip hop", "west coast rap", "east coast rap",
+    ).associateWith { normalised ->
+        SPELLINGS[normalised] ?: normalised.split(" ").joinToString(" ") { word ->
+            word.replaceFirstChar { it.uppercase(Locale.ROOT) }
+        }
+    }
+
+    /** Tags that are a genre in [VOCABULARY] under another name. */
+    private val ALIASES = mapOf(
+        "rnb" to "randb",
+        "r and b" to "randb",
+        "rhythm and blues" to "randb",
+        "contemporary randb" to "randb",
+        "hiphop" to "hip hop",
+        "hip hop rap" to "hip hop",
+        "lofi" to "lo fi",
+        "lo fi hip hop" to "lo fi",
+        "chillhop" to "lo fi",
+        "kpop" to "k pop",
+        "jpop" to "j pop",
+        "jrock" to "j rock",
+        "cpop" to "c pop",
+        "korean" to "k pop",
+        "dnb" to "drum and bass",
+        "drum n bass" to "drum and bass",
+        "drumandbass" to "drum and bass",
+        "electronica" to "electronic",
+        "electro" to "electronic",
+        "dance" to "electronic",
+        "electropop" to "synthpop",
+        "synth pop" to "synthpop",
+        "indierock" to "indie rock",
+        "indiepop" to "indie pop",
+        "alt rock" to "alternative rock",
+        "altrock" to "alternative rock",
+        "singersongwriter" to "singer songwriter",
+        "female vocalists" to "pop",
+        "hindi pop" to "bollywood",
+        "indian" to "desi",
+        "filmi" to "bollywood",
+        "afro beats" to "afrobeats",
+        "afropop" to "afrobeats",
+        "amapiano" to "afrobeats",
+        "regueton" to "reggaeton",
+        "latin pop" to "latin",
+        "trip hop" to "downtempo",
+        "nu metal" to "metal",
+        "classic rock" to "rock",
+        "soft rock" to "rock",
+        "pop rock" to "rock",
+        "pop punk" to "punk",
+        "hardcore punk" to "hardcore",
+        "orchestral" to "classical",
+        "film score" to "soundtrack",
+        "score" to "soundtrack",
+        "ost" to "soundtrack",
+        "chill" to "chillout",
+        "chillwave" to "chillout",
+        "worship" to "christian",
+        "rap rock" to "rap",
+        "gangsta rap" to "rap",
+        "underground hip hop" to "hip hop",
+    )
+}
