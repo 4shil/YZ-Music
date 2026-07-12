@@ -171,3 +171,16 @@ object ListeningRecorder {
      * A shade over the sampler's interval, so an ordinary tick that arrived late
      * — a busy main thread, a device coming out of doze — is still counted in
      * full, while the unbounded gap across a pause is not.
+     */
+    private const val MAX_STEP_MS = 8_000L
+
+    /** Under half a minute is not a listen, however it ended. */
+    private const val PLAY_FLOOR_MS = 30_000L
+
+    /** Past four minutes, half a track is more listening than anyone disputes. */
+    private const val PLAY_CEILING_MS = 4 * 60 * 1000L
+
+    /** Six ticks — about half a minute of listening between disk writes. */
+    private const val FLUSH_EVERY = 6
+
+    /** What a YouTube video id looks like, and nothing else this app plays does. */
