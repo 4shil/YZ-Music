@@ -67,3 +67,16 @@ object ListeningRecorder {
             playedThisTrack = 0L
             playCounted = false
             return
+        }
+        val step = (now - lastSampleAt).coerceIn(0L, MAX_STEP_MS)
+        lastSampleAt = now
+        if (step <= 0L) return
+        playedThisTrack += step
+
+        val length = durationMs.takeIf { it > 0 } ?: song.durationMillis()
+        val threshold = if (length > 0) {
+            min(length / 2, PLAY_CEILING_MS).coerceAtLeast(PLAY_FLOOR_MS)
+        } else {
+            PLAY_FLOOR_MS
+        }
+        val counts = !playCounted && playedThisTrack >= threshold
