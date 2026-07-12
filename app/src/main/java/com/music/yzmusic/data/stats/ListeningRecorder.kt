@@ -54,3 +54,16 @@ object ListeningRecorder {
      *
      * [durationMs] is the decoder's figure when it has one; the row's stated
      * runtime stands in until it does, and a track with neither simply has to
+     * clear the thirty-second floor to count as a play.
+     */
+    @Synchronized
+    fun onSample(song: Song, durationMs: Long) {
+        val now = System.currentTimeMillis()
+        if (song.videoId != currentId) {
+            // A new track anchors the clock and contributes nothing yet — see
+            // the class note on undercounting.
+            currentId = song.videoId
+            lastSampleAt = now
+            playedThisTrack = 0L
+            playCounted = false
+            return
