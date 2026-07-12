@@ -119,3 +119,29 @@ object ListeningRecorder {
      * the app and fatal here: an album chart counted off what the queue carries
      * is empty for almost everybody, and the artist rows have no page to open.
      *
+     * The player already asks this same question, but only while its screen is
+     * up (see MainActivity's `links`), so listening with the phone in a pocket —
+     * which is most listening — would be exactly the listening that went
+     * uncredited.
+     *
+     * One request per track, kept for the life of the process, and the answer is
+     * cached a second time by the repository itself.
+     */
+    private val extras = ConcurrentHashMap<String, Song>()
+
+    /** Ids already sent for, so a track on repeat is asked about once. */
+    private val asked = ConcurrentHashMap.newKeySet<String>()
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * [song] with whatever the lookup has found so far.
+     *
+     * Returns the song unchanged while the request is in flight rather than
+     * holding the sample back: a few seconds filed without an album is a few
+     * seconds missing from the album chart, and blocking the sampler on a
+     * network call would be a few seconds missing from everything.
+     */
+    private fun enriched(song: Song): Song {
+        extras[song.videoId]?.let { extra ->
+            return song.copy(
