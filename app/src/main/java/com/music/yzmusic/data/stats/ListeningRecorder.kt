@@ -80,3 +80,29 @@ object ListeningRecorder {
             PLAY_FLOOR_MS
         }
         val counts = !playCounted && playedThisTrack >= threshold
+        if (counts) playCounted = true
+
+        ListeningStats.record(enriched(song), step, counts)
+
+        if (++samplesSinceFlush >= FLUSH_EVERY) {
+            samplesSinceFlush = 0
+            ListeningStats.flush()
+        }
+    }
+
+    /**
+     * Playback stopped, paused, or moved on.
+     *
+     * Forgetting the current track is what makes the *next* tick anchor rather
+     * than contribute: without it, a player paused for an afternoon would hand
+     * [MAX_STEP_MS] of listening to whatever was on screen when it resumed.
+     */
+    @Synchronized
+    fun onStopped() {
+        currentId = null
+        playedThisTrack = 0L
+        playCounted = false
+        samplesSinceFlush = 0
+        ListeningStats.flush()
+    }
+
