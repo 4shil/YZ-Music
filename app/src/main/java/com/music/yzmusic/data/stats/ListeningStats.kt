@@ -721,3 +721,57 @@ data class NameEntry(
 @Serializable
 data class StoredBucket(
     val version: Int = 1,
+    val month: String,
+    val tracks: List<TrackEntry> = emptyList(),
+    val artists: List<NameEntry> = emptyList(),
+    val albums: List<NameEntry> = emptyList(),
+    /** Milliseconds played per hour of the day, 0..23. */
+    val hours: List<Long> = List(24) { 0L },
+    /** Milliseconds played per day of the month. */
+    val days: Map<Int, Long> = emptyMap(),
+)
+
+/** A row on one of the four charts. */
+data class RankedEntry(
+    val title: String,
+    val subtitle: String?,
+    val artworkUrl: String?,
+    val browseId: String?,
+    val ms: Long,
+    val plays: Int,
+)
+
+/** A song row, which keeps the whole [Song] so tapping it can play it. */
+data class RankedSong(val song: Song, val ms: Long, val plays: Int)
+
+/** How far back a Replay reaches. */
+enum class ReplayPeriod(val chip: String) {
+    THIS_MONTH("This month"),
+    THIS_YEAR("This year"),
+    ALL_TIME("All time"),
+    ;
+
+    fun covers(month: YearMonth, today: LocalDate): Boolean = when (this) {
+        THIS_MONTH -> month == YearMonth.from(today)
+        THIS_YEAR -> month.year == today.year
+        ALL_TIME -> true
+    }
+
+    fun label(today: LocalDate): String = when (this) {
+        THIS_MONTH -> YearMonth.from(today).month.name.lowercase(Locale.ROOT)
+            .replaceFirstChar { it.uppercase(Locale.ROOT) } + " ${today.year}"
+        THIS_YEAR -> today.year.toString()
+        ALL_TIME -> "All time"
+    }
+}
+
+/**
+ * Everything the Replay page and the stories draw, worked out once.
+ *
+ * Deliberately a plain value with the charts already sorted: the stories flip
+ * between eight views of the same numbers, and recomputing a ranking per page
+ * would put a sort on the swipe.
+ */
+data class ReplaySummary(
+    val period: ReplayPeriod,
+    val label: String,
