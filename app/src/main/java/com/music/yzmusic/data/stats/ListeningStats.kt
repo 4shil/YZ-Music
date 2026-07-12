@@ -561,3 +561,110 @@ object ListeningStats {
                     )
                 }
 
+            val busiest = days.entries.maxByOrNull { it.value }
+            return ReplaySummary(
+                period = period,
+                label = period.label(today),
+                totalMs = tracks.values.sumOf { it.ms },
+                totalPlays = tracks.values.sumOf { it.plays },
+                songs = rankedSongs,
+                artists = rankedArtists,
+                albums = rankedAlbums,
+                genres = rankedGenres,
+                hourOfDay = hours.toList(),
+                busiestDay = busiest?.key,
+                busiestDayMs = busiest?.value ?: 0L,
+                distinctSongs = tracks.size,
+                distinctArtists = artists.size,
+                distinctAlbums = albums.size,
+                since = earliest,
+            )
+        }
+    }
+
+    /**
+     * How an album is filed: its name and its artist, folded to lower case.
+     *
+     * Joined on a NUL rather than a space, because that is the one character
+     * neither half can contain: with a space, "Greatest Hits" by "Vol 2" and
+     * "Greatest Hits Vol" by "2" are the same key. Contrived, but the class of
+     * bug is not, and a separator that cannot collide costs nothing.
+     *
+     * Concatenated rather than interpolated so the separator is visible in the
+     * source — a NUL inside a template string is an invisible character in the
+     * middle of a line, which is exactly how this file spent a while being
+     * treated as a binary by every tool that looked at it.
+     */
+    private fun albumKey(name: String, artist: String): String =
+        name.lowercase(Locale.ROOT) + ALBUM_KEY_SEPARATOR + artist.lowercase(Locale.ROOT)
+
+    /** @see albumKey */
+    private val ALBUM_KEY_SEPARATOR = Char(UNIT_SEPARATOR).toString()
+
+    /**
+     * ASCII 0x1F, which exists for exactly this and cannot occur in a title.
+     *
+     * Built from its code point rather than written as an escape: a control
+     * character spelt out in a string literal is an invisible byte in the
+     * middle of a line, and this file spent a while being treated as a binary
+     * by every tool that looked at it because of one.
+     */
+    private const val UNIT_SEPARATOR = 31
+
+    /**
+     * The people named on a track's credit.
+     *
+     * Split conservatively, and on punctuation rather than on words: `,`, `&`,
+     * `x` and the feature markers are how every catalogue this app reads joins
+     * two artists, while " and " and " with " are as often part of a band's
+     * actual name — "Florence and the Machine", "Nick Cave and the Bad Seeds" —
+     * so they are left alone. A name is still split wrongly now and then
+     * ("Simon & Garfunkel"), which costs one duplicated chart row; not splitting
+     * at all costs a row for every collaboration anyone has ever recorded.
+     */
+    fun primaryArtist(credit: String): String? {
+        lastCredit?.let { (raw, name) -> if (raw == credit) return name }
+        val name = credit.split(CREDIT_SEPARATORS)
+            .firstOrNull { it.isNotBlank() }
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        // Memoised on the last credit seen, because the caller is the playback
+        // sampler: it asks about the same string a dozen times a minute for as
+        // long as a track is playing, and a regex split per tick is work with a
+        // known answer.
+        lastCredit = credit to name
+        return name
+    }
+
+    @Volatile
+    private var lastCredit: Pair<String, String?>? = null
+
+    private val CREDIT_SEPARATORS = Regex(
+        """\s*,\s*|\s+&\s+|\s+x\s+|\s+feat\.?\s+|\s+ft\.?\s+|\s+featuring\s+""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private const val TAG = "YZMusicListening"
+    private const val DIRECTORY = "listening"
+
+    /** How far down the artist chart a page opening will send lookups for. */
+    private const val ARTISTS_TO_RESOLVE = 15
+
+    /** Three years, which is longer than "all time" means to most people. */
+    private const val KEEP_MONTHS = 36
+
+    /**
+     * Per-month caps. Generous enough that nobody reaches them by listening,
+     * tight enough that a bucket stays well under a hundred kilobytes.
+     */
+    private const val MAX_TRACKS = 600
+    private const val MAX_NAMES = 400
+}
+
+/** One track's totals inside a bucket. */
+@Serializable
+data class TrackEntry(
+    val id: String,
+    val title: String = "",
+    val artist: String = "",
+    var album: String? = null,
