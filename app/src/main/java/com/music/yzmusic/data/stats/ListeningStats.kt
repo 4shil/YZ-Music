@@ -775,3 +775,12 @@ enum class ReplayPeriod(val chip: String) {
 data class ReplaySummary(
     val period: ReplayPeriod,
     val label: String,
+    val totalMs: Long,
+    val totalPlays: Int,
+    val songs: List<RankedSong>,
+    val artists: List<RankedEntry>,
+    val albums: List<RankedEntry>,
+    val genres: List<RankedEntry>,
+    val hourOfDay: List<Long>,
+    /** `YYYY-MM-DD` of the day with the most listening, or null. */
+    val busiestDay: String?,
