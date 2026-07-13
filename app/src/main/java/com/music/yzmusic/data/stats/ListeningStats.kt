@@ -668,3 +668,56 @@ data class TrackEntry(
     val title: String = "",
     val artist: String = "",
     var album: String? = null,
+    var albumId: String? = null,
+    var artistId: String? = null,
+    var art: String? = null,
+    var ms: Long = 0L,
+    var plays: Int = 0,
+    var last: Long = 0L,
+) {
+    fun absorb(other: TrackEntry) {
+        ms += other.ms
+        plays += other.plays
+        last = maxOf(last, other.last)
+        if (album == null) album = other.album
+        if (albumId == null) albumId = other.albumId
+        if (artistId == null) artistId = other.artistId
+        if (art == null) art = other.art
+    }
+}
+
+/**
+ * One artist's or album's totals.
+ *
+ * [key] is the map key it was stored under. Written for a reader's benefit and
+ * for anything downstream of an export; it is deliberately *not* read back.
+ *
+ * Reading it was the original design, on the reasoning that a stored key cannot
+ * be spelt differently by a later build. What that actually buys is the
+ * opposite: an entry keyed by an older build keeps its old key forever, so the
+ * same artist ends up in two rows the moment the spelling changes and there is
+ * no way back. Recomputing on load means a change heals itself — see
+ * [OpenBucket.of] and the merge it does on the way in.
+ */
+@Serializable
+data class NameEntry(
+    val name: String = "",
+    val sub: String? = null,
+    var art: String? = null,
+    var id: String? = null,
+    var ms: Long = 0L,
+    var plays: Int = 0,
+    val key: String? = null,
+) {
+    fun absorb(other: NameEntry) {
+        ms += other.ms
+        plays += other.plays
+        if (art == null) art = other.art
+        if (id == null) id = other.id
+    }
+}
+
+/** One calendar month on disk. */
+@Serializable
+data class StoredBucket(
+    val version: Int = 1,
