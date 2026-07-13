@@ -721,3 +721,17 @@ data class NameEntry(
 @Serializable
 data class StoredBucket(
     val version: Int = 1,
+    val month: String,
+    val tracks: List<TrackEntry> = emptyList(),
+    val artists: List<NameEntry> = emptyList(),
+    val albums: List<NameEntry> = emptyList(),
+    /** Milliseconds played per hour of the day, 0..23. */
+    val hours: List<Long> = List(24) { 0L },
+    /** Milliseconds played per day of the month. */
+    val days: Map<Int, Long> = emptyMap(),
+)
+
+/** A row on one of the four charts. */
+data class RankedEntry(
+    val title: String,
+    val subtitle: String?,
