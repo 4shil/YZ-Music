@@ -784,3 +784,31 @@ data class ReplaySummary(
     val hourOfDay: List<Long>,
     /** `YYYY-MM-DD` of the day with the most listening, or null. */
     val busiestDay: String?,
+    val busiestDayMs: Long,
+    val distinctSongs: Int,
+    val distinctArtists: Int,
+    val distinctAlbums: Int,
+    /** The earliest month with anything in it, `YYYY-MM`. */
+    val since: String?,
+) {
+    val minutes: Long get() = totalMs / 60_000
+    val hours: Long get() = totalMs / 3_600_000
+
+    /**
+     * Whether there is anything at all to draw.
+     *
+     * One track is enough. There was a minimum here — five minutes, on the
+     * reasoning that a chart of two songs is not a chart — and it was wrong in
+     * the only way that matters: someone who has just played a couple of songs
+     * and gone looking for the page they heard about is told they have not
+     * listened to anything, which is both untrue and indistinguishable from the
+     * feature being broken. A small Replay is a small Replay, and it grows.
+     */
+    val isEmpty: Boolean get() = songs.isEmpty()
+
+    /** The hour of the day with the most listening, or null if nothing was. */
+    val peakHour: Int? get() = hourOfDay.withIndex()
+        .filter { it.value > 0 }
+        .maxByOrNull { it.value }
+        ?.index
+}
