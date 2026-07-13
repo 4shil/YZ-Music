@@ -462,3 +462,102 @@ object ListeningStats {
     private class MergedBucket {
         val tracks = HashMap<String, TrackEntry>()
         val artists = HashMap<String, NameEntry>()
+        val albums = HashMap<String, NameEntry>()
+        val hours = LongArray(24)
+        val days = HashMap<String, Long>()
+        var earliest: String? = null
+
+        fun add(bucket: StoredBucket) {
+            bucket.tracks.forEach { entry ->
+                tracks.merge(entry.id, entry.copy()) { a, b -> a.also { it.absorb(b) } }
+            }
+            bucket.artists.forEach { entry ->
+                val lead = entry.copy(name = primaryArtist(entry.name) ?: entry.name)
+                artists.merge(lead.name.lowercase(Locale.ROOT), lead) { a, b -> a.also { it.absorb(b) } }
+            }
+            bucket.albums.forEach { entry ->
+                val key = albumKey(entry.name, entry.sub.orEmpty())
+                albums.merge(key, entry.copy()) { a, b -> a.also { it.absorb(b) } }
+            }
+            repeat(24) { hours[it] += bucket.hours.getOrElse(it) { 0L } }
+            bucket.days.forEach { (day, ms) ->
+                val date = "${bucket.month}-%02d".format(day)
+                days[date] = (days[date] ?: 0L) + ms
+            }
+            if (earliest == null || bucket.month < earliest!!) earliest = bucket.month
+        }
+
+        fun toSummary(period: ReplayPeriod, today: LocalDate): ReplaySummary {
+            val rankedSongs = tracks.values
+                .sortedWith(compareByDescending<TrackEntry> { it.ms }.thenByDescending { it.plays })
+                .map {
+                    RankedSong(
+                        song = Song(
+                            videoId = it.id,
+                            title = it.title,
+                            artist = it.artist,
+                            thumbnailUrl = it.art,
+                            artistId = it.artistId,
+                            albumId = it.albumId,
+                            albumName = it.album,
+                        ),
+                        ms = it.ms,
+                        plays = it.plays,
+                    )
+                }
+            // The artist's own picture and page where one has been found, and
+            // the track's sleeve where one hasn't -- see [ArtistFacts]. Resolved
+            // here rather than stored in the bucket because it is a fact about
+            // the artist, not about the evening they were played on: written
+            // into every month it would freeze at whatever was known the first
+            // time they came up, and be missing from every month before that.
+            val rankedArtists = artists.values
+                .sortedWith(compareByDescending<NameEntry> { it.ms }.thenByDescending { it.plays })
+                .map {
+                    RankedEntry(
+                        title = it.name,
+                        subtitle = it.sub,
+                        artworkUrl = ArtistFacts.imageFor(it.name) ?: it.art,
+                        browseId = it.id ?: ArtistFacts.browseIdFor(it.name),
+                        ms = it.ms,
+                        plays = it.plays,
+                    )
+                }
+            val rankedAlbums = albums.values
+                .sortedWith(compareByDescending<NameEntry> { it.ms }.thenByDescending { it.plays })
+                .map { RankedEntry(it.name, it.sub, it.art, it.id, it.ms, it.plays) }
+
+            // Genres are derived rather than stored — see [ArtistFacts]. An
+            // artist with no tag yet simply doesn't vote, which is why this can
+            // be an empty list on a page whose other charts are full.
+            val genreMs = LinkedHashMap<String, Long>()
+            val genrePlays = LinkedHashMap<String, Int>()
+            val genreArt = LinkedHashMap<String, String?>()
+            rankedArtists.forEach { artist ->
+                ArtistFacts.genresFor(artist.title).forEach { genre ->
+                    genreMs[genre] = (genreMs[genre] ?: 0L) + artist.ms
+                    genrePlays[genre] = (genrePlays[genre] ?: 0) + artist.plays
+                    if (genreArt[genre] == null) genreArt[genre] = artist.artworkUrl
+                }
+            }
+            // Anything still missing a picture is asked about now, so opening
+            // the page is a second way for these to fill in — the first being
+            // playing the music, which is no help to someone who has just
+            // installed a build that started collecting them.
+            rankedArtists.take(ARTISTS_TO_RESOLVE)
+                .filter { it.artworkUrl == null || it.browseId == null }
+                .forEach { ArtistFacts.noticed(it.title) }
+
+            val rankedGenres = genreMs.entries
+                .sortedByDescending { it.value }
+                .map {
+                    RankedEntry(
+                        title = it.key,
+                        subtitle = null,
+                        artworkUrl = genreArt[it.key],
+                        browseId = null,
+                        ms = it.value,
+                        plays = genrePlays[it.key] ?: 0,
+                    )
+                }
+
