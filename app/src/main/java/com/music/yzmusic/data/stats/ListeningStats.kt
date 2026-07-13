@@ -333,3 +333,132 @@ object ListeningStats {
      * appear on any page this data exists to draw.
      */
     private fun prune() {
+        val existing = months()
+        if (existing.size > KEEP_MONTHS) {
+            existing.take(existing.size - KEEP_MONTHS).forEach {
+                File(directory, "$it.json").delete()
+            }
+        }
+        val bucket = open ?: return
+        bucket.tracks.trimTo(MAX_TRACKS) { it.ms }
+        bucket.artists.trimTo(MAX_NAMES) { it.ms }
+        bucket.albums.trimTo(MAX_NAMES) { it.ms }
+    }
+
+    /**
+     * [this] keyed by [key], with anything that lands on the same key added
+     * together rather than overwriting.
+     *
+     * Needed because a key is *recomputed* on load rather than read back from
+     * the file — see [NameEntry.key]. Two entries written under different keys
+     * by an older build can therefore arrive at the same key now, and the
+     * obvious `associateByTo` would silently drop one of their totals.
+     */
+    private inline fun <T : Any> List<T>.mergedBy(
+        into: LinkedHashMap<String, T>,
+        key: (T) -> String,
+    ): LinkedHashMap<String, T> {
+        forEach { entry ->
+            val k = key(entry)
+            val existing = into[k]
+            if (existing == null) {
+                into[k] = entry
+            } else {
+                @Suppress("UNCHECKED_CAST")
+                (existing as NameEntry).absorb(entry as NameEntry)
+            }
+        }
+        return into
+    }
+
+    private inline fun <K, V> MutableMap<K, V>.trimTo(limit: Int, crossinline weight: (V) -> Long) {
+        if (size <= limit) return
+        entries.sortedBy { weight(it.value) }
+            .take(size - limit)
+            .forEach { remove(it.key) }
+    }
+
+    // ── Backup ──────────────────────────────────────────────────────────────
+
+    /** Every bucket, for [Backup]. */
+    suspend fun exportAll(): List<StoredBucket> {
+        if (!ready) return emptyList()
+        flushAndAwait()
+        return months().mapNotNull { read(it.toString()) }
+    }
+
+    /**
+     * Replaces everything held with [buckets].
+     *
+     * A replace rather than a merge, and deliberately so: an import is a restore
+     * onto a new device, and two copies of the same month added together would
+     * silently double every number on the page with no way to tell afterwards.
+     */
+    fun importAll(buckets: List<StoredBucket>) {
+        if (!ready) return
+        synchronized(lock) {
+            open = null
+            dirty = false
+            directory.listFiles()?.forEach { it.delete() }
+            directory.mkdirs()
+            version++
+            cached = null
+            buckets.forEach { bucket ->
+                val key = runCatching { YearMonth.parse(bucket.month).toString() }.getOrNull()
+                    ?: return@forEach
+                runCatching {
+                    File(directory, "$key.json")
+                        .writeText(json.encodeToString(StoredBucket.serializer(), bucket))
+                }.onFailure { Log.w(TAG, "Could not import bucket $key", it) }
+            }
+        }
+    }
+
+    // ── Shapes ──────────────────────────────────────────────────────────────
+
+    /**
+     * The open month, in mutable form.
+     *
+     * Apart from [StoredBucket] because the stored shape is a schema and this
+     * one is a working set: a counter that goes up thousands of times a session
+     * wants to be a `var` in a map, and a file format wants to be immutable and
+     * boring.
+     */
+    private class OpenBucket(
+        val key: String,
+        val tracks: MutableMap<String, TrackEntry>,
+        val artists: MutableMap<String, NameEntry>,
+        val albums: MutableMap<String, NameEntry>,
+        val hours: LongArray,
+        val days: MutableMap<Int, Long>,
+    ) {
+        fun snapshot() = StoredBucket(
+            month = key,
+            tracks = tracks.values.toList(),
+            artists = artists.map { (key, entry) -> entry.copy(key = key) },
+            albums = albums.map { (key, entry) -> entry.copy(key = key) },
+            hours = hours.toList(),
+            days = days.toMap(),
+        )
+
+        companion object {
+            fun of(key: String, stored: StoredBucket) = OpenBucket(
+                key = key,
+                tracks = stored.tracks.associateByTo(LinkedHashMap()) { it.id },
+                // Re-keyed on the lead artist, so entries a previous build
+                // filed under a whole credit fold into the person on read
+                // instead of sitting beside them forever.
+                artists = stored.artists
+                    .map { it.copy(name = primaryArtist(it.name) ?: it.name) }
+                    .mergedBy(LinkedHashMap()) { it.name.lowercase(Locale.ROOT) },
+                albums = stored.albums.mergedBy(LinkedHashMap()) { albumKey(it.name, it.sub.orEmpty()) },
+                hours = LongArray(24) { stored.hours.getOrElse(it) { 0L } },
+                days = stored.days.toMutableMap(),
+            )
+        }
+    }
+
+    /** Several months added together, on the way to a [ReplaySummary]. */
+    private class MergedBucket {
+        val tracks = HashMap<String, TrackEntry>()
+        val artists = HashMap<String, NameEntry>()
