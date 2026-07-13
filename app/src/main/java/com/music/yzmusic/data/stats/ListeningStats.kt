@@ -284,3 +284,52 @@ object ListeningStats {
      */
     suspend fun summary(period: ReplayPeriod): ReplaySummary = withContext(Dispatchers.IO) {
         flushAndAwait()
+        val today = LocalDate.now()
+        val facts = ArtistFacts.revision.value
+        // Every input to the merge, so the cache cannot be stale: which months
+        // are on disk and what is in them ([version]), what is known about the
+        // artists in them, which period was asked for, and — because "this
+        // month" and "this year" are relative — what day it is. Opening the
+        // Library tab asks for this, so it is asked often and usually for an
+        // answer that has not changed.
+        cached?.takeIf {
+            it.period == period && it.version == version && it.facts == facts && it.day == today
+        }?.let { return@withContext it.summary }
+
+        val merged = MergedBucket()
+        months().filter { period.covers(it, today) }
+            .forEach { month -> read(month.toString())?.let(merged::add) }
+        merged.toSummary(period, today).also {
+            cached = Cached(period, version, facts, today, it)
+        }
+    }
+
+    /** Every month with a file, oldest first. */
+    fun months(): List<YearMonth> {
+        if (!ready) return emptyList()
+        val files = directory.listFiles() ?: return emptyList()
+        return files.mapNotNull { file ->
+            file.name.removeSuffix(".json").takeIf { it != file.name }
+                ?.let { runCatching { YearMonth.parse(it) }.getOrNull() }
+        }.sorted()
+    }
+
+    private fun read(key: String): StoredBucket? {
+        val file = File(directory, "$key.json")
+        if (!file.exists()) return null
+        return runCatching { json.decodeFromString(StoredBucket.serializer(), file.readText()) }
+            .onFailure { Log.w(TAG, "Discarding unreadable listening bucket $key", it) }
+            .getOrNull()
+    }
+
+    // ── Housekeeping ────────────────────────────────────────────────────────
+
+    /**
+     * Keeps the folder to [KEEP_MONTHS] and each bucket to its entry caps.
+     *
+     * Both are the same bet: what survives is what was actually listened to, so
+     * eviction is by time played rather than by recency. A track heard once in
+     * passing is the first thing out of a full bucket, and it was never going to
+     * appear on any page this data exists to draw.
+     */
+    private fun prune() {
