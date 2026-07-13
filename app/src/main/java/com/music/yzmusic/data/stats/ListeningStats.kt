@@ -735,3 +735,52 @@ data class StoredBucket(
 data class RankedEntry(
     val title: String,
     val subtitle: String?,
+    val artworkUrl: String?,
+    val browseId: String?,
+    val ms: Long,
+    val plays: Int,
+)
+
+/** A song row, which keeps the whole [Song] so tapping it can play it. */
+data class RankedSong(val song: Song, val ms: Long, val plays: Int)
+
+/** How far back a Replay reaches. */
+enum class ReplayPeriod(val chip: String) {
+    THIS_MONTH("This month"),
+    THIS_YEAR("This year"),
+    ALL_TIME("All time"),
+    ;
+
+    fun covers(month: YearMonth, today: LocalDate): Boolean = when (this) {
+        THIS_MONTH -> month == YearMonth.from(today)
+        THIS_YEAR -> month.year == today.year
+        ALL_TIME -> true
+    }
+
+    fun label(today: LocalDate): String = when (this) {
+        THIS_MONTH -> YearMonth.from(today).month.name.lowercase(Locale.ROOT)
+            .replaceFirstChar { it.uppercase(Locale.ROOT) } + " ${today.year}"
+        THIS_YEAR -> today.year.toString()
+        ALL_TIME -> "All time"
+    }
+}
+
+/**
+ * Everything the Replay page and the stories draw, worked out once.
+ *
+ * Deliberately a plain value with the charts already sorted: the stories flip
+ * between eight views of the same numbers, and recomputing a ranking per page
+ * would put a sort on the swipe.
+ */
+data class ReplaySummary(
+    val period: ReplayPeriod,
+    val label: String,
+    val totalMs: Long,
+    val totalPlays: Int,
+    val songs: List<RankedSong>,
+    val artists: List<RankedEntry>,
+    val albums: List<RankedEntry>,
+    val genres: List<RankedEntry>,
+    val hourOfDay: List<Long>,
+    /** `YYYY-MM-DD` of the day with the most listening, or null. */
+    val busiestDay: String?,
