@@ -29,3 +29,13 @@ jobs:
         echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> keystore.properties
         echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> keystore.properties
 
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run Unit Tests
+      run: ./gradlew testProdDebugUnitTest
+
+    - name: Build Signed Prod Release APK
+      run: ./gradlew assembleProdRelease
+
+    - name: Upload APK Artifact
