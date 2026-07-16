@@ -44,3 +44,48 @@
         <item quantity="other">%1$d Songs</item>
     </plurals>
     <plurals name="artist_count">
+        <item quantity="one">%1$d Künstler</item>
+        <item quantity="other">%1$d Künstler</item>
+    </plurals>
+    <plurals name="album_count">
+        <item quantity="one">%1$d Album</item>
+        <item quantity="other">%1$d Alben</item>
+    </plurals>
+    <string name="songs">Songs</string>
+    <string name="artists">Künstler</string>
+    <string name="albums">Alben</string>
+    <string name="no_album_metadata">Keiner dieser Titel gibt an, zu welchem Album er gehört.</string>
+    <string name="search_empty">Durchsuche Millionen Songs auf YouTube Music.</string>
+    <string name="recent_searches">Letzte Suchanfragen</string>
+    <string name="clear">Löschen</string>
+    <string name="search_hint">Künstler, Songs, Songtexte und mehr</string>
+    <string name="recent_search_edit">„%1$s“ bearbeiten</string>
+    <string name="recent_search_remove">„%1$s“ aus letzten Suchanfragen entfernen</string>
+    <string name="storage_required_save">Speicherzugriff ist erforderlich, um Songs zu speichern</string>
+    <string name="storage_required_read">Speicherberechtigung ist erforderlich, um lokale Audiodateien zu lesen</string>
+    <string name="sharing_coming_soon">Teilen ist bald verfügbar</string>
+    <string name="already_downloaded">Bereits heruntergeladen</string>
+    <plurals name="downloading_song_count">
+        <item quantity="one">%1$d Song wird heruntergeladen</item>
+        <item quantity="other">%1$d Songs werden heruntergeladen</item>
+    </plurals>
+    <string name="source">Quellen</string>
+    <string name="lossless_audio">Verlustfreies Audio</string>
+    <string name="prefer_lossless">Verlustfrei bevorzugen</string>
+    <string name="lossless_source_subtitle">FLAC und ALAC direkt von der Quelle</string>
+    <string name="overridden">Überschrieben</string>
+    <string name="add_module_source">Modulquelle hinzufügen</string>
+    <string name="link">Link</string>
+    <string name="name_optional">Name (optional)</string>
+    <string name="remove_source">Diese Quelle entfernen</string>
+    <string name="test">Testen</string>
+    <string name="testing">Wird getestet…</string>
+    <string name="connected">Verbunden</string>
+    <string name="account_integrations">Konto &amp; Integrationen</string>
+    <string name="account_scrobbling">Konto &amp; Scrobbling</string>
+    <string name="rich_presence">Rich Presence</string>
+    <string name="scrobbling">Scrobbling</string>
+    <string name="now_playing">Wird wiedergegeben</string>
+    <string name="selected">Ausgewählt</string>
+    <string name="password">Passwort</string>
+    <string name="username">Benutzername</string>
