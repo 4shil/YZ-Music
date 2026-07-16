@@ -44,3 +44,48 @@
         <item quantity="other">%1$d गाने</item>
     </plurals>
     <plurals name="artist_count">
+        <item quantity="one">%1$d कलाकार</item>
+        <item quantity="other">%1$d कलाकार</item>
+    </plurals>
+    <plurals name="album_count">
+        <item quantity="one">%1$d एल्बम</item>
+        <item quantity="other">%1$d एल्बम</item>
+    </plurals>
+    <string name="songs">गाने</string>
+    <string name="artists">कलाकार</string>
+    <string name="albums">एल्बम</string>
+    <string name="no_album_metadata">इनमें से कोई भी ट्रैक यह नहीं बताता कि वह किस एल्बम का है।</string>
+    <string name="search_empty">YouTube Music पर लाखों गाने खोजें।</string>
+    <string name="recent_searches">हाल की खोजें</string>
+    <string name="clear">साफ़ करें</string>
+    <string name="search_hint">कलाकार, गाने, लिरिक्स और बहुत कुछ</string>
+    <string name="recent_search_edit">“%1$s” संपादित करें</string>
+    <string name="recent_search_remove">हाल की खोजों से “%1$s” हटाएं</string>
+    <string name="storage_required_save">गाने सेव करने के लिए स्टोरेज एक्सेस ज़रूरी है</string>
+    <string name="storage_required_read">लोकल ऑडियो फ़ाइलें पढ़ने के लिए स्टोरेज अनुमति ज़रूरी है</string>
+    <string name="sharing_coming_soon">शेयरिंग जल्द आ रही है</string>
+    <string name="already_downloaded">पहले से डाउनलोड है</string>
+    <plurals name="downloading_song_count">
+        <item quantity="one">%1$d गाना डाउनलोड हो रहा है</item>
+        <item quantity="other">%1$d गाने डाउनलोड हो रहे हैं</item>
+    </plurals>
+    <string name="source">स्रोत</string>
+    <string name="lossless_audio">लॉसलेस ऑडियो</string>
+    <string name="prefer_lossless">लॉसलेस को प्राथमिकता दें</string>
+    <string name="lossless_source_subtitle">सीधे स्रोत से FLAC और ALAC</string>
+    <string name="overridden">बदल दिया गया</string>
+    <string name="add_module_source">मॉड्यूल स्रोत जोड़ें</string>
+    <string name="link">लिंक</string>
+    <string name="name_optional">नाम (वैकल्पिक)</string>
+    <string name="remove_source">यह स्रोत हटाएं</string>
+    <string name="test">जांचें</string>
+    <string name="testing">जांच हो रही है…</string>
+    <string name="connected">कनेक्टेड</string>
+    <string name="account_integrations">खाता और एकीकरण</string>
+    <string name="account_scrobbling">खाता और स्क्रॉबलिंग</string>
+    <string name="rich_presence">रिच प्रेज़ेंस</string>
+    <string name="scrobbling">स्क्रॉबलिंग</string>
+    <string name="now_playing">अभी चल रहा है</string>
+    <string name="selected">चयनित</string>
+    <string name="password">पासवर्ड</string>
+    <string name="username">यूज़रनेम</string>
