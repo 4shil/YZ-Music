@@ -107,3 +107,29 @@ YZ Music features an advanced autoplay engine designed for standalone single-son
 ```powershell
 # Run all unit tests
 ./gradlew testProdDebugUnitTest
+
+# Assemble production debug APK
+./gradlew assembleProdDebug
+
+# Assemble signed release APK (requires keystore configuration)
+./gradlew assembleProdRelease
+```
+
+Generated APKs are located at:
+- Debug: `app/build/outputs/apk/prod/debug/app-prod-debug.apk`
+- Release: `app/build/outputs/apk/prod/release/app-prod-release.apk`
+
+---
+
+## Privacy & Security
+
+- **No Third-Party Analytics**: Zero tracking SDKs or telemetry beacons.
+- **Direct-to-Source**: All requests communicate directly with YouTube Music / lyrics providers.
+- **Local Storage**: All playback statistics, history, and downloads reside strictly on your local device.
+- **Credential Protection**: Account cookies and API keys are stored in encrypted private shared preferences and are never exported.
+
+---
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
