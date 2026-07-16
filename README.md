@@ -26,3 +26,57 @@
 ## Features
 
 ### Playback & Audio
+- **Seamless Streaming**: Full catalogue search, album browsing, artist discography, and playlist playback.
+- **Standalone AutoPlay**: Dynamic queue continuation powered by YouTube Music `/next` radio, candidate classification, and per-artist diversity caps.
+- **High-Fidelity Audio**: Lossless audio support (FLAC/ALAC) with fallback to high-bitrate YouTube Music audio streams.
+- **True Crossfade**: Adjustable 0–12s gapless crossfade transitions with automated loudness management.
+- **Automix DSP Analyzer**: Native C++ 17 beat and tempo tracking (`native/analyzer`) for musical transitions.
+- **Offline Downloads**: High-bitrate audio downloads with embedded ID3/Vorbis comment tags, synchronized lyrics, and artwork.
+- **Local Audio Library**: Indexed on-device playback supporting local tracks, albums, and artist tags.
+
+### Visuals & User Experience
+- **Motion Artwork**: Real-time canvas animation and Spotify canvas integration on the Now Playing screen.
+- **Synchronized Lyrics**: Word-level, syllable-level, and line-level lyrics synced from LRCLib, Musixmatch, and embedded tags.
+- **Dynamic Theming**: Artwork-driven Material 3 color palettes with AMOLED black and light theme support.
+- **Frosted Glass UI**: Ultra-smooth frosted acrylic scrims and fluid gestures.
+- **Home Screen Widgets**: Now-playing widgets with interactive media controls and dynamic artwork updates.
+
+### Connectivity & Accounts
+- **Google Account Authentication**: Optional session cookie integration for personal playlists, subscriptions, and recommendations.
+- **Scrobbling**: Native scrobbling to Last.fm and ListenBrainz.
+- **Discord Rich Presence**: Live playback status with album sleeve thumbnails and interactive action links.
+- **Local Backup & Restore**: Full JSON backup and migration for playlists, playback history, and user settings.
+
+---
+
+## Architecture
+
+YZ Music follows modern Android architectural guidelines:
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│                   Jetpack Compose UI                     │
+│  (Material 3, Haze Frosted Glass, Navigation, Replay)    │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│                 MainViewModel & StateFlow                │
+│    (Authoritative player state, queue sync, settings)    │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│           AndroidX Media3 Service (PlaybackService)      │
+│  ├── ExoPlayer Engine (MediaSession, AudioAttributes)    │
+│  ├── CrossfadeController (Gapless & dual-player fade)    │
+│  ├── Autoplay Manager (Dynamic replenishment)            │
+│  └── AudioCache (Disk caching & stream resolution)       │
+└──────────────┬─────────────────────────────┬─────────────┘
+               │                             │
+┌──────────────▼─────────────┐ ┌─────────────▼─────────────┐
+│    C++ DSP Native Engine   │ │     Data & InnerTube      │
+│  - Tempo & beat analysis   │ │  - Watch queue parser     │
+│  - Mel spectrograms        │ │  - Stream URL resolver    │
+│  - Vocal separation        │ │  - Multi-provider lyrics  │
+└────────────────────────────┘ └───────────────────────────┘
+```
+
