@@ -80,3 +80,30 @@ YZ Music follows modern Android architectural guidelines:
 └────────────────────────────┘ └───────────────────────────┘
 ```
 
+---
+
+## Autoplay & Recommendation Engine
+
+YZ Music features an advanced autoplay engine designed for standalone single-song playback:
+
+1. **Seed Extraction**: Extracts remote video IDs or matches local tracks against YouTube Music catalogue metadata.
+2. **Watch Queue Classification**: Evaluates items using structured metadata (`musicVideoType`, non-square thumbnail shape, and album attribution) rather than view count heuristics, preventing unwanted video renderers from polluting the audio queue.
+3. **Fault-Tolerant Resolution**: Candidate audio resolutions are individually isolated; network or cipher failures on single tracks do not discard the recommendation batch.
+4. **Low-Water Replenishment**: Continuously monitors the upcoming playback buffer and proactively requests new recommendations when queued tracks drop below threshold.
+5. **Diversity & Deduplication**: Restricts tracks per artist (`PER_ARTIST_LIMIT = 2`) to ensure recommendation variety and prevents repeat plays of recently heard tracks.
+
+---
+
+## Building from Source
+
+### Prerequisites
+- Android Studio Ladybug (or newer) / IntelliJ IDEA
+- Java Development Kit (JDK) 17+ (Microsoft OpenJDK 17 recommended)
+- Android SDK Platform 36 (Build Tools 36.0.0 or 35.0.0)
+- CMake 3.22.1+ & Android NDK (r27 or newer)
+
+### Build Commands
+
+```powershell
+# Run all unit tests
+./gradlew testProdDebugUnitTest
