@@ -43,3 +43,47 @@
         <item quantity="other">%1$d曲</item>
     </plurals>
     <plurals name="artist_count">
+        <item quantity="other">%1$d組のアーティスト</item>
+    </plurals>
+    <plurals name="album_count">
+        <item quantity="other">%1$d枚のアルバム</item>
+    </plurals>
+    <string name="songs">曲</string>
+    <string name="artists">アーティスト</string>
+    <string name="albums">アルバム</string>
+    <string name="no_album_metadata">これらの曲はどのアルバムに属するか示されていません。</string>
+    <string name="search_empty">YouTube Musicで何百万もの曲を検索できます。</string>
+    <string name="recent_searches">最近の検索</string>
+    <string name="clear">消去</string>
+    <string name="search_hint">アーティスト、曲、歌詞など</string>
+    <string name="recent_search_edit">「%1$s」を編集</string>
+    <string name="recent_search_remove">最近の検索から「%1$s」を削除</string>
+    <string name="storage_required_save">曲を保存するにはストレージへのアクセスが必要です</string>
+    <string name="storage_required_read">ローカルの音声ファイルを読み込むにはストレージの権限が必要です</string>
+    <string name="sharing_coming_soon">共有機能は近日公開予定です</string>
+    <string name="already_downloaded">ダウンロード済み</string>
+    <plurals name="downloading_song_count">
+        <item quantity="other">%1$d曲をダウンロード中</item>
+    </plurals>
+    <string name="source">ソース</string>
+    <string name="lossless_audio">ロスレスオーディオ</string>
+    <string name="prefer_lossless">ロスレスを優先</string>
+    <string name="lossless_source_subtitle">ソースから直接FLACやALACを取得</string>
+    <string name="overridden">上書き済み</string>
+    <string name="add_module_source">モジュールソースを追加</string>
+    <string name="link">リンク</string>
+    <string name="name_optional">名前（任意）</string>
+    <string name="remove_source">このソースを削除</string>
+    <string name="test">テスト</string>
+    <string name="testing">テスト中…</string>
+    <string name="connected">接続済み</string>
+    <string name="account_integrations">アカウントと連携</string>
+    <string name="account_scrobbling">アカウントとスクロブリング</string>
+    <string name="rich_presence">リッチプレゼンス</string>
+    <string name="scrobbling">スクロブリング</string>
+    <string name="now_playing">再生中</string>
+    <string name="selected">選択済み</string>
+    <string name="password">パスワード</string>
+    <string name="username">ユーザー名</string>
+    <string name="login_failed">ログインに失敗しました</string>
+    <string name="song_cache_cleared">曲のキャッシュを削除しました</string>
