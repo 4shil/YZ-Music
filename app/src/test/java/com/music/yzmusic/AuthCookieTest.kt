@@ -49,3 +49,18 @@ class AuthCookieTest {
     }
 
     @Test
+    fun `a present but empty value is rejected`() {
+        // A cleared cookie is not a credential, and signing with the empty
+        // string produces a digest Google refuses rather than an obvious error.
+        assertFalse(AuthStore.hasApiSid("SID=abc; SAPISID=; HSID=def"))
+    }
+
+    @Test
+    fun `the name has to be the whole name`() {
+        // `APISID` is a different cookie and cannot sign anything, and a value
+        // that merely mentions the text is not the text.
+        assertFalse(AuthStore.hasApiSid("APISID=secret"))
+        assertFalse(AuthStore.hasApiSid("NOT-SAPISID=secret"))
+        assertFalse(AuthStore.hasApiSid("PREF=tz=SAPISID"))
+    }
+}
