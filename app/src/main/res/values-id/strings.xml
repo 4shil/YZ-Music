@@ -43,3 +43,47 @@
         <item quantity="other">%1$d lagu</item>
     </plurals>
     <plurals name="artist_count">
+        <item quantity="other">%1$d artis</item>
+    </plurals>
+    <plurals name="album_count">
+        <item quantity="other">%1$d album</item>
+    </plurals>
+    <string name="songs">Lagu</string>
+    <string name="artists">Artis</string>
+    <string name="albums">Album</string>
+    <string name="no_album_metadata">Tidak ada trek ini yang menunjukkan asal albumnya.</string>
+    <string name="search_empty">Cari jutaan lagu di YouTube Music.</string>
+    <string name="recent_searches">Pencarian terbaru</string>
+    <string name="clear">Hapus</string>
+    <string name="search_hint">Artis, Lagu, Lirik, dan Lainnya</string>
+    <string name="recent_search_edit">Edit “%1$s”</string>
+    <string name="recent_search_remove">Hapus “%1$s” dari pencarian terbaru</string>
+    <string name="storage_required_save">Akses penyimpanan diperlukan untuk menyimpan lagu</string>
+    <string name="storage_required_read">Izin penyimpanan diperlukan untuk membaca file audio lokal</string>
+    <string name="sharing_coming_soon">Fitur berbagi akan segera hadir</string>
+    <string name="already_downloaded">Sudah diunduh</string>
+    <plurals name="downloading_song_count">
+        <item quantity="other">Mengunduh %1$d lagu</item>
+    </plurals>
+    <string name="source">Sumber</string>
+    <string name="lossless_audio">Audio lossless</string>
+    <string name="prefer_lossless">Utamakan lossless</string>
+    <string name="lossless_source_subtitle">FLAC dan ALAC langsung dari sumber</string>
+    <string name="overridden">Ditimpa</string>
+    <string name="add_module_source">Tambahkan sumber modul</string>
+    <string name="link">Tautan</string>
+    <string name="name_optional">Nama (opsional)</string>
+    <string name="remove_source">Hapus sumber ini</string>
+    <string name="test">Uji</string>
+    <string name="testing">Menguji…</string>
+    <string name="connected">Terhubung</string>
+    <string name="account_integrations">Akun &amp; integrasi</string>
+    <string name="account_scrobbling">Akun &amp; scrobbling</string>
+    <string name="rich_presence">Rich presence</string>
+    <string name="scrobbling">Scrobbling</string>
+    <string name="now_playing">Sedang diputar</string>
+    <string name="selected">Dipilih</string>
+    <string name="password">Kata sandi</string>
+    <string name="username">Nama pengguna</string>
+    <string name="login_failed">Login gagal</string>
+    <string name="song_cache_cleared">Cache lagu dibersihkan</string>
