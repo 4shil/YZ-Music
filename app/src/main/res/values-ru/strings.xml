@@ -46,3 +46,50 @@
         <item quantity="other">%1$d песни</item>
     </plurals>
     <plurals name="artist_count">
+        <item quantity="one">%1$d исполнитель</item>
+        <item quantity="few">%1$d исполнителя</item>
+        <item quantity="many">%1$d исполнителей</item>
+        <item quantity="other">%1$d исполнителя</item>
+    </plurals>
+    <plurals name="album_count">
+        <item quantity="one">%1$d альбом</item>
+        <item quantity="few">%1$d альбома</item>
+        <item quantity="many">%1$d альбомов</item>
+        <item quantity="other">%1$d альбома</item>
+    </plurals>
+    <string name="songs">Песни</string>
+    <string name="artists">Исполнители</string>
+    <string name="albums">Альбомы</string>
+    <string name="no_album_metadata">Ни один из этих треков не указывает свой альбом.</string>
+    <string name="search_empty">Ищите миллионы песен на YouTube Music.</string>
+    <string name="recent_searches">Недавние запросы</string>
+    <string name="clear">Очистить</string>
+    <string name="search_hint">Исполнители, песни, тексты и многое другое</string>
+    <string name="recent_search_edit">Изменить «%1$s»</string>
+    <string name="recent_search_remove">Удалить «%1$s» из недавних запросов</string>
+    <string name="storage_required_save">Для сохранения песен нужен доступ к хранилищу</string>
+    <string name="storage_required_read">Для чтения локальных аудиофайлов нужно разрешение на доступ к хранилищу</string>
+    <string name="sharing_coming_soon">Функция «Поделиться» скоро появится</string>
+    <string name="already_downloaded">Уже загружено</string>
+    <plurals name="downloading_song_count">
+        <item quantity="one">Загрузка %1$d песни</item>
+        <item quantity="few">Загрузка %1$d песен</item>
+        <item quantity="many">Загрузка %1$d песен</item>
+        <item quantity="other">Загрузка %1$d песни</item>
+    </plurals>
+    <string name="source">Источники</string>
+    <string name="lossless_audio">Аудио без потерь</string>
+    <string name="prefer_lossless">Предпочитать без потерь</string>
+    <string name="lossless_source_subtitle">FLAC и ALAC прямо из источника</string>
+    <string name="overridden">Переопределено</string>
+    <string name="add_module_source">Добавить источник-модуль</string>
+    <string name="link">Ссылка</string>
+    <string name="name_optional">Название (необязательно)</string>
+    <string name="remove_source">Удалить этот источник</string>
+    <string name="test">Проверить</string>
+    <string name="testing">Проверка…</string>
+    <string name="connected">Подключено</string>
+    <string name="account_integrations">Аккаунт и интеграции</string>
+    <string name="account_scrobbling">Аккаунт и скробблинг</string>
+    <string name="rich_presence">Rich Presence</string>
+    <string name="scrobbling">Скробблинг</string>
