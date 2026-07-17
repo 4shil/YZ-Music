@@ -24,3 +24,22 @@ import org.junit.Test
 class AuthCookieTest {
 
     @Test
+    fun `plain SAPISID is accepted`() {
+        assertTrue(AuthStore.hasApiSid("SID=abc; SAPISID=secret; HSID=def"))
+    }
+
+    @Test
+    fun `a jar with only the secure forms is accepted`() {
+        // The case the substring test got right by accident and the
+        // header-signing code then got wrong: signed in, but unsigned.
+        assertTrue(AuthStore.hasApiSid("SID=abc; __Secure-3PAPISID=secret"))
+        assertTrue(AuthStore.hasApiSid("SID=abc; __Secure-1PAPISID=secret"))
+    }
+
+    @Test
+    fun `leading and trailing whitespace does not hide a cookie`() {
+        assertTrue(AuthStore.hasApiSid("SID=abc;SAPISID=secret;HSID=def"))
+        assertTrue(AuthStore.hasApiSid("  SAPISID = secret  "))
+    }
+
+    @Test
