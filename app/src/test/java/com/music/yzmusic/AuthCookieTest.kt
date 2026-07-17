@@ -43,3 +43,9 @@ class AuthCookieTest {
     }
 
     @Test
+    fun `a jar with no signing secret is rejected`() {
+        assertFalse(AuthStore.hasApiSid("SID=abc; HSID=def; SSID=ghi; APISID=jkl"))
+        assertFalse(AuthStore.hasApiSid(""))
+    }
+
+    @Test
