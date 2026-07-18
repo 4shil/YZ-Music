@@ -94,3 +94,29 @@ class BackgroundVocalTest {
     fun `a bracket opening mid-word is not a second voice`() {
         // "wait(ing)" is one word; there is no word boundary to split on and
         // nothing to give the answering line for timing.
+        val line = listOf(
+            wordSynced(
+                Triple(1_000L, 1_400L, "still"),
+                Triple(1_400L, 2_000L, "wait(ing)"),
+            ),
+        ).withBackgroundVocals().single()
+        assertEquals("still wait(ing)", line.text)
+        assertNull(line.background)
+    }
+
+    @Test
+    fun `nesting splits at the outer bracket`() {
+        val line = listOf(LyricLine(1_000L, "lead (echo (twice))")).withBackgroundVocals().single()
+        assertEquals("lead", line.text)
+        assertEquals("(echo (twice))", line.background?.text)
+    }
+
+    @Test
+    fun `a bracket with no words in it is not a second voice`() {
+        val line = listOf(LyricLine(1_000L, "lead words (!)")).withBackgroundVocals().single()
+        assertEquals("lead words (!)", line.text)
+        assertNull(line.background)
+    }
+
+    @Test
+    fun `a line-synced answer shares the line's stamp and its stated end`() {
