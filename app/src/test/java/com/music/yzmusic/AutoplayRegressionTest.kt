@@ -44,3 +44,42 @@ class AutoplayRegressionTest {
     }
 
     @Test
+    fun `QueueBuilder extend filters duplicates of existing queue items`() {
+        val existing = listOf(
+            song("id1", "Starboy", "The Weeknd"),
+            song("id2", "Save Your Tears", "The Weeknd"),
+        )
+        val candidates = listOf(
+            song("id1", "Starboy", "The Weeknd"), // exact duplicate ID
+            song("id3", "Starboy (Official Video)", "The Weeknd"), // duplicate recording title
+            song("id4", "After Hours", "The Weeknd"),
+            song("id5", "Levitating", "Dua Lipa"),
+        )
+
+        val extended = QueueBuilder.extend(existing = existing, candidates = candidates, limit = 5)
+        val ids = extended.map { it.videoId }
+
+        assertFalse("Exact duplicate id1 should not be in extended", "id1" in ids)
+        assertFalse("Same recording id3 should not be in extended", "id3" in ids)
+        assertTrue("New song id5 should be in extended", "id5" in ids)
+    }
+
+    @Test
+    fun `QueueBuilder extend respects artist diversity limit`() {
+        val candidates = listOf(
+            song("cand1", "Track 1", "Solo Artist"),
+            song("cand2", "Track 2", "Solo Artist"),
+            song("cand3", "Track 3", "Solo Artist"),
+            song("cand4", "Track 4", "Solo Artist"),
+            song("cand5", "Other 1", "Different Artist"),
+        )
+
+        val extended = QueueBuilder.extend(existing = emptyList(), candidates = candidates, limit = 10)
+        val soloCount = extended.count { it.artist == "Solo Artist" }
+
+        // QueueBuilder caps unseeded artists at PER_ARTIST_LIMIT = 2
+        assertTrue("Solo Artist should be capped at 2 tracks", soloCount <= 2)
+        assertEquals(3, extended.size) // 2 by Solo Artist + 1 by Different Artist
+    }
+
+    @Test
