@@ -44,3 +44,24 @@ class AutoplayRegressionTest {
     }
 
     @Test
+    fun `QueueBuilder extend filters duplicates of existing queue items`() {
+        val existing = listOf(
+            song("id1", "Starboy", "The Weeknd"),
+            song("id2", "Save Your Tears", "The Weeknd"),
+        )
+        val candidates = listOf(
+            song("id1", "Starboy", "The Weeknd"), // exact duplicate ID
+            song("id3", "Starboy (Official Video)", "The Weeknd"), // duplicate recording title
+            song("id4", "After Hours", "The Weeknd"),
+            song("id5", "Levitating", "Dua Lipa"),
+        )
+
+        val extended = QueueBuilder.extend(existing = existing, candidates = candidates, limit = 5)
+        val ids = extended.map { it.videoId }
+
+        assertFalse("Exact duplicate id1 should not be in extended", "id1" in ids)
+        assertFalse("Same recording id3 should not be in extended", "id3" in ids)
+        assertTrue("New song id5 should be in extended", "id5" in ids)
+    }
+
+    @Test
