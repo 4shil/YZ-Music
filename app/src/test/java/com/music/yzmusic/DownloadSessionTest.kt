@@ -220,3 +220,40 @@ class DownloadSessionTest {
         // The second ask is a page that had since loaded a continuation.
         Downloads.rememberCollection(target, listOf(onDisk("a"), onDisk("b"), onDisk("c")))
 
+        val all = listOf(onDisk("a"), onDisk("b"), onDisk("c"))
+        val found = Downloads.collectionsAmong(all)
+        assertEquals(1, found.size)
+        assertEquals(listOf("a", "b", "c"), found.single().songs.map { it.videoId })
+    }
+
+    @Test
+    fun `an empty ask records nothing`() {
+        Downloads.rememberCollection(DownloadTarget(id = "MPREb1", title = "Motion"), emptyList())
+        assertTrue(Downloads.collections.value.isEmpty())
+    }
+
+    // ---- What the Library page's On Device shelf shows ----------------------
+
+    /** As the record of what's on disk reads: videoId to the file saved for it. */
+    private fun onDiskMap(vararg ids: String) =
+        ids.associateWith { "content://media/external/audio/media/$it" }
+
+    /**
+     * The shelf's whole reason for existing: an album downloaded whole can be
+     * grouped back up off its tracks' own tags, so it is already reachable
+     * through the Downloads folder without help. A playlist cannot be grouped
+     * that way at all, so it is the one that needs a card of its own — and a
+     * card per album beside it would only be a second door onto a list already
+     * there.
+     */
+    @Test
+    fun `only playlists get a card, because only playlists cannot be inferred`() {
+        Downloads.rememberCollection(
+            DownloadTarget(id = "VLPL1", title = "Late night drive", playlist = true),
+            listOf(onDisk("a"), onDisk("b")),
+        )
+        Downloads.rememberCollection(
+            DownloadTarget(id = "MPREb1", title = "Motion", playlist = false),
+            listOf(onDisk("c")),
+        )
+
