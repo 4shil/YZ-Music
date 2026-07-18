@@ -175,3 +175,48 @@ class DownloadSessionTest {
 
     @Test
     fun `a playlist is grouped by what was tapped, not by any tag on its tracks`() {
+        val target = DownloadTarget(
+            id = "VLPL123",
+            title = "Late night drive",
+            thumbnailUrl = "https://example/cover.jpg",
+            playlist = true,
+        )
+        // A playlist's tracks are off different releases, and two of these name
+        // no release at all — which is why the tag grouping the Albums tab used
+        // to do on its own could never put this back together.
+        val tracks = listOf(onDisk("a", album = "One"), onDisk("b"), onDisk("c"))
+        Downloads.rememberCollection(target, tracks)
+
+        val found = Downloads.collectionsAmong(tracks).single()
+        assertEquals("Late night drive", found.title)
+        assertTrue(found.playlist)
+        assertEquals("https://example/cover.jpg", found.thumbnailUrl)
+        assertEquals(listOf("a", "b", "c"), found.songs.map { it.videoId })
+    }
+
+    /**
+     * The record is a claim about a folder the user manages themselves, and the
+     * page is the only thing that has actually looked at the disk — so a release
+     * is worth exactly the tracks that came back, and one with none left is not
+     * worth a row.
+     */
+    @Test
+    fun `a release is only drawn for the files that are still there`() {
+        val target = DownloadTarget(id = "MPREb1", title = "Motion", subtitle = "Calvin Harris")
+        Downloads.rememberCollection(target, listOf(onDisk("a"), onDisk("b"), onDisk("c")))
+
+        val survivors = listOf(onDisk("a"), onDisk("c"))
+        val found = Downloads.collectionsAmong(survivors).single()
+        assertEquals(listOf("a", "c"), found.songs.map { it.videoId })
+
+        assertTrue(Downloads.collectionsAmong(listOf(onDisk("z"))).isEmpty())
+    }
+
+    /** Downloading the same release twice is one entry, not two near-copies. */
+    @Test
+    fun `re-downloading a release merges into the entry already there`() {
+        val target = DownloadTarget(id = "MPREb1", title = "Motion")
+        Downloads.rememberCollection(target, listOf(onDisk("a"), onDisk("b")))
+        // The second ask is a page that had since loaded a continuation.
+        Downloads.rememberCollection(target, listOf(onDisk("a"), onDisk("b"), onDisk("c")))
+
