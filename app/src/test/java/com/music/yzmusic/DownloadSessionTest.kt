@@ -257,3 +257,70 @@ class DownloadSessionTest {
             listOf(onDisk("c")),
         )
 
+        val shelf = Downloads.savedPlaylists(onDiskMap("a", "b", "c"))
+        assertEquals(listOf("Late night drive"), shelf.map { it.title })
+    }
+
+    /**
+     * The record is written at the tap, before a byte has been fetched — so
+     * without this, asking for a playlist would put it on a shelf headed "On
+     * Device" while none of it was.
+     */
+    @Test
+    fun `a playlist with nothing downloaded yet is not on the device`() {
+        Downloads.rememberCollection(
+            DownloadTarget(id = "VLPL1", title = "Late night drive", playlist = true),
+            listOf(onDisk("a"), onDisk("b")),
+        )
+        assertTrue(Downloads.savedPlaylists(emptyMap()).isEmpty())
+
+        // One track in is enough to be worth opening: the page behind the card
+        // is the tracks that are there, not the tracks that were asked for.
+        assertEquals(1, Downloads.savedPlaylists(onDiskMap("b")).size)
+    }
+
+    /**
+     * Deleting a playlist's tracks one by one has to eventually take the card
+     * with them. Nothing calls [Downloads.forgetCollection] in the app, so the
+     * record itself outlives the files and this is the only thing that notices.
+     */
+    @Test
+    fun `a playlist whose last file is gone loses its card`() {
+        Downloads.rememberCollection(
+            DownloadTarget(id = "VLPL1", title = "Late night drive", playlist = true),
+            listOf(onDisk("a"), onDisk("b")),
+        )
+        assertEquals(1, Downloads.savedPlaylists(onDiskMap("a")).size)
+        assertTrue(Downloads.savedPlaylists(onDiskMap("unrelated")).isEmpty())
+    }
+
+    @Test
+    fun `cards are in name order, whatever order they were downloaded in`() {
+        listOf("Zephyr", "anthems", "Morning").forEach { title ->
+            Downloads.rememberCollection(
+                DownloadTarget(id = "VL$title", title = title, playlist = true),
+                listOf(onDisk(title)),
+            )
+        }
+        assertEquals(
+            listOf("anthems", "Morning", "Zephyr"),
+            Downloads.savedPlaylists(onDiskMap("Zephyr", "anthems", "Morning")).map { it.title },
+        )
+    }
+
+    /**
+     * A downloaded playlist opens as a page of its own, and the id it is opened
+     * with has to survive the round trip — it is the only thing linking the card
+     * back to the record behind it. The two device folders must not be mistaken
+     * for one: they share the `local:` prefix and open a different screen.
+     */
+    @Test
+    fun `a playlist page id round-trips, and the device folders are not one`() {
+        assertEquals("VLPL1", Downloads.recordIdOf(Downloads.pageIdFor("VLPL1")))
+        assertNull(Downloads.recordIdOf("local:downloads"))
+        assertNull(Downloads.recordIdOf("local:all"))
+        assertNull(Downloads.recordIdOf("VLPL1"))
+        // A prefix with nothing behind it names no record.
+        assertNull(Downloads.recordIdOf(Downloads.PLAYLIST_PREFIX))
+    }
+}
