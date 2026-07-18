@@ -20,3 +20,15 @@ class AutoplayFaultToleranceTest {
     @Test
     fun `youtubeSeedFor preserves normal YouTube videoId`() = runBlocking {
         val ytSong = song("J7p4bzqLvCw", "Blinding Lights")
+        val seed = youtubeSeedFor(ytSong)
+        assertEquals("J7p4bzqLvCw", seed)
+    }
+
+    @Test
+    fun `youtubeSeedFor with local content uri and blank title returns null gracefully`() = runBlocking {
+        val localSong = song("content://media/external/audio/media/123", "", "")
+        val seed = youtubeSeedFor(localSong)
+        assertNull("Local file with blank metadata must return null rather than raw content URI", seed)
+    }
+
+    @Test
