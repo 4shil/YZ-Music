@@ -83,3 +83,33 @@ class AutoplayRegressionTest {
     }
 
     @Test
+    fun `loadAutoplayTracks returns empty list when all candidates are duplicates`() = runBlocking {
+        val existing = listOf(
+            song("id1", "Track 1", "Artist 1"),
+            song("id2", "Track 2", "Artist 2"),
+        )
+        val candidates = listOf(
+            song("id1", "Track 1", "Artist 1"),
+            song("id2", "Track 2", "Artist 2"),
+        )
+
+        val result = loadAutoplayTracks(
+            existing = existing,
+            seedSong = existing.first(),
+            limit = MAX_QUEUED_AUTOPLAY,
+            fetchRadio = { Result.success(candidates) },
+            resolveAudio = { it },
+        )
+
+        assertTrue(result.isSuccess)
+        assertTrue(result.getOrThrow().isEmpty())
+    }
+
+    @Test
+    fun `low water mark constant is calibrated for seamless playback replenishment`() {
+        assertTrue("Low-water mark must be positive", AUTOPLAY_LOW_WATER_MARK > 0)
+        assertTrue("Low-water mark must be below MAX_QUEUED_AUTOPLAY", AUTOPLAY_LOW_WATER_MARK < MAX_QUEUED_AUTOPLAY)
+        assertEquals(5, AUTOPLAY_LOW_WATER_MARK)
+        assertEquals(10, MAX_QUEUED_AUTOPLAY)
+    }
+}
