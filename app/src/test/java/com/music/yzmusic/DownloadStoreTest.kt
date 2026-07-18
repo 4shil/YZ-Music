@@ -103,3 +103,47 @@ class DownloadStoreTest {
      * counts.
      */
     @Test
+    fun `only lossless asks a source for the file it holds`() {
+        assertEquals(
+            StreamRequest.Lossless,
+            SourceResolver.requestForDownload(DownloadQuality.LOSSLESS),
+        )
+        assertEquals(StreamRequest.Best, SourceResolver.requestForDownload(DownloadQuality.HIGH))
+        assertEquals(
+            StreamRequest.Capped(128),
+            SourceResolver.requestForDownload(DownloadQuality.STANDARD),
+        )
+    }
+
+    /**
+     * High means "the best rung there is", and the sentinel that says so must
+     * not survive into a request as a literal 2-billion-kbps cap — the
+     * difference between a ceiling nothing exceeds and no ceiling at all is
+     * invisible until something starts formatting the number.
+     */
+    @Test
+    fun `high is uncapped rather than capped very high`() {
+        assertEquals(Int.MAX_VALUE, DownloadQuality.HIGH.maxKbps)
+        assertTrue(SourceResolver.requestForDownload(DownloadQuality.HIGH) !is StreamRequest.Capped)
+    }
+
+    /** Every rung has to say what it costs, or the picker shows a blank line. */
+    @Test
+    fun `every download rung is describable`() {
+        DownloadQuality.entries.forEach { quality ->
+            assertTrue(quality.label.isNotBlank())
+            assertTrue(quality.detail.isNotBlank())
+            assertTrue(quality.perTrack.isNotBlank())
+        }
+    }
+
+    // ---- When a download may start -----------------------------------------
+
+    /**
+     * The Wi-Fi-only gate, including the case that is easiest to get backwards:
+     * offline. A null [AppSettings.meteredConnection] means there is no active
+     * network at all, and refusing there would blame a Wi-Fi setting for an
+     * outage — the download is let through to fail on the network and say so.
+     */
+    @Test
+    fun `wifi-only refuses metered connections and nothing else`() {
