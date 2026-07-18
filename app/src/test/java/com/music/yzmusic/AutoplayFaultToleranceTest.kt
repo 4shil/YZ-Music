@@ -88,3 +88,25 @@ class AutoplayFaultToleranceTest {
     }
 
     @Test
+    fun `production loadAutoplayTracks propagates CancellationException`() = runBlocking {
+        val seed = song("seed1", "Seed Track")
+        val candidates = listOf(
+            song("candA", "Candidate A").copy(isVideo = true),
+        )
+
+        var cancellationPropagated = false
+        try {
+            loadAutoplayTracks(
+                existing = emptyList(),
+                seedSong = seed,
+                limit = 10,
+                fetchRadio = { Result.success(candidates) },
+                resolveAudio = { throw CancellationException("User skipped to next track") },
+            )
+        } catch (e: CancellationException) {
+            cancellationPropagated = true
+        }
+
+        assertTrue("CancellationException must be rethrown rather than swallowed as a candidate failure", cancellationPropagated)
+    }
+}
