@@ -1,0 +1,97 @@
+﻿package com.music.yzmusic
+
+import com.music.yzmusic.data.model.Song
+import com.music.yzmusic.download.DownloadProgress
+import com.music.yzmusic.download.DownloadSession
+import com.music.yzmusic.download.DownloadTarget
+import com.music.yzmusic.download.Downloads
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+/**
+ * The two things about a download that are remembered rather than observed: what
+ * release a batch was, and whether the user has been told how it went.
+ *
+ * Both are worth pinning because both fail silently. A release that isn't
+ * recorded doesn't throw — it just arrives in the Downloads folder as forty
+ * unrelated rows, which is exactly what it looked like before any of this
+ * existed. And a visibility rule that is off by one visit is either an indicator
+ * that can't be dismissed or one that was never seen, and neither is visible
+ * from the code: the whole point of the rule is that it holds while nobody is
+ * looking.
+ */
+class DownloadSessionTest {
+
+    private fun song(id: String, title: String = id, artist: String = "Artist") =
+        Song(videoId = id, title = title, artist = artist, thumbnailUrl = null)
+
+    /** As a downloaded track comes back off the Downloads page: with a file. */
+    private fun onDisk(id: String, album: String? = null) = song(id).copy(
+        albumName = album,
+        localUri = "content://media/external/audio/media/$id",
+    )
+
+    @Before
+    fun reset() = clearState()
+
+    @After
+    fun tearDown() = clearState()
+
+    /**
+     * Both of these are process-wide singletons by design — the queue outlives
+     * every screen that can look at it — so a test that leaves anything behind
+     * is a test that breaks the next one.
+     */
+    private fun clearState() {
+        DownloadSession.clear()
+        Downloads.collections.value.keys.toList().forEach(Downloads::forgetCollection)
+    }
+
+    // ---- Whether the indicator is up ---------------------------------------
+
+    @Test
+    fun `nothing asked for means no indicator at all`() {
+        assertFalse(DownloadSession.state.value.visible)
+    }
+
+    @Test
+    fun `an indicator survives the batch finishing, and goes on being seen`() {
+        DownloadSession.queued(song("a"))
+        assertTrue(DownloadSession.state.value.visible)
+
+        DownloadSession.done("a")
+        // The whole reason this class exists: a download is started and walked
+        // away from, so the moment it finishes is the moment nobody is watching.
+        // An indicator that goes with it was never there for the person it was
+        // for.
+        assertTrue(DownloadSession.state.value.visible)
+        assertFalse(DownloadSession.state.value.busy)
+
+        DownloadSession.markSeen()
+        assertFalse(DownloadSession.state.value.visible)
+    }
+
+    @Test
+    fun `looking in halfway through does not sign the batch off`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.queued(song("b"))
+        DownloadSession.done("a")
+
+        // Opened while "b" is still going: this is checking in, not confirming
+        // an outcome, because the outcome hasn't happened yet.
+        DownloadSession.markSeen()
+        assertTrue(DownloadSession.state.value.visible)
+
+        DownloadSession.done("b")
+        assertTrue(DownloadSession.state.value.visible)
+
+        DownloadSession.markSeen()
+        assertFalse(DownloadSession.state.value.visible)
+    }
+
+    @Test
