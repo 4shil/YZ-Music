@@ -31,3 +31,16 @@ class AutoplayRegressionTest {
     @Test
     fun `youtubeSeedFor returns standard YouTube ID directly without remote lookup`() = runBlocking {
         val standardSong = song("v_abc123xyz", "Blinding Lights", "The Weeknd")
+        val seed = youtubeSeedFor(standardSong)
+        assertEquals("v_abc123xyz", seed)
+    }
+
+    @Test
+    fun `youtubeSeedFor recognizes local content URIs and avoids raw ID usage`() = runBlocking {
+        val localSong = song("content://media/external/audio/media/42", "Local File", "Local Artist")
+        // When offline or unsearchable, it should safely return null rather than emitting the raw URI
+        val seed = youtubeSeedFor(localSong)
+        assertTrue(seed == null || !seed.startsWith("content://"))
+    }
+
+    @Test
