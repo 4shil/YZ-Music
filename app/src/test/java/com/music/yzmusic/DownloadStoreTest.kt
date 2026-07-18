@@ -44,3 +44,22 @@ class DownloadStoreTest {
 
         // Not audio/x-wav's mirror image: the x- prefix is on the MIME type
         // here and not on the extension.
+        val wav = DownloadStore.storable("wav")
+        assertEquals("wav", wav?.extension)
+        assertEquals("audio/x-wav", wav?.mimeType)
+    }
+
+    @Test
+    fun `alac is filed as the mp4 it actually is`() {
+        val alac = DownloadStore.storable("alac")
+        assertEquals("m4a", alac?.extension)
+        assertEquals("audio/mp4", alac?.mimeType)
+    }
+
+    @Test
+    fun `codecs are matched however a source spells them`() {
+        assertEquals("flac", DownloadStore.storable("FLAC")?.extension)
+        assertEquals("flac", DownloadStore.storable(" x-flac ")?.extension)
+    }
+
+    @Test
