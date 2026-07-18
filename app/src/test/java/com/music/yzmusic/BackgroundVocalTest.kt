@@ -33,3 +33,46 @@ class BackgroundVocalTest {
 
     @Test
     fun `a trailing bracket becomes the answering line`() {
+        val line = listOf(LyricLine(1_000L, "lead words (echoed words)")).withBackgroundVocals().single()
+        assertEquals("lead words", line.text)
+        assertEquals("(echoed words)", line.background?.text)
+    }
+
+    @Test
+    fun `the answering line takes the words that were inside the bracket`() {
+        val line = listOf(
+            wordSynced(
+                Triple(1_000L, 1_400L, "lead"),
+                Triple(1_400L, 1_900L, "words"),
+                Triple(2_100L, 2_500L, "(echoed"),
+                Triple(2_500L, 3_200L, "words)"),
+            ),
+        ).withBackgroundVocals().single()
+
+        assertEquals("lead words", line.text)
+        assertEquals(listOf("lead", "words"), line.words.map { it.text })
+
+        val backing = line.background!!
+        assertEquals("(echoed words)", backing.text)
+        assertEquals(listOf("(echoed", "words)"), backing.words.map { it.text })
+        // Its own stamp, so it sweeps on its own clock rather than the lead's.
+        assertEquals(2_100L, backing.timeMs)
+        assertTrue(backing.isWordSynced)
+    }
+
+    /**
+     * The bug the split exists for: the answer runs past the lead's last word,
+     * and the line is not over until it stops.
+     */
+    @Test
+    fun `the line ends when the answer does, not when the lead does`() {
+        val line = listOf(
+            wordSynced(
+                Triple(1_000L, 1_400L, "lead"),
+                Triple(2_100L, 3_200L, "(echo)"),
+            ),
+        ).withBackgroundVocals().single()
+        assertEquals(3_200L, line.endMs)
+    }
+
+    @Test
