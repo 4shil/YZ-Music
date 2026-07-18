@@ -95,3 +95,42 @@ class DownloadSessionTest {
     }
 
     @Test
+    fun `a new batch after a seen one brings the indicator back`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.done("a")
+        DownloadSession.markSeen()
+        assertFalse(DownloadSession.state.value.visible)
+
+        DownloadSession.queued(song("b"))
+        assertTrue(DownloadSession.state.value.visible)
+    }
+
+    @Test
+    fun `a failure is something to be told about, not something to hide`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.failed("a", "Download failed — check your connection")
+
+        val state = DownloadSession.state.value
+        assertTrue(state.visible)
+        assertFalse(state.busy)
+        assertEquals(1, state.failed)
+    }
+
+    @Test
+    fun `cancelling the only download leaves nothing to report`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.forget("a")
+        assertFalse(DownloadSession.state.value.visible)
+    }
+
+    /**
+     * A retry is the same errand, not a second one. Two rows for one song would
+     * put a failure on screen next to its own retry, and the count under the
+     * heading would claim more tracks were asked for than were.
+     */
+    @Test
+    fun `re-asking for a failed track replaces its row rather than adding one`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.failed("a", "nope")
+        DownloadSession.queued(song("a"))
+
