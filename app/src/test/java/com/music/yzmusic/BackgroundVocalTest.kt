@@ -76,3 +76,21 @@ class BackgroundVocalTest {
     }
 
     @Test
+    fun `a line that is entirely bracketed is left as it is`() {
+        // It is already its own line; there is no lead to hang it under.
+        val line = listOf(LyricLine(1_000L, "(ooh ooh)")).withBackgroundVocals().single()
+        assertEquals("(ooh ooh)", line.text)
+        assertNull(line.background)
+    }
+
+    @Test
+    fun `a bracket in the middle of a line is left alone`() {
+        val line = listOf(LyricLine(1_000L, "a (parenthetical) aside")).withBackgroundVocals().single()
+        assertEquals("a (parenthetical) aside", line.text)
+        assertNull(line.background)
+    }
+
+    @Test
+    fun `a bracket opening mid-word is not a second voice`() {
+        // "wait(ing)" is one word; there is no word boundary to split on and
+        // nothing to give the answering line for timing.
