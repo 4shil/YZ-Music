@@ -57,3 +57,92 @@ class EmbeddedLyricsTest {
     }
 
     @Test
+    fun `a webm written by the tagger reads back`() {
+        val tagged = WebmTagger.tag(
+            bytes = minimalWebm(),
+            title = "t",
+            artist = "a",
+            album = null,
+            lyrics = lrc,
+            cover = null,
+            coverMime = "image/jpeg",
+        )
+        assertEquals(lrc, EmbeddedLyrics.fromBytes(tagged))
+    }
+
+    /**
+     * A cover is a `data` box too, and it sits in the same `ilst` as the lyrics.
+     * Reading the first one that turns up rather than the lyrics' own would
+     * hand a JPEG back as a string.
+     */
+    @Test
+    fun `a cover alongside the lyrics is not mistaken for them`() {
+        val tagged = Mp4Tagger.tag(
+            bytes = minimalMp4(),
+            title = "t",
+            artist = "a",
+            album = null,
+            lyrics = lrc,
+            cover = ByteArray(64) { 0x7F },
+            coverIsPng = false,
+        )
+        assertEquals(lrc, EmbeddedLyrics.fromBytes(tagged))
+    }
+
+    /**
+     * The whole point of the second field: a word-synced download has to come
+     * back word-synced, or a downloaded song silently drops to whole-line
+     * highlighting while a streamed one keeps its syllables.
+     */
+    @Test
+    fun `word timings survive the write and the read, in all three containers`() {
+        val words = listOf(
+            LyricLine(
+                timeMs = 1_000L,
+                text = "two words",
+                words = listOf(
+                    LyricWord(startMs = 1_000L, endMs = 1_400L, text = "two"),
+                    LyricWord(startMs = 1_400L, endMs = 2_000L, text = "words"),
+                ),
+            ),
+        )
+        val plain = words.toLrc()
+        val enhanced = words.toEnhancedLrc()
+
+        val written = listOf(
+            Mp4Tagger.tag(minimalMp4(), "t", "a", null, plain, null, false, enhanced),
+            FlacTagger.tag(minimalFlac(), "t", "a", null, plain, null, "image/jpeg", enhanced),
+            WebmTagger.tag(minimalWebm(), "t", "a", null, plain, null, "image/jpeg", enhanced),
+        )
+        for (bytes in written) {
+            // The word-timed field wins over the plain one sitting beside it.
+            val read = LrcLib.parseLrc(requireNotNull(EmbeddedLyrics.fromBytes(bytes)))
+            assertEquals(1, read.size)
+            assertEquals("two words", read[0].text)
+            assertEquals(listOf("two", "words"), read[0].words.map { it.text })
+            assertEquals(listOf(1_000L, 1_400L), read[0].words.map { it.startMs })
+            assertEquals(2_000L, read[0].endMs)
+        }
+    }
+
+    /**
+     * The standard field must stay plain whatever else is written beside it —
+     * a reader without A2 shows `<00:01.00>` rather than skipping it, which is
+     * the reason there are two fields at all.
+     */
+    @Test
+    fun `the portable field never carries word stamps`() {
+        val words = listOf(
+            LyricLine(
+                timeMs = 1_000L,
+                text = "two words",
+                words = listOf(
+                    LyricWord(1_000L, 1_400L, "two"),
+                    LyricWord(1_400L, 2_000L, "words"),
+                ),
+            ),
+        )
+        assertEquals("[00:01.00]two words", words.toLrc())
+    }
+
+    @Test
