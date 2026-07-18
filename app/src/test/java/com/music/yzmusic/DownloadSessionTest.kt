@@ -202,3 +202,21 @@ class DownloadSessionTest {
      */
     @Test
     fun `a release is only drawn for the files that are still there`() {
+        val target = DownloadTarget(id = "MPREb1", title = "Motion", subtitle = "Calvin Harris")
+        Downloads.rememberCollection(target, listOf(onDisk("a"), onDisk("b"), onDisk("c")))
+
+        val survivors = listOf(onDisk("a"), onDisk("c"))
+        val found = Downloads.collectionsAmong(survivors).single()
+        assertEquals(listOf("a", "c"), found.songs.map { it.videoId })
+
+        assertTrue(Downloads.collectionsAmong(listOf(onDisk("z"))).isEmpty())
+    }
+
+    /** Downloading the same release twice is one entry, not two near-copies. */
+    @Test
+    fun `re-downloading a release merges into the entry already there`() {
+        val target = DownloadTarget(id = "MPREb1", title = "Motion")
+        Downloads.rememberCollection(target, listOf(onDisk("a"), onDisk("b")))
+        // The second ask is a page that had since loaded a continuation.
+        Downloads.rememberCollection(target, listOf(onDisk("a"), onDisk("b"), onDisk("c")))
+
