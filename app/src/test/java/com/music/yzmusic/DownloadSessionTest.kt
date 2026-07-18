@@ -134,3 +134,44 @@ class DownloadSessionTest {
         DownloadSession.failed("a", "nope")
         DownloadSession.queued(song("a"))
 
+        val state = DownloadSession.state.value
+        assertEquals(1, state.items.size)
+        assertEquals(DownloadProgress.Queued, state.items.single().progress)
+        assertEquals(0, state.failed)
+    }
+
+    // ---- How far through it is ---------------------------------------------
+
+    @Test
+    fun `progress counts settled tracks whole, however they settled`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.queued(song("b"))
+        DownloadSession.queued(song("c"))
+        DownloadSession.queued(song("d"))
+
+        assertEquals(0f, DownloadSession.state.value.fraction, 0.001f)
+
+        DownloadSession.done("a")
+        // A failure is not progress, but it is finished — a bar that can never
+        // fill because one track died reads as a download still going.
+        DownloadSession.failed("b", "nope")
+        DownloadSession.running("c", 0.5f)
+
+        assertEquals(0.625f, DownloadSession.state.value.fraction, 0.001f)
+    }
+
+    @Test
+    fun `the catalogue swap corrects the row rather than adding another`() {
+        DownloadSession.queued(song("vid", title = "Kesariya (Official Video)"))
+        DownloadSession.retitle("vid", song("audio", title = "Kesariya"))
+
+        val item = DownloadSession.state.value.items.single()
+        // Keyed by what was tapped, titled by what is being fetched.
+        assertEquals("vid", item.videoId)
+        assertEquals("Kesariya", item.song.title)
+    }
+
+    // ---- What a batch was --------------------------------------------------
+
+    @Test
+    fun `a playlist is grouped by what was tapped, not by any tag on its tracks`() {
