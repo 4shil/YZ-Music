@@ -63,3 +63,43 @@ class DownloadStoreTest {
     }
 
     @Test
+    fun `an unknown or absent codec is nothing to file`() {
+        // Every one of these falls the download through to YouTube's AAC, so
+        // answering with a guess here would cost a file nothing can open.
+        assertNull(DownloadStore.storable(null))
+        assertNull(DownloadStore.storable(""))
+        assertNull(DownloadStore.storable("opus"))
+        assertNull(DownloadStore.storable("webm"))
+        assertNull(DownloadStore.storable("dsf"))
+    }
+
+    // ---- What the file is called -------------------------------------------
+
+    @Test
+    fun `the name is artist then title, and carries the extension asked for`() {
+        assertEquals(
+            "Arijit Singh - Kesariya.flac",
+            DownloadStore.fileNameFor(song("Kesariya", "Arijit Singh"), "flac"),
+        )
+    }
+
+    @Test
+    fun `characters a volume or a shell would object to are replaced`() {
+        val name = DownloadStore.fileNameFor(song("A/B: C?", "D|E"), "m4a")
+        assertEquals("D E - A B C.m4a", name)
+    }
+
+    @Test
+    fun `a row with nothing to name it falls back to the video id`() {
+        assertEquals("xyz789.m4a", DownloadStore.fileNameFor(song("", "", "xyz789"), "m4a"))
+    }
+
+    // ---- What quality is kept ----------------------------------------------
+
+    /**
+     * Only the top rung is worth a source's own file. The rungs below it are AAC
+     * rungs, and YouTube's AAC ladder is the more reliable fetch for those — so
+     * asking a module for a transcode it would have to make is worse on both
+     * counts.
+     */
+    @Test
