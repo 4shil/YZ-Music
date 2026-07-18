@@ -40,3 +40,97 @@ class DownloadSessionTest {
     fun reset() = clearState()
 
     @After
+    fun tearDown() = clearState()
+
+    /**
+     * Both of these are process-wide singletons by design — the queue outlives
+     * every screen that can look at it — so a test that leaves anything behind
+     * is a test that breaks the next one.
+     */
+    private fun clearState() {
+        DownloadSession.clear()
+        Downloads.collections.value.keys.toList().forEach(Downloads::forgetCollection)
+    }
+
+    // ---- Whether the indicator is up ---------------------------------------
+
+    @Test
+    fun `nothing asked for means no indicator at all`() {
+        assertFalse(DownloadSession.state.value.visible)
+    }
+
+    @Test
+    fun `an indicator survives the batch finishing, and goes on being seen`() {
+        DownloadSession.queued(song("a"))
+        assertTrue(DownloadSession.state.value.visible)
+
+        DownloadSession.done("a")
+        // The whole reason this class exists: a download is started and walked
+        // away from, so the moment it finishes is the moment nobody is watching.
+        // An indicator that goes with it was never there for the person it was
+        // for.
+        assertTrue(DownloadSession.state.value.visible)
+        assertFalse(DownloadSession.state.value.busy)
+
+        DownloadSession.markSeen()
+        assertFalse(DownloadSession.state.value.visible)
+    }
+
+    @Test
+    fun `looking in halfway through does not sign the batch off`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.queued(song("b"))
+        DownloadSession.done("a")
+
+        // Opened while "b" is still going: this is checking in, not confirming
+        // an outcome, because the outcome hasn't happened yet.
+        DownloadSession.markSeen()
+        assertTrue(DownloadSession.state.value.visible)
+
+        DownloadSession.done("b")
+        assertTrue(DownloadSession.state.value.visible)
+
+        DownloadSession.markSeen()
+        assertFalse(DownloadSession.state.value.visible)
+    }
+
+    @Test
+    fun `a new batch after a seen one brings the indicator back`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.done("a")
+        DownloadSession.markSeen()
+        assertFalse(DownloadSession.state.value.visible)
+
+        DownloadSession.queued(song("b"))
+        assertTrue(DownloadSession.state.value.visible)
+    }
+
+    @Test
+    fun `a failure is something to be told about, not something to hide`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.failed("a", "Download failed — check your connection")
+
+        val state = DownloadSession.state.value
+        assertTrue(state.visible)
+        assertFalse(state.busy)
+        assertEquals(1, state.failed)
+    }
+
+    @Test
+    fun `cancelling the only download leaves nothing to report`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.forget("a")
+        assertFalse(DownloadSession.state.value.visible)
+    }
+
+    /**
+     * A retry is the same errand, not a second one. Two rows for one song would
+     * put a failure on screen next to its own retry, and the count under the
+     * heading would claim more tracks were asked for than were.
+     */
+    @Test
+    fun `re-asking for a failed track replaces its row rather than adding one`() {
+        DownloadSession.queued(song("a"))
+        DownloadSession.failed("a", "nope")
+        DownloadSession.queued(song("a"))
+
