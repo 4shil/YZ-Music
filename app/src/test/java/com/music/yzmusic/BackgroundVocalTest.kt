@@ -94,3 +94,56 @@ class BackgroundVocalTest {
     fun `a bracket opening mid-word is not a second voice`() {
         // "wait(ing)" is one word; there is no word boundary to split on and
         // nothing to give the answering line for timing.
+        val line = listOf(
+            wordSynced(
+                Triple(1_000L, 1_400L, "still"),
+                Triple(1_400L, 2_000L, "wait(ing)"),
+            ),
+        ).withBackgroundVocals().single()
+        assertEquals("still wait(ing)", line.text)
+        assertNull(line.background)
+    }
+
+    @Test
+    fun `nesting splits at the outer bracket`() {
+        val line = listOf(LyricLine(1_000L, "lead (echo (twice))")).withBackgroundVocals().single()
+        assertEquals("lead", line.text)
+        assertEquals("(echo (twice))", line.background?.text)
+    }
+
+    @Test
+    fun `a bracket with no words in it is not a second voice`() {
+        val line = listOf(LyricLine(1_000L, "lead words (!)")).withBackgroundVocals().single()
+        assertEquals("lead words (!)", line.text)
+        assertNull(line.background)
+    }
+
+    @Test
+    fun `a line-synced answer shares the line's stamp and its stated end`() {
+        val line = listOf(
+            LyricLine(timeMs = 1_000L, text = "lead words (echo)", sungUntilMs = 4_000L),
+        ).withBackgroundVocals().single()
+        assertEquals("lead words", line.text)
+        assertEquals(1_000L, line.background?.timeMs)
+        assertEquals(4_000L, line.background?.sungUntilMs)
+        assertEquals(4_000L, line.endMs)
+    }
+
+    @Test
+    fun `a source that marked its own answer is not second-guessed`() {
+        val marked = LyricLine(
+            timeMs = 1_000L,
+            text = "lead words (already split)",
+            background = LyricLine(1_500L, "(the real answer)"),
+        )
+        val line = listOf(marked).withBackgroundVocals().single()
+        assertEquals(marked, line)
+    }
+
+    @Test
+    fun `instrumental breaks are left untouched`() {
+        val line = listOf(LyricLine(1_000L, "")).withBackgroundVocals().single()
+        assertTrue(line.isGap)
+        assertNull(line.background)
+    }
+}
