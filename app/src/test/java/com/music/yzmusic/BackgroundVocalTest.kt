@@ -120,3 +120,30 @@ class BackgroundVocalTest {
 
     @Test
     fun `a line-synced answer shares the line's stamp and its stated end`() {
+        val line = listOf(
+            LyricLine(timeMs = 1_000L, text = "lead words (echo)", sungUntilMs = 4_000L),
+        ).withBackgroundVocals().single()
+        assertEquals("lead words", line.text)
+        assertEquals(1_000L, line.background?.timeMs)
+        assertEquals(4_000L, line.background?.sungUntilMs)
+        assertEquals(4_000L, line.endMs)
+    }
+
+    @Test
+    fun `a source that marked its own answer is not second-guessed`() {
+        val marked = LyricLine(
+            timeMs = 1_000L,
+            text = "lead words (already split)",
+            background = LyricLine(1_500L, "(the real answer)"),
+        )
+        val line = listOf(marked).withBackgroundVocals().single()
+        assertEquals(marked, line)
+    }
+
+    @Test
+    fun `instrumental breaks are left untouched`() {
+        val line = listOf(LyricLine(1_000L, "")).withBackgroundVocals().single()
+        assertTrue(line.isGap)
+        assertNull(line.background)
+    }
+}
