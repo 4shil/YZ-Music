@@ -178,3 +178,21 @@ class EmbeddedLyricsTest {
     }
 
     /** `fLaC`, a last-block STREAMINFO, then a byte standing in for the frames. */
+    private fun minimalFlac(): ByteArray {
+        val streamInfo = ByteArray(34)
+        return "fLaC".toByteArray() +
+            byteArrayOf(0x80.toByte(), 0, 0, streamInfo.size.toByte()) + streamInfo +
+            byteArrayOf(0xFF.toByte())
+    }
+
+    /** An EBML header and a Segment whose declared size covers the rest of the file. */
+    private fun minimalWebm(): ByteArray {
+        val header = byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte()) +
+            byteArrayOf(0x84.toByte()) + ByteArray(4)
+        val body = ByteArray(8)
+        val segment = byteArrayOf(0x18, 0x53, 0x80.toByte(), 0x67) +
+            // An 8-byte length so there is room to grow it when tags are appended.
+            byteArrayOf(0x01, 0, 0, 0, 0, 0, 0, body.size.toByte()) + body
+        return header + segment
+    }
+}
