@@ -147,3 +147,28 @@ class InnertubeParserWatchQueueTest {
     }
 
     @Test
+    fun `case F - unknown type with widescreen thumbnail is marked isVideo`() {
+        val json = itemJson(
+            musicVideoType = null,
+            albumId = null,
+            thumbWidth = 800,
+            thumbHeight = 450,
+        )
+        val songs = parse(json)
+        assertEquals(1, songs.size)
+        assertTrue("Unknown type with widescreen thumbnail must be isVideo=true", songs[0].isVideo)
+    }
+
+    @Test
+    fun `case G - unknown type with square thumbnail and no album metadata is NOT marked isVideo`() {
+        val json = itemJson(
+            musicVideoType = null,
+            albumId = null,
+            thumbWidth = 500,
+            thumbHeight = 500,
+        )
+        val songs = parse(json)
+        assertEquals(1, songs.size)
+        assertFalse("Unknown type with square thumbnail in music queue defaults to isVideo=false", songs[0].isVideo)
+    }
+}
