@@ -56,3 +56,22 @@ class LrcWriterTest {
     }
 
     @Test
+    fun `an instrumental gap is written as a bare stamp`() {
+        val lines = listOf(
+            LyricLine(timeMs = 1_000L, text = "first line"),
+            LyricLine(timeMs = 8_000L, text = ""),
+            LyricLine(timeMs = 20_000L, text = "second line"),
+        )
+        assertEquals("[00:01.00]first line\n[00:08.00]\n[00:20.00]second line", lines.toLrc())
+    }
+
+    @Test
+    fun `lines are sorted by their stamp, whatever order they arrive in`() {
+        val lines = listOf(
+            LyricLine(timeMs = 5_000L, text = "later"),
+            LyricLine(timeMs = 1_000L, text = "earlier"),
+        )
+        assertEquals("[00:01.00]earlier\n[00:05.00]later", lines.toLrc())
+    }
+
+    @Test
