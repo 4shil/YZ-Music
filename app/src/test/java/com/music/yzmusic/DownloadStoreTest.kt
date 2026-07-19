@@ -147,3 +147,52 @@ class DownloadStoreTest {
      */
     @Test
     fun `wifi-only refuses metered connections and nothing else`() {
+        val wifiOnly = AppSettings.wifiOnlyDownloads.value
+        val metered = AppSettings.meteredConnection.value
+        try {
+            AppSettings.wifiOnlyDownloads.value = true
+            AppSettings.meteredConnection.value = true
+            assertFalse(AppSettings.downloadsAllowedNow)
+
+            AppSettings.meteredConnection.value = false
+            assertTrue(AppSettings.downloadsAllowedNow)
+
+            // Offline: not this setting's business.
+            AppSettings.meteredConnection.value = null
+            assertTrue(AppSettings.downloadsAllowedNow)
+
+            // Off, and mobile data is fair game again.
+            AppSettings.wifiOnlyDownloads.value = false
+            AppSettings.meteredConnection.value = true
+            assertTrue(AppSettings.downloadsAllowedNow)
+        } finally {
+            AppSettings.wifiOnlyDownloads.value = wifiOnly
+            AppSettings.meteredConnection.value = metered
+        }
+    }
+
+    /**
+     * The two settings are independent on purpose, and this is the pairing that
+     * proves it: a capped mobile-data *stream* must not quietly downgrade a
+     * *file*. It used to — the ceiling was what decided whether a download could
+     * be lossless, so someone with their own FLAC server streamed the FLAC and
+     * downloaded a transcode of the same recording.
+     */
+    @Test
+    fun `a capped streaming ceiling no longer decides what a download keeps`() {
+        val cellular = AppSettings.audioQualityCellular.value
+        val metered = AppSettings.meteredConnection.value
+        try {
+            AppSettings.audioQualityCellular.value = AudioQuality.LOW
+            AppSettings.meteredConnection.value = true
+            assertEquals(AudioQuality.LOW, AppSettings.effectiveAudioQuality)
+            assertEquals(
+                StreamRequest.Lossless,
+                SourceResolver.requestForDownload(DownloadQuality.LOSSLESS),
+            )
+        } finally {
+            AppSettings.audioQualityCellular.value = cellular
+            AppSettings.meteredConnection.value = metered
+        }
+    }
+}
