@@ -75,3 +75,29 @@ class LrcWriterTest {
     }
 
     @Test
+    fun `word timings are dropped and the line's own text is kept whole`() {
+        // The A2 word-stamp extension is deliberately not written: a reader
+        // without it renders `<00:01.00>` as text rather than ignoring it.
+        val lines = listOf(
+            LyricLine(
+                timeMs = 1_000L,
+                text = "two words",
+                words = listOf(
+                    LyricWord(startMs = 1_000L, endMs = 1_400L, text = "two"),
+                    LyricWord(startMs = 1_400L, endMs = 2_000L, text = "words"),
+                ),
+            ),
+        )
+        val written = lines.toLrc()
+        assertEquals("[00:01.00]two words", written)
+        assertTrue("no word stamps", '<' !in written)
+    }
+
+    /**
+     * The backing-vocal split is a display decision; the file gets the line
+     * the way every provider that didn't mark it structurally published it.
+     * Written as two stamps it would be two lines of the song where there is
+     * one, and the second would be timed over the top of the next one.
+     */
+    @Test
+    fun `an answering vocal is written back onto the end of its lead`() {
