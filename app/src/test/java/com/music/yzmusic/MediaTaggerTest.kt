@@ -93,3 +93,60 @@ class MediaTaggerTest {
         val newOffset = mdatPayloadOffset + delta
         assertArrayEquals(mdatPayload, tagged.copyOfRange(newOffset, newOffset + mdatPayload.size))
 
+        val stcoTypePos = tagged.indexOfBytes("stco".toByteArray(Charsets.US_ASCII))
+        assertTrue(stcoTypePos >= 0)
+        val entryOffsetPos = stcoTypePos + 4 + 4 + 4 // past type, version/flags, entry_count
+        assertEquals(newOffset.toLong(), readU32(tagged, entryOffsetPos))
+
+        assertTrue(tagged.indexOfBytes("My Title".toByteArray(Charsets.UTF_8)) >= 0)
+        assertTrue(tagged.indexOfBytes("My Artist".toByteArray(Charsets.UTF_8)) >= 0)
+        assertTrue(tagged.indexOfBytes("My Album".toByteArray(Charsets.UTF_8)) >= 0)
+        assertTrue(tagged.indexOfBytes(cover) >= 0)
+    }
+
+    @Test
+    fun `mp4 tagging is a no-op without a moov box`() {
+        val bytes = box("ftyp", ByteArray(8)) + box("mdat", ByteArray(16))
+        val tagged = Mp4Tagger.tag(bytes, "Title", "Artist", null, null, null, false)
+        assertSame(bytes, tagged)
+    }
+
+    @Test
+    fun `mp4 tagging is a no-op with nothing worth writing`() {
+        val (original, _, _) = buildFakeMp4(ByteArray(4))
+        val tagged = Mp4Tagger.tag(original, "", "", null, null, null, false)
+        assertSame(original, tagged)
+    }
+
+    /**
+     * Lyrics on their own have to be enough to trigger a rewrite. [MediaTagger]
+     * decides whether to touch the file by comparing references, so a tagger
+     * that treated lyrics as an afterthought — added to the atom list but not
+     * counted when deciding whether there is anything to write — would return
+     * the input for a track that has lyrics and nothing else, and the field
+     * would silently never appear.
+     */
+    @Test
+    fun `mp4 tagging writes lyrics into a lyr atom on their own`() {
+        val (original, _, _) = buildFakeMp4(ByteArray(4))
+
+        val tagged = Mp4Tagger.tag(original, "", "", null, LRC, null, false)
+
+        assertNotSame(original, tagged)
+        // ISO-8859-1, because the atom name leads with the 0xA9 byte that plain
+        // ASCII can't encode — the same reason [Mp4Tagger.box] uses it.
+        assertTrue(tagged.indexOfBytes("©lyr".toByteArray(Charsets.ISO_8859_1)) >= 0)
+        assertTrue(tagged.indexOfBytes(LRC.toByteArray(Charsets.UTF_8)) >= 0)
+    }
+
+    private val ebmlHeaderId = byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte())
+    private val segmentId = byteArrayOf(0x18, 0x53.toByte(), 0x80.toByte(), 0x67)
+
+    /** A one-byte-vint EBML header (4 bytes of dummy payload) followed by a `Segment` of [segmentSize]. */
+    private fun buildFakeWebm(segmentBody: ByteArray, segmentSize: ByteArray): ByteArray {
+        val header = ebmlHeaderId + byteArrayOf(0x84.toByte()) + ByteArray(4) // size vint = 4, one byte wide
+        return header + segmentId + segmentSize + segmentBody
+    }
+
+    @Test
+    fun `webm tagging appends after an unknown-size segment untouched`() {
