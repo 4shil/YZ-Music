@@ -99,3 +99,51 @@ class InnertubeParserWatchQueueTest {
 
     @Test
     fun `case B - OMV with missing thumbnail dimensions is marked isVideo`() {
+        val json = itemJson(
+            musicVideoType = "MUSIC_VIDEO_TYPE_OMV",
+            thumbWidth = null,
+            thumbHeight = null,
+        )
+        val songs = parse(json)
+        assertEquals(1, songs.size)
+        assertTrue("Explicit OMV must be isVideo=true even with missing thumbnail dimensions", songs[0].isVideo)
+    }
+
+    @Test
+    fun `case C - UGC with square thumbnail is marked isVideo`() {
+        val json = itemJson(
+            musicVideoType = "MUSIC_VIDEO_TYPE_UGC",
+            thumbWidth = 500,
+            thumbHeight = 500,
+        )
+        val songs = parse(json)
+        assertEquals(1, songs.size)
+        assertTrue("Explicit UGC must be isVideo=true even with square thumbnail", songs[0].isVideo)
+    }
+
+    @Test
+    fun `case D - ATV with widescreen thumbnail is NOT marked isVideo`() {
+        val json = itemJson(
+            musicVideoType = "MUSIC_VIDEO_TYPE_ATV",
+            thumbWidth = 800,
+            thumbHeight = 450,
+        )
+        val songs = parse(json)
+        assertEquals(1, songs.size)
+        assertFalse("Explicit ATV must be isVideo=false even with widescreen thumbnail", songs[0].isVideo)
+    }
+
+    @Test
+    fun `case E - catalogue track with album metadata is NOT marked isVideo`() {
+        val json = itemJson(
+            musicVideoType = null,
+            albumId = "MPREb_album456",
+            thumbWidth = 500,
+            thumbHeight = 500,
+        )
+        val songs = parse(json)
+        assertEquals(1, songs.size)
+        assertFalse("Track with album metadata and square thumbnail must be isVideo=false", songs[0].isVideo)
+    }
+
+    @Test
