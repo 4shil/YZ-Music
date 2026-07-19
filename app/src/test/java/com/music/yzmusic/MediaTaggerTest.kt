@@ -150,3 +150,43 @@ class MediaTaggerTest {
 
     @Test
     fun `webm tagging appends after an unknown-size segment untouched`() {
+        val unknownSize = byteArrayOf(0x01) + ByteArray(7) { 0xFF.toByte() }
+        val segmentBody = ByteArray(10) { (it + 1).toByte() }
+        val original = buildFakeWebm(segmentBody, unknownSize)
+
+        val cover = byteArrayOf(3, 1, 4, 1, 5)
+        val tagged = WebmTagger.tag(original, "T", "A", "Al", null, cover, "image/jpeg")
+
+        assertNotSame(original, tagged)
+        assertArrayEquals(original, tagged.copyOfRange(0, original.size))
+        assertTrue(tagged.indexOfBytes("TITLE".toByteArray(Charsets.US_ASCII)) >= 0)
+        assertTrue(tagged.indexOfBytes("ARTIST".toByteArray(Charsets.US_ASCII)) >= 0)
+        assertTrue(tagged.indexOfBytes("ALBUM".toByteArray(Charsets.US_ASCII)) >= 0)
+        assertTrue(tagged.indexOfBytes(cover) >= 0)
+    }
+
+    @Test
+    fun `webm tagging widens a definite segment size in place`() {
+        // A 2-byte vint (marker 0x40..) covering exactly the body that follows.
+        val segmentBody = ByteArray(20) { it.toByte() }
+        val declaredSize = segmentBody.size.toLong()
+        val sizeField = byteArrayOf(
+            (0x40 or ((declaredSize ushr 8).toInt() and 0x3F)).toByte(),
+            (declaredSize and 0xFF).toByte(),
+        )
+        val original = buildFakeWebm(segmentBody, sizeField)
+
+        val tagged = WebmTagger.tag(original, "T", "", null, null, null, "image/jpeg")
+
+        assertNotSame(original, tagged)
+        val sizeFieldOffset = ebmlHeaderId.size + 1 + 4 + segmentId.size
+        // Everything except the 2-byte size field itself — which is expected
+        // to change, that's the point of this test — is untouched.
+        assertArrayEquals(original.copyOfRange(0, sizeFieldOffset), tagged.copyOfRange(0, sizeFieldOffset))
+        assertArrayEquals(
+            original.copyOfRange(sizeFieldOffset + 2, original.size),
+            tagged.copyOfRange(sizeFieldOffset + 2, sizeFieldOffset + 2 + segmentBody.size),
+        )
+
+        val b0 = tagged[sizeFieldOffset].toInt() and 0xFF
+        val b1 = tagged[sizeFieldOffset + 1].toInt() and 0xFF
