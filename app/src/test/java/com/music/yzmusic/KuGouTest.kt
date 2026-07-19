@@ -45,3 +45,12 @@ class KuGouTest {
 
     @Test
     fun `cuts everything through the last credit line, title restated and all`() {
+        val stripped = strip(fixture)
+        assertFalse("title-as-lyric line", stripped.contains("GIVĒON"))
+        assertFalse("Lyrics by credit", stripped.contains("Lyrics by"))
+        assertFalse("Composed by credit", stripped.contains("Composed by"))
+        assertTrue("first real line survives", stripped.startsWith("[00:12.36]Ooh"))
+    }
+
+    @Test
+    fun `real sung lines after the header survive untouched`() {
