@@ -242,3 +242,45 @@ class MediaTaggerTest {
         val blocks = mutableListOf<Pair<Int, ByteArray>>()
         var offset = 4
         while (true) {
+            val flags = bytes[offset].toInt() and 0xFF
+            val length = ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
+                ((bytes[offset + 2].toInt() and 0xFF) shl 8) or (bytes[offset + 3].toInt() and 0xFF)
+            blocks += (flags and 0x7F) to bytes.copyOfRange(offset + 4, offset + 4 + length)
+            offset += 4 + length
+            if (flags and 0x80 != 0) return blocks to offset
+        }
+    }
+
+    private fun le32(value: Int): ByteArray = byteArrayOf(
+        value.toByte(),
+        (value ushr 8).toByte(),
+        (value ushr 16).toByte(),
+        (value ushr 24).toByte(),
+    )
+
+    private fun readU32Le(bytes: ByteArray, offset: Int): Int =
+        (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
+            ((bytes[offset + 2].toInt() and 0xFF) shl 16) or ((bytes[offset + 3].toInt() and 0xFF) shl 24)
+
+    private fun vorbisComment(vendor: String, fields: List<String>): ByteArray {
+        val vendorBytes = vendor.toByteArray(Charsets.UTF_8)
+        var out = le32(vendorBytes.size) + vendorBytes + le32(fields.size)
+        for (field in fields) {
+            val encoded = field.toByteArray(Charsets.UTF_8)
+            out += le32(encoded.size) + encoded
+        }
+        return out
+    }
+
+    @Test
+    fun `flac tagging keeps the frames, carries other blocks and spends the padding`() {
+        val streamInfo = ByteArray(34) { it.toByte() }
+        val seekTable = ByteArray(18) { (it + 100).toByte() }
+        val frames = ByteArray(64) { (it + 1).toByte() }
+        val original = flacMagic +
+            flacBlock(TYPE_STREAMINFO, streamInfo) +
+            flacBlock(TYPE_SEEKTABLE, seekTable) +
+            flacBlock(TYPE_PADDING, ByteArray(200), last = true) +
+            frames
+        val cover = byteArrayOf(9, 8, 7, 6, 5)
+
