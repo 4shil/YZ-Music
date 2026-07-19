@@ -101,3 +101,40 @@ class LrcWriterTest {
      */
     @Test
     fun `an answering vocal is written back onto the end of its lead`() {
+        val lines = listOf(
+            LyricLine(
+                timeMs = 1_000L,
+                text = "the lead line",
+                background = LyricLine(timeMs = 1_600L, text = "(the answer)"),
+            ),
+        )
+        assertEquals("[00:01.00]the lead line (the answer)", lines.toLrc())
+    }
+
+    @Test
+    fun `no lines is empty text rather than a blank stamp`() {
+        assertEquals("", emptyList<LyricLine>().toLrc())
+    }
+
+    /**
+     * The one property that matters end to end: what this writes,
+     * [LrcLib.parseLrc] reads back to the same stamps and the same words. The
+     * gaps here are spaced past `MIN_GAP_MS` so the parser's own short-gap
+     * filtering doesn't drop them and make this a test of two behaviours.
+     */
+    @Test
+    fun `what it writes, the parser reads back unchanged`() {
+        val lines = listOf(
+            LyricLine(timeMs = 0L, text = ""),
+            LyricLine(timeMs = 6_120L, text = "first line"),
+            LyricLine(timeMs = 12_340L, text = "second line"),
+            LyricLine(timeMs = 18_000L, text = ""),
+            LyricLine(timeMs = 25_500L, text = "third line"),
+        )
+
+        val reparsed = LrcLib.parseLrc(lines.toLrc())
+
+        assertEquals(lines.map { it.timeMs }, reparsed.map { it.timeMs })
+        assertEquals(lines.map { it.text }, reparsed.map { it.text })
+    }
+}
