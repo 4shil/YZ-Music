@@ -190,3 +190,55 @@ class MediaTaggerTest {
 
         val b0 = tagged[sizeFieldOffset].toInt() and 0xFF
         val b1 = tagged[sizeFieldOffset + 1].toInt() and 0xFF
+        val decoded = ((b0 and 0x3F) shl 8) or b1
+        val newBodyLength = tagged.size - (sizeFieldOffset + 2)
+        assertEquals(newBodyLength.toLong(), decoded.toLong())
+    }
+
+    @Test
+    fun `webm tagging is a no-op without a recognisable ebml header`() {
+        val bytes = ByteArray(20) { it.toByte() }
+        val tagged = WebmTagger.tag(bytes, "Title", "Artist", null, null, null, "image/jpeg")
+        assertSame(bytes, tagged)
+    }
+
+    /** As for MP4: lyrics alone have to be reason enough to append a `Tags` element. */
+    @Test
+    fun `webm tagging writes lyrics into a LYRICS simpletag on their own`() {
+        val unknownSize = byteArrayOf(0x01) + ByteArray(7) { 0xFF.toByte() }
+        val original = buildFakeWebm(ByteArray(10) { (it + 1).toByte() }, unknownSize)
+
+        val tagged = WebmTagger.tag(original, "", "", null, LRC, null, "image/jpeg")
+
+        assertNotSame(original, tagged)
+        assertArrayEquals(original, tagged.copyOfRange(0, original.size))
+        assertTrue(tagged.indexOfBytes("LYRICS".toByteArray(Charsets.US_ASCII)) >= 0)
+        assertTrue(tagged.indexOfBytes(LRC.toByteArray(Charsets.UTF_8)) >= 0)
+    }
+
+    // ---- FLAC ---------------------------------------------------------------
+
+    private val flacMagic = "fLaC".toByteArray(Charsets.US_ASCII)
+
+    private fun flacBlock(type: Int, payload: ByteArray, last: Boolean = false): ByteArray =
+        byteArrayOf(
+            (type or if (last) 0x80 else 0).toByte(),
+            (payload.size ushr 16).toByte(),
+            (payload.size ushr 8).toByte(),
+            payload.size.toByte(),
+        ) + payload
+
+    /**
+     * The metadata chain of [bytes] as (type, payload), and where the audio
+     * frames begin.
+     *
+     * Walking to the last-block flag rather than to a known count is the point:
+     * a flag left set on a block that is no longer last stops the walk early and
+     * every assertion made off the result then fails, which is exactly the bug
+     * worth catching.
+     */
+    private fun flacChain(bytes: ByteArray): Pair<List<Pair<Int, ByteArray>>, Int> {
+        assertArrayEquals(flacMagic, bytes.copyOfRange(0, 4))
+        val blocks = mutableListOf<Pair<Int, ByteArray>>()
+        var offset = 4
+        while (true) {
