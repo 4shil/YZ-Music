@@ -63,3 +63,20 @@ class LrcLibTest {
 
     @Test
     fun `keeps a trailing gap as the outro`() {
+        val lines = LrcLib.parseLrc("[00:10.00] words\n[04:49.01] ")
+        assertEquals(listOf("words"), lines.words())
+        assertEquals(289_010L, lines.last().timeMs)
+        assertTrue(lines.last().isGap)
+    }
+
+    @Test
+    fun `adds a leading gap for a long intro`() {
+        val lines = LrcLib.parseLrc("[00:32.07] first words")
+        assertEquals(2, lines.size)
+        assertTrue(lines[0].isGap)
+        assertEquals(0L, lines[0].timeMs)
+        assertEquals("first words", lines[1].text)
+    }
+
+    @Test
+    fun `no leading gap when singing starts straight away`() {
