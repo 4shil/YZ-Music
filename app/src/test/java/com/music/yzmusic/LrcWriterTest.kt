@@ -36,3 +36,23 @@ class LrcWriterTest {
     }
 
     @Test
+    fun `stamps are ascii digits regardless of the default locale`() {
+        // `String.format("%02d")` would emit Arabic-Indic digits under this
+        // locale, which no LRC parser — including this project's own — matches.
+        val original = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("ar-EG"))
+            val written = listOf(LyricLine(75_400L, "x")).toLrc()
+            assertEquals("[01:15.40]x", written)
+        } finally {
+            java.util.Locale.setDefault(original)
+        }
+    }
+
+    @Test
+    fun `a stamp past ninety-nine minutes overflows to three digits rather than wrapping`() {
+        // Truncating to two digits would silently move the line an hour earlier.
+        assertEquals("[100:00.00]x", listOf(LyricLine(6_000_000L, "x")).toLrc())
+    }
+
+    @Test
