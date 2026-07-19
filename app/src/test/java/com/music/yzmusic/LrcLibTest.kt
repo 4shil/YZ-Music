@@ -33,3 +33,33 @@ class LrcLibTest {
 
     @Test
     fun `drops metadata tags and short gaps`() {
+        val lines = LrcLib.parseLrc(
+            """
+            [ar:Arijit Singh]
+            [ti:Zaalima]
+            [00:10.00]
+            [00:12.00] real words
+
+            """.trimIndent(),
+        )
+        // The 2s gap between the two stamps is too short to be worth showing.
+        assertEquals(listOf("real words"), lines.words())
+        assertEquals(1, lines.count { it.isGap })
+    }
+
+    @Test
+    fun `keeps long instrumental gaps`() {
+        val lines = LrcLib.parseLrc(
+            """
+            [00:00.00] intro words
+            [00:05.00]
+            [00:30.00] verse
+            """.trimIndent(),
+        )
+        assertEquals(3, lines.size)
+        assertTrue(lines[1].isGap)
+        assertEquals(5_000L, lines[1].timeMs)
+    }
+
+    @Test
+    fun `keeps a trailing gap as the outro`() {
