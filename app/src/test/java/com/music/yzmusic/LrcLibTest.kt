@@ -80,3 +80,16 @@ class LrcLibTest {
 
     @Test
     fun `no leading gap when singing starts straight away`() {
+        val lines = LrcLib.parseLrc("[00:01.00] straight in")
+        assertEquals(1, lines.size)
+        assertEquals("straight in", lines.single().text)
+    }
+
+    @Test
+    fun `sorts out of order stamps`() {
+        val lines = LrcLib.parseLrc("[00:30.00] later\n[00:10.00] earlier")
+        assertEquals(listOf("earlier", "later"), lines.words())
+        val sung = lines.filterNot { it.isGap }
+        assertTrue(sung[0].timeMs < sung[1].timeMs)
+    }
+}
