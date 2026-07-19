@@ -146,3 +146,35 @@ class EmbeddedLyricsTest {
     }
 
     @Test
+    fun `a file with no lyrics at all reads back as nothing`() {
+        val tagged = Mp4Tagger.tag(
+            bytes = minimalMp4(),
+            title = "t",
+            artist = "a",
+            album = null,
+            lyrics = null,
+            cover = null,
+            coverIsPng = false,
+        )
+        assertNull(EmbeddedLyrics.fromBytes(tagged))
+    }
+
+    @Test
+    fun `something that is none of the three containers is not guessed at`() {
+        assertNull(EmbeddedLyrics.fromBytes(ByteArray(512) { it.toByte() }))
+    }
+
+    // ---- Minimal containers, just enough shape for each tagger to accept ----
+
+    /** `ftyp` then an empty `moov`, which is all [Mp4Tagger] looks for. */
+    private fun minimalMp4(): ByteArray = box("ftyp", "isom".toByteArray()) + box("moov", ByteArray(0))
+
+    private fun box(type: String, payload: ByteArray): ByteArray {
+        val size = 8 + payload.size
+        return byteArrayOf(
+            (size ushr 24).toByte(), (size ushr 16).toByte(),
+            (size ushr 8).toByte(), size.toByte(),
+        ) + type.toByteArray(Charsets.ISO_8859_1) + payload
+    }
+
+    /** `fLaC`, a last-block STREAMINFO, then a byte standing in for the frames. */
