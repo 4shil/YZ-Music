@@ -36,3 +36,42 @@ class LrcWriterTest {
     }
 
     @Test
+    fun `stamps are ascii digits regardless of the default locale`() {
+        // `String.format("%02d")` would emit Arabic-Indic digits under this
+        // locale, which no LRC parser — including this project's own — matches.
+        val original = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("ar-EG"))
+            val written = listOf(LyricLine(75_400L, "x")).toLrc()
+            assertEquals("[01:15.40]x", written)
+        } finally {
+            java.util.Locale.setDefault(original)
+        }
+    }
+
+    @Test
+    fun `a stamp past ninety-nine minutes overflows to three digits rather than wrapping`() {
+        // Truncating to two digits would silently move the line an hour earlier.
+        assertEquals("[100:00.00]x", listOf(LyricLine(6_000_000L, "x")).toLrc())
+    }
+
+    @Test
+    fun `an instrumental gap is written as a bare stamp`() {
+        val lines = listOf(
+            LyricLine(timeMs = 1_000L, text = "first line"),
+            LyricLine(timeMs = 8_000L, text = ""),
+            LyricLine(timeMs = 20_000L, text = "second line"),
+        )
+        assertEquals("[00:01.00]first line\n[00:08.00]\n[00:20.00]second line", lines.toLrc())
+    }
+
+    @Test
+    fun `lines are sorted by their stamp, whatever order they arrive in`() {
+        val lines = listOf(
+            LyricLine(timeMs = 5_000L, text = "later"),
+            LyricLine(timeMs = 1_000L, text = "earlier"),
+        )
+        assertEquals("[00:01.00]earlier\n[00:05.00]later", lines.toLrc())
+    }
+
+    @Test
