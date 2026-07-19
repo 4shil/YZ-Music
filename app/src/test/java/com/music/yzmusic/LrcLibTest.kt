@@ -13,3 +13,23 @@ class LrcLibTest {
 
     @Test
     fun `parses centisecond stamps`() {
+        val lines = LrcLib.parseLrc(
+            """
+            [00:32.07] first line
+            [01:05.50] second line
+            """.trimIndent(),
+        ).filterNot { it.isGap }
+        assertEquals(2, lines.size)
+        assertEquals(32_070L, lines[0].timeMs)
+        assertEquals("first line", lines[0].text)
+        assertEquals(65_500L, lines[1].timeMs)
+    }
+
+    @Test
+    fun `parses millisecond stamps`() {
+        val lines = LrcLib.parseLrc("[02:03.456] third line").filterNot { it.isGap }
+        assertEquals(123_456L, lines.single().timeMs)
+    }
+
+    @Test
+    fun `drops metadata tags and short gaps`() {
