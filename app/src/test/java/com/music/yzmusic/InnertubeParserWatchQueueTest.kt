@@ -55,3 +55,47 @@ class InnertubeParserWatchQueueTest {
             """
         } else ""
 
+        val thumbs = if (thumbWidth != null && thumbHeight != null) {
+            """
+            "thumbnail": {
+              "thumbnails": [{ "url": "https://img.jpg", "width": $thumbWidth, "height": $thumbHeight }]
+            },
+            """
+        } else """
+            "thumbnail": { "thumbnails": [] },
+        """
+
+        return """
+        {
+          "playlistPanelVideoRenderer": {
+            "videoId": "$videoId",
+            "title": { "runs": [{ "text": "Test Song" }] },
+            "longBylineText": {
+              "runs": [
+                { "text": "Test Artist" }
+                $albumRun
+              ]
+            },
+            $config
+            $thumbs
+            "lengthText": { "runs": [{ "text": "3:30" }] }
+          }
+        }
+        """.trimIndent()
+    }
+
+    @Test
+    fun `case A - OMV with album metadata is still marked isVideo`() {
+        val json = itemJson(
+            musicVideoType = "MUSIC_VIDEO_TYPE_OMV",
+            albumId = "MPREb_album123",
+            thumbWidth = 500,
+            thumbHeight = 500,
+        )
+        val songs = parse(json)
+        assertEquals(1, songs.size)
+        assertTrue("Explicit OMV must be isVideo=true even with album metadata and square thumb", songs[0].isVideo)
+    }
+
+    @Test
+    fun `case B - OMV with missing thumbnail dimensions is marked isVideo`() {
