@@ -54,3 +54,28 @@ class KuGouTest {
 
     @Test
     fun `real sung lines after the header survive untouched`() {
+        val stripped = strip(fixture)
+        assertTrue(stripped.contains("[00:15.90]Balloons are deflated"))
+        assertTrue(stripped.contains("[00:19.73]Guess they look lifeless like me"))
+    }
+
+    @Test
+    fun `the outro is not mistaken for a credit and cut`() {
+        val stripped = strip(fixture)
+        assertTrue(stripped.contains("[03:07.90]Ooh ooh ooh-ooh"))
+    }
+
+    @Test
+    fun `a lyric with no credit block anywhere is left whole`() {
+        val clean = """
+            [00:01.00]first line
+            [00:05.00]second line
+        """.trimIndent()
+        assertEquals(clean, strip(clean))
+    }
+
+    @Test
+    fun `empty input yields empty output`() {
+        assertEquals("", strip(""))
+    }
+}
