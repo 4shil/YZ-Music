@@ -74,3 +74,14 @@ class QueueShuffleTest {
     }
 
     @Test
+    fun `shuffling then restoring returns the original running order`() {
+        val original = ('a'..'j').map { it.toString() }
+        repeat(50) {
+            val from = 1
+            val shuffled = applied(original, from, original.drop(from).shuffled())
+            assertEquals(original.take(from), shuffled.take(from))
+            assertEquals(original.sorted(), shuffled.sorted())
+            assertEquals(original, applied(shuffled, from, original.drop(from)))
+        }
+    }
+}
