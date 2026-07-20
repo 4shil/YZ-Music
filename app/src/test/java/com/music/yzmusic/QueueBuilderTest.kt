@@ -142,3 +142,21 @@ class QueueBuilderTest {
 
     @Test
     fun `the seed's own artist gets more room than the rest`() {
+        val seed = song("seed", "Seed", "Diljit Dosanjh")
+        val candidates = (1..8).map { song("v$it", "Song $it", "Diljit Dosanjh") }
+        val extra = QueueBuilder.extend(listOf(seed), candidates, limit = 10)
+        assertEquals(4, extra.size)
+    }
+
+    @Test
+    fun `the cap counts a reordered credit as one artist`() {
+        val seed = song("seed", "Seed", "Nucleya")
+        val candidates = listOf(
+            song("v1", "One", "Pritam, Arijit Singh"),
+            song("v2", "Two", "Arijit Singh, Pritam"),
+            song("v3", "Three", "Pritam & Arijit Singh"),
+        )
+        val extra = QueueBuilder.extend(listOf(seed), candidates, limit = 10)
+        assertEquals(listOf("v1", "v2"), extra.map { it.videoId })
+    }
+}
