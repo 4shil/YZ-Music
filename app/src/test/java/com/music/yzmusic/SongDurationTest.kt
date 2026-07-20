@@ -53,3 +53,18 @@ class SongDurationTest {
     }
 
     @Test
+    fun `anything that isn't a duration is zero`() {
+        assertEquals(0L, song("").durationMillis())
+        assertEquals(0L, song("LIVE").durationMillis())
+        assertEquals(0L, song("3:45:xx").durationMillis())
+        assertEquals(0L, song("225").durationMillis())
+        assertEquals(0L, song("1:2:3:4").durationMillis())
+    }
+
+    @Test
+    fun `a negative field cannot produce a negative duration`() {
+        // Nothing sends this, but a caller's only check is `<= 0`, so the
+        // guard has to hold rather than be argued about.
+        assertEquals(0L, song("-3:45").durationMillis())
+    }
+}
