@@ -289,3 +289,244 @@ class SourcesTest {
     @Test
     fun `prefers a credited match over a runtime-vouched one`() {
         val target = TrackMatcher.Target("Jhak Maar Ke", "Pritam, Neeraj Shridhar", durationSec = 233)
+        val vouched = song("Jhak Maar Ke", "Some Uploader", duration = "3:53")
+        val credited = song("Jhak Maar Ke", "Neeraj Shridhar", duration = "3:53")
+        assertEquals(credited, TrackMatcher.best(listOf(vouched, credited), target))
+    }
+
+    /** A name inside another name is not a shared credit. */
+    @Test
+    fun `refuses an artist whose name merely contains the one asked for`() {
+        assertFalse(matches(song("No One Knows", "Queens of the Stone Age"), "No One Knows", "Queen"))
+    }
+
+    /**
+     * A different take is a different recording, and the direction it is asked
+     * for in doesn't change that.
+     */
+    @Test
+    fun `refuses a different take of the same song`() {
+        assertFalse(matches(song("Shape of You (Acoustic)", "Ed Sheeran"), "Shape of You", "Ed Sheeran"))
+        assertFalse(matches(song("Shape of You", "Ed Sheeran"), "Shape of You (Acoustic)", "Ed Sheeran"))
+        assertFalse(matches(song("Creep (Live)", "Radiohead"), "Creep", "Radiohead"))
+        assertFalse(matches(song("Faded", "Alan Walker"), "Faded (Slowed + Reverb)", "Alan Walker"))
+        // A stem carries the right title and the right artist and is not the
+        // song — this one was one candidate away from playing.
+        assertFalse(
+            matches(
+                song("Apna Bana Le - Arijit Singh Vocals Only", "Arijit Singh, Sachin-Jigar"),
+                title = "Apna Bana Le (From \"Bhediya\")",
+                artist = "Arijit Singh",
+            ),
+        )
+        assertFalse(matches(song("Kesariya (Instrumental)", "Arijit Singh"), "Kesariya", "Arijit Singh"))
+        // Both sides saying the same thing is still a match.
+        assertTrue(matches(song("Creep (Live)", "Radiohead"), "Creep [Live]", "Radiohead"))
+    }
+
+    /** Version-shaped words that describe the ordinary release, not a new take. */
+    @Test
+    fun `treats an album or radio version as the plain track`() {
+        assertTrue(matches(song("Africa", "Toto"), "Africa (Album Version)", "Toto"))
+        assertTrue(matches(song("Clocks", "Coldplay"), "Clocks (Radio Edit)", "Coldplay"))
+    }
+
+    /** The signal a title can't give: a loop, a snippet, or a whole album side. */
+    @Test
+    fun `refuses a candidate whose runtime is nowhere near`() {
+        assertFalse(
+            matches(
+                song("Levitating", "Dua Lipa", duration = "1:00:12"),
+                title = "Levitating",
+                artist = "Dua Lipa",
+                durationSec = 203,
+            ),
+        )
+        // A few seconds of trimmed silence is not a different recording.
+        assertTrue(
+            matches(
+                song("Levitating", "Dua Lipa", duration = "3:25"),
+                title = "Levitating",
+                artist = "Dua Lipa",
+                durationSec = 203,
+            ),
+        )
+    }
+
+    /** With no artist to check against, the title alone has to carry it. */
+    @Test
+    fun `falls back to title alone when no artist is known`() {
+        assertTrue(matches(song("Clair de Lune", "Debussy"), "Clair de Lune", ""))
+        assertFalse(matches(song("Reverie", "Debussy"), "Clair de Lune", ""))
+    }
+
+    // ---- Choosing between candidates ---------------------------------------
+
+    /**
+     * Search backends rank however they like. The right copy is the one whose
+     * runtime and credit agree, not the one that came back first.
+     */
+    @Test
+    fun `picks the closest candidate rather than the first acceptable one`() {
+        val target = TrackMatcher.Target("Paniyon Sa", "Atif Aslam", durationSec = 247)
+        val wrongLength = song("Paniyon Sa", "Atif Aslam", duration = "4:32")
+        val right = song("Paniyon Sa", "Atif Aslam, Tulsi Kumar", duration = "4:06")
+        assertEquals(right, TrackMatcher.best(listOf(wrongLength, right), target))
+    }
+
+    /**
+     * A declared tier is a reason to prefer one copy of a recording over
+     * another. It is not a reason to play a different recording — the DJ edit
+     * on a compilation carries the right title and the right artist, and only
+     * its runtime gives it away.
+     */
+    @Test
+    fun `refuses to let a lossless label outrank the right runtime`() {
+        val target = TrackMatcher.Target("Sakhiyaan", "Maninder Buttar", durationSec = 180)
+        val djEdit = song("Sakhiyaan", "Maninder Buttar", duration = "3:05")
+            .copy(albumName = "Punjabi Dj Holi songs", sourceQuality = "LOSSLESS")
+        val albumCut = song("Sakhiyaan", "Maninder Buttar", duration = "3:00")
+            .copy(albumName = "Sakhiyaan")
+        // Both are acceptable matches on title and artist alone...
+        assertTrue(TrackMatcher.matches(djEdit, target.title, target.artist))
+        // ...and the runtime is the only thing that separates them.
+        assertEquals(albumCut, TrackMatcher.best(listOf(djEdit, albumCut), target))
+        // Including when lossless is being asked for and only the wrong cut
+        // claims to have it, which is the case that actually shipped broken.
+        assertEquals(
+            listOf(albumCut),
+            SourceResolver.preferred(listOf(djEdit, albumCut), target, wantsLossless = true),
+        )
+    }
+
+    /** With no runtime to separate them, the declared tier is the tiebreak again. */
+    @Test
+    fun `prefers the lossless copy when nothing separates the recordings`() {
+        val target = TrackMatcher.Target("Sakhiyaan", "Maninder Buttar", durationSec = 180)
+        val plain = song("Sakhiyaan", "Maninder Buttar", duration = "3:00")
+        val lossless = song("Sakhiyaan", "Maninder Buttar", duration = "3:00")
+            .copy(sourceQuality = "LOSSLESS")
+        assertEquals(
+            listOf(lossless, plain),
+            SourceResolver.preferred(listOf(plain, lossless), target, wantsLossless = true),
+        )
+    }
+
+    // ---- Deciding whether an upgrade is worth the seam -----------------------
+
+    /**
+     * Lossless is always worth it — it is what was asked for, and the reason
+     * the second look happens at all.
+     */
+    @Test
+    fun `always swaps to lossless`() {
+        val youtube = StreamFormat(codec = "opus", kbps = 160)
+        assertTrue(SourceResolver.worthSwapping(StreamFormat(codec = "flac"), youtube))
+        // Even against a lossy stream that is nominally the higher bitrate.
+        assertTrue(
+            SourceResolver.worthSwapping(StreamFormat(codec = "flac"), StreamFormat(codec = "aac", kbps = 320)),
+        )
+    }
+
+    /**
+     * The Shaayraana case: no catalogue had a lossless copy, one had a 320kbps
+     * AAC, and the track played on YouTube's 160kbps Opus because the only
+     * question being asked was "is this lossless".
+     */
+    @Test
+    fun `swaps to a lossy stream that is clearly better than what is playing`() {
+        val youtube = StreamFormat(codec = "opus", kbps = 160)
+        assertTrue(SourceResolver.worthSwapping(StreamFormat(codec = "aac", kbps = 320), youtube))
+    }
+
+    /** A margin too narrow to hear does not earn a break in the audio. */
+    @Test
+    fun `refuses a lossy swap that gains little`() {
+        assertFalse(
+            SourceResolver.worthSwapping(
+                StreamFormat(codec = "mp3", kbps = 192),
+                StreamFormat(codec = "aac", kbps = 128),
+            ),
+        )
+        // And never a downgrade, however the codecs compare.
+        assertFalse(
+            SourceResolver.worthSwapping(
+                StreamFormat(codec = "mp3", kbps = 128),
+                StreamFormat(codec = "opus", kbps = 160),
+            ),
+        )
+    }
+
+    /**
+     * An unstated bitrate on either side is not evidence of an improvement.
+     * Swapping on one would be gambling the listener's audio on a guess.
+     */
+    @Test
+    fun `refuses a lossy swap it cannot measure`() {
+        val playing = StreamFormat(codec = "opus", kbps = 160)
+        assertFalse(SourceResolver.worthSwapping(StreamFormat(codec = "aac"), playing))
+        assertFalse(SourceResolver.worthSwapping(StreamFormat(codec = "aac", kbps = 320), null))
+        assertFalse(
+            SourceResolver.worthSwapping(StreamFormat(codec = "aac", kbps = 320), StreamFormat(codec = "opus")),
+        )
+    }
+
+    // ---- Ranking two copies of the same recording ---------------------------
+
+    /**
+     * The '9:45' case, reduced to the comparison at the heart of it: a module
+     * ranked above JioSaavn offered 128kbps and JioSaavn held 320kbps, and the
+     * walk has to be able to say which of those it would rather have.
+     *
+     * Note this is a different question from [SourceResolver.worthSwapping] —
+     * that one asks whether a difference earns a break in the audio, this one
+     * only asks which is better.
+     */
+    @Test
+    fun `ranks a higher-bitrate lossy stream above a lower one`() {
+        assertTrue(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "mp4", kbps = 320),
+                StreamFormat(codec = "mp3", kbps = 128),
+            ),
+        )
+        assertFalse(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "mp3", kbps = 128),
+                StreamFormat(codec = "mp4", kbps = 320),
+            ),
+        )
+    }
+
+    /** Codec decides before bitrate: no lossy rendition outranks a lossless one. */
+    @Test
+    fun `ranks lossless above any lossy bitrate`() {
+        assertTrue(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "flac"),
+                StreamFormat(codec = "mp4", kbps = 320),
+            ),
+        )
+        assertFalse(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "mp4", kbps = 320),
+                StreamFormat(codec = "flac"),
+            ),
+        )
+    }
+
+    /**
+     * Nothing to compare against is beaten by anything — this is what makes the
+     * first source's answer the floor rather than a special case.
+     */
+    @Test
+    fun `anything beats no stream at all`() {
+        assertTrue(SourceResolver.isBetter(StreamFormat(codec = "mp3", kbps = 128), null))
+    }
+
+    /**
+     * An equal stream does not displace the one already held. The walk asks
+     * sources in rank order, so a tie has to leave the higher-ranked source's
+     * copy in place rather than drifting to whoever answered last.
+     */
+    @Test
