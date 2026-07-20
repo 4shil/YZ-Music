@@ -31,3 +31,96 @@ class QueueBuilderTest {
 
     @Test
     fun `a mix of nothing but videos still plays`() {
+        val extra = QueueBuilder.extend(
+            existing = emptyList(),
+            candidates = listOf(video("aaa", "One", "A"), video("bbb", "Two", "B")),
+            limit = 10,
+        )
+        assertEquals(listOf("aaa", "bbb"), extra.map { it.videoId })
+    }
+
+    @Test
+    fun `the video cut of a track is the same recording as its audio`() {
+        assertTrue(
+            QueueBuilder.isSameRecording(
+                song("aaa", "Kesariya"),
+                song("bbb", "Kesariya (Official Video)"),
+            ),
+        )
+    }
+
+    @Test
+    fun `matches across a longer billing of the same credit`() {
+        assertTrue(
+            QueueBuilder.isSameRecording(
+                song("aaa", "Kesariya", "Arijit Singh"),
+                song("bbb", "Kesariya | Official Video", "Arijit Singh, Pritam"),
+            ),
+        )
+    }
+
+    @Test
+    fun `a remix is not the original`() {
+        assertFalse(
+            QueueBuilder.isSameRecording(
+                song("aaa", "Kesariya"),
+                song("bbb", "Kesariya (Remix)"),
+            ),
+        )
+    }
+
+    @Test
+    fun `same title from a different artist is a different song`() {
+        assertFalse(
+            QueueBuilder.isSameRecording(
+                song("aaa", "Perfect", "Ed Sheeran"),
+                song("bbb", "Perfect", "One Direction"),
+            ),
+        )
+    }
+
+    @Test
+    fun `a reordered credit is the same recording`() {
+        assertTrue(
+            QueueBuilder.isSameRecording(
+                song("aaa", "Kalank (Duet)", "Pritam, Arijit Singh & Shilpa Rao"),
+                song("bbb", "Kalank (Duet)", "Shilpa Rao, Arijit Singh, & Pritam"),
+            ),
+        )
+    }
+
+    @Test
+    fun `topic channels and casing do not affect the credit`() {
+        assertEquals(setOf("arijit singh"), QueueBuilder.artistSet("Arijit Singh - Topic"))
+        assertEquals(
+            setOf("pritam", "arijit singh"),
+            QueueBuilder.artistSet("Pritam feat. Arijit Singh"),
+        )
+    }
+
+    @Test
+    fun `extend drops the seed and anything already queued`() {
+        val seed = song("aaa", "Kesariya")
+        val extra = QueueBuilder.extend(
+            existing = listOf(seed),
+            candidates = listOf(seed, song("bbb", "Tum Hi Ho"), song("aaa", "Kesariya")),
+            limit = 10,
+        )
+        assertEquals(listOf("bbb"), extra.map { it.videoId })
+    }
+
+    @Test
+    fun `extend drops a duplicate that only differs by video cut`() {
+        val extra = QueueBuilder.extend(
+            existing = emptyList(),
+            candidates = listOf(
+                song("aaa", "Channa Mereya"),
+                song("bbb", "Channa Mereya (Official Video)"),
+                song("ccc", "Ae Dil Hai Mushkil"),
+            ),
+            limit = 10,
+        )
+        assertEquals(listOf("aaa", "ccc"), extra.map { it.videoId })
+    }
+
+    @Test
