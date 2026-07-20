@@ -340,3 +340,74 @@ class MediaTaggerTest {
     fun `flac tagging replaces an existing comment rather than adding a second`() {
         val stale = vorbisComment("Somebody Else", listOf("TITLE=Old Title", "COMMENT=stale"))
         val frames = ByteArray(16) { 7 }
+        val original = flacMagic +
+            flacBlock(TYPE_STREAMINFO, ByteArray(34)) +
+            flacBlock(TYPE_VORBIS_COMMENT, stale, last = true) +
+            frames
+
+        val tagged = FlacTagger.tag(original, "New Title", "New Artist", null, null, null, "image/jpeg")
+
+        val (blocks, framesAt) = flacChain(tagged)
+        assertEquals(1L, blocks.count { it.first == TYPE_VORBIS_COMMENT }.toLong())
+        assertArrayEquals(frames, tagged.copyOfRange(framesAt, tagged.size))
+        assertTrue(tagged.indexOfBytes("TITLE=New Title".toByteArray(Charsets.UTF_8)) >= 0)
+        assertEquals(-1, tagged.indexOfBytes("Old Title".toByteArray(Charsets.UTF_8)))
+        assertEquals(-1, tagged.indexOfBytes("stale".toByteArray(Charsets.UTF_8)))
+    }
+
+    @Test
+    fun `flac tagging is a no-op without the fLaC magic`() {
+        val bytes = ByteArray(64) { it.toByte() }
+        assertSame(bytes, FlacTagger.tag(bytes, "Title", "Artist", null, null, null, "image/jpeg"))
+    }
+
+    @Test
+    fun `flac tagging is a no-op when a block claims more bytes than the file has`() {
+        val original = flacMagic +
+            byteArrayOf(TYPE_STREAMINFO.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte()) +
+            ByteArray(34)
+        assertSame(original, FlacTagger.tag(original, "Title", "Artist", null, null, null, "image/jpeg"))
+    }
+
+    @Test
+    fun `flac tagging is a no-op with nothing to write`() {
+        val original = flacMagic + flacBlock(TYPE_STREAMINFO, ByteArray(34), last = true) + ByteArray(16)
+        assertSame(original, FlacTagger.tag(original, "   ", "", null, null, null, "image/jpeg"))
+    }
+
+    /**
+     * As for the other two: lyrics alone have to produce a `VORBIS_COMMENT`.
+     *
+     * Also checks the field survives its own newlines, which is the one thing
+     * about a multi-line value worth asserting — a Vorbis field is length-
+     * prefixed, so nothing needs escaping, and the failure mode of getting that
+     * wrong is a comment block truncated at the first line break.
+     */
+    @Test
+    fun `flac tagging writes multi-line lyrics into a LYRICS field on their own`() {
+        val frames = ByteArray(16) { 7 }
+        val original = flacMagic + flacBlock(TYPE_STREAMINFO, ByteArray(34), last = true) + frames
+
+        val tagged = FlacTagger.tag(original, "", "", null, LRC, null, "image/jpeg")
+
+        assertNotSame(original, tagged)
+        val (blocks, framesAt) = flacChain(tagged)
+        assertEquals(listOf(TYPE_STREAMINFO, TYPE_VORBIS_COMMENT), blocks.map { it.first })
+        assertArrayEquals(frames, tagged.copyOfRange(framesAt, tagged.size))
+        assertTrue(tagged.indexOfBytes("LYRICS=$LRC".toByteArray(Charsets.UTF_8)) >= 0)
+    }
+
+    private companion object {
+        const val TYPE_STREAMINFO = 0
+        const val TYPE_PADDING = 1
+        const val TYPE_SEEKTABLE = 3
+        const val TYPE_VORBIS_COMMENT = 4
+        const val TYPE_PICTURE = 6
+
+        /**
+         * Stand-in LRC, in the shape `LrcWriter` emits — two stamped lines and
+         * the newline between them, which is all these tests need to look for.
+         */
+        const val LRC = "[00:01.20]first line here\n[00:04.50]second line here"
+    }
+}
