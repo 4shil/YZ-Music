@@ -96,3 +96,28 @@ class PlaylistOwnershipTest {
      */
     @Test
     fun `a track row's delete does not make the playlist own`() {
+        val json = """
+        {"header":{"musicResponsiveHeaderRenderer":{
+          "buttons":[{"toggleButtonRenderer":{
+            "defaultIcon":{"iconType":"BOOKMARK_BORDER"}}}]
+        }},
+         "contents":[{"musicResponsiveListItemRenderer":{"menu":{"menuRenderer":{"items":[
+           {"menuNavigationItemRenderer":{"icon":{"iconType":"DELETE"}}}
+         ]}}}}]}
+        """
+        assertEquals(false, owned(json))
+    }
+
+    // ---- No answer ----------------------------------------------------------
+
+    /** A continuation carries rows and nothing else, so it must not guess. */
+    @Test
+    fun `a headerless response says nothing`() {
+        val json = """
+        {"continuationContents":{"musicPlaylistShelfContinuation":{"contents":[
+          {"musicResponsiveListItemRenderer":{}}
+        ]}}}
+        """
+        assertNull(owned(json))
+    }
+}
