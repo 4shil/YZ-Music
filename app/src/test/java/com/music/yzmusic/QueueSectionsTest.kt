@@ -36,3 +36,14 @@ class QueueSectionsTest {
     }
 
     @Test
+    fun `a track put in by hand mid-mix stays above the section`() {
+        // Play next during the mix: the manual track at 3, heading below it.
+        assertEquals(4, start("~~~.~~", currentIndex = 2))
+    }
+
+    @Test
+    fun `an empty queue has nowhere for the section but the top`() {
+        assertEquals(0, start("", currentIndex = 0))
+        assertEquals(0, start("", currentIndex = -1))
+    }
+}
