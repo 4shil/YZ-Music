@@ -23,3 +23,19 @@ class QueueEdgeScrollTest {
         )
 
     @Test
+    fun `a row in the middle of the list scrolls it neither way`() {
+        assertEquals(0f, speed(top = 250f), 0f)
+    }
+
+    @Test
+    fun `a row clear of the zone by a single pixel still scrolls nothing`() {
+        assertEquals(0f, speed(top = 51f), 0f)
+        assertEquals(0f, speed(top = 449f), 0f)
+    }
+
+    @Test
+    fun `reaching the top of the list scrolls back towards the start`() {
+        assertTrue(speed(top = 40f) < 0f)
+    }
+
+    @Test
