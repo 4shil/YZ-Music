@@ -25,3 +25,21 @@ class PlaylistOwnershipTest {
 
     /** The renderer YouTube wraps a header in when it belongs to the caller. */
     @Test
+    fun `editable header renderer means own playlist`() {
+        val json = """
+        {"header":{"musicEditablePlaylistDetailHeaderRenderer":{
+          "header":{"musicResponsiveHeaderRenderer":{"buttons":[
+            {"toggleButtonRenderer":{
+              "defaultIcon":{"iconType":"BOOKMARK_BORDER"},
+              "toggledIcon":{"iconType":"BOOKMARK"}}}
+          ]}}
+        }}}
+        """
+        // Decided before the buttons are read, so a stray bookmark inside an
+        // editable header cannot talk it back out of being the account's.
+        assertEquals(true, owned(json))
+    }
+
+    /** Edit and Delete in the header menu are offered to nobody else. */
+    @Test
+    fun `delete in the header menu means own playlist`() {
