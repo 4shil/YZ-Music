@@ -73,3 +73,26 @@ class PlaylistOwnershipTest {
 
     /** The reported bug: a saved playlist offering Rename and Delete. */
     @Test
+    fun `save bookmark means saved rather than own`() {
+        val json = """
+        {"header":{"musicResponsiveHeaderRenderer":{
+          "buttons":[
+            {"musicPlayButtonRenderer":{}},
+            {"toggleButtonRenderer":{
+              "isToggled":"true",
+              "defaultIcon":{"iconType":"BOOKMARK_BORDER"},
+              "toggledIcon":{"iconType":"BOOKMARK"}}}
+          ]
+        }}}
+        """
+        assertEquals(false, owned(json))
+    }
+
+    /**
+     * A track row's own menu never answers for the playlist. Every row on a
+     * playlist page carries one, and on a page of anyone's playlist a row can
+     * be removed from a queue — a page-wide walk for DELETE would call every
+     * playlist in the library the account's own.
+     */
+    @Test
+    fun `a track row's delete does not make the playlist own`() {
