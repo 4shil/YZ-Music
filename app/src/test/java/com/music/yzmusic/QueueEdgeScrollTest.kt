@@ -39,3 +39,22 @@ class QueueEdgeScrollTest {
     }
 
     @Test
+    fun `reaching the bottom scrolls on towards the end`() {
+        assertTrue(speed(top = 460f) > 0f)
+    }
+
+    @Test
+    fun `the speed at the very edge is the full speed asked for`() {
+        // The row's top on the viewport's: the whole 50px zone is covered.
+        assertEquals(-1000f, speed(top = 0f), 0.01f)
+        // And its bottom on the viewport's, 500px down.
+        assertEquals(1000f, speed(top = 500f), 0.01f)
+    }
+
+    @Test
+    fun `held past the edge it goes no faster than at it`() {
+        assertEquals(-1000f, speed(top = -400f), 0.01f)
+        assertEquals(1000f, speed(top = 900f), 0.01f)
+    }
+
+    @Test
