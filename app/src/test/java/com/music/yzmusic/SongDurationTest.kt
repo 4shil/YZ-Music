@@ -17,3 +17,29 @@ import org.junit.Test
  */
 class SongDurationTest {
 
+    private fun song(durationText: String?) = Song(
+        videoId = "id",
+        title = "Title",
+        artist = "Artist",
+        thumbnailUrl = null,
+        durationText = durationText,
+    )
+
+    @Test
+    fun `minutes and seconds`() {
+        assertEquals(225_000L, song("3:45").durationMillis())
+    }
+
+    @Test
+    fun `a single-digit minute field, which is how most rows arrive`() {
+        assertEquals(62_000L, song("1:02").durationMillis())
+    }
+
+    @Test
+    fun `hours, minutes and seconds`() {
+        // The long-mix case. Two of the app's older duration parsers return 0
+        // here, which is the reason this one is written out separately.
+        assertEquals(3_753_000L, song("1:02:33").durationMillis())
+    }
+
+    @Test
