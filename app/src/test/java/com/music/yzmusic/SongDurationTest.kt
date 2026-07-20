@@ -43,3 +43,13 @@ class SongDurationTest {
     }
 
     @Test
+    fun `surrounding and interior whitespace is tolerated`() {
+        assertEquals(225_000L, song(" 3 : 45 ").durationMillis())
+    }
+
+    @Test
+    fun `a row with no duration is zero rather than null`() {
+        assertEquals(0L, song(null).durationMillis())
+    }
+
+    @Test
