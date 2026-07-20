@@ -54,3 +54,23 @@ class QueueShuffleTest {
     }
 
     @Test
+    fun `tracks the target does not name trail behind the ones it does`() {
+        val queue = listOf("a", "b", "c", "d", "e")
+        // "e" was queued after the shuffle, so the restored order says nothing
+        // about it — it stays at the end rather than displacing anything.
+        assertEquals(
+            listOf("a", "d", "b", "c", "e"),
+            applied(queue, from = 1, target = listOf("d", "b", "c")),
+        )
+    }
+
+    @Test
+    fun `a track that has since been removed is skipped`() {
+        val queue = listOf("a", "b", "c")
+        assertEquals(
+            listOf("a", "c", "b"),
+            applied(queue, from = 1, target = listOf("c", "gone", "b")),
+        )
+    }
+
+    @Test
