@@ -25,3 +25,14 @@ class QueueSectionsTest {
     }
 
     @Test
+    fun `AutoPlay tracks already played sit above the section, not in it`() {
+        // Playing the third of the mix: the two behind it have had their turn.
+        assertEquals(5, start("..~~~~", currentIndex = 4))
+    }
+
+    @Test
+    fun `the section closes the queue once the mix is on its last track`() {
+        assertEquals(4, start("..~~", currentIndex = 3))
+    }
+
+    @Test
