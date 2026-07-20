@@ -43,3 +43,33 @@ class PlaylistOwnershipTest {
     /** Edit and Delete in the header menu are offered to nobody else. */
     @Test
     fun `delete in the header menu means own playlist`() {
+        val json = """
+        {"header":{"musicResponsiveHeaderRenderer":{
+          "buttons":[{"menuRenderer":{"items":[
+            {"menuNavigationItemRenderer":{"icon":{"iconType":"DELETE"}}}
+          ]}}]
+        }}}
+        """
+        assertEquals(true, owned(json))
+    }
+
+    /** Nothing to save a playlist already yours into, so there is no bookmark. */
+    @Test
+    fun `header with no save bookmark means own playlist`() {
+        val json = """
+        {"header":{"musicResponsiveHeaderRenderer":{
+          "buttons":[
+            {"musicPlayButtonRenderer":{}},
+            {"menuRenderer":{"items":[
+              {"menuNavigationItemRenderer":{"icon":{"iconType":"SHARE"}}}
+            ]}}
+          ]
+        }}}
+        """
+        assertEquals(true, owned(json))
+    }
+
+    // ---- Saved playlists ----------------------------------------------------
+
+    /** The reported bug: a saved playlist offering Rename and Delete. */
+    @Test
