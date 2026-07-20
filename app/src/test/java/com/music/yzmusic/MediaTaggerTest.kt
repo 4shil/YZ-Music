@@ -284,3 +284,59 @@ class MediaTaggerTest {
             frames
         val cover = byteArrayOf(9, 8, 7, 6, 5)
 
+        val tagged = FlacTagger.tag(original, "My Title", "My Artist", "My Album", null, cover, "image/jpeg")
+
+        assertNotSame(original, tagged)
+        val (blocks, framesAt) = flacChain(tagged)
+        // STREAMINFO first, SEEKTABLE carried across, PADDING gone, the two new
+        // blocks appended — and the last-block flag on the last of them, which
+        // is what let the walk get this far.
+        assertEquals(
+            listOf(TYPE_STREAMINFO, TYPE_SEEKTABLE, TYPE_VORBIS_COMMENT, TYPE_PICTURE),
+            blocks.map { it.first },
+        )
+        assertArrayEquals(streamInfo, blocks[0].second)
+        assertArrayEquals(seekTable, blocks[1].second)
+        assertArrayEquals(frames, tagged.copyOfRange(framesAt, tagged.size))
+
+        // Little-endian lengths, and no framing bit after the last field. Both
+        // are inherited from Ogg Vorbis' comment layout except that the framing
+        // bit isn't, and both are silent when written the other way.
+        val comment = blocks[2].second
+        val vendorLength = readU32Le(comment, 0)
+        assertEquals("YZ Music", String(comment, 4, vendorLength, Charsets.UTF_8))
+        var at = 4 + vendorLength
+        val count = readU32Le(comment, at)
+        at += 4
+        assertEquals(3L, count.toLong())
+        val fields = buildList {
+            repeat(count) {
+                val length = readU32Le(comment, at)
+                at += 4
+                add(String(comment, at, length, Charsets.UTF_8))
+                at += length
+            }
+        }
+        assertEquals(listOf("TITLE=My Title", "ARTIST=My Artist", "ALBUM=My Album"), fields)
+        assertEquals(comment.size.toLong(), at.toLong())
+
+        // The picture block is big-endian, unlike the one above it.
+        val picture = blocks[3].second
+        assertEquals(3L, readU32(picture, 0)) // front cover
+        val mimeLength = readU32(picture, 4).toInt()
+        assertEquals("image/jpeg", String(picture, 8, mimeLength, Charsets.US_ASCII))
+        var pat = 8 + mimeLength
+        // Description length, width, height, colour depth, colours used.
+        repeat(5) {
+            assertEquals(0L, readU32(picture, pat))
+            pat += 4
+        }
+        assertEquals(cover.size.toLong(), readU32(picture, pat))
+        pat += 4
+        assertArrayEquals(cover, picture.copyOfRange(pat, picture.size))
+    }
+
+    @Test
+    fun `flac tagging replaces an existing comment rather than adding a second`() {
+        val stale = vorbisComment("Somebody Else", listOf("TITLE=Old Title", "COMMENT=stale"))
+        val frames = ByteArray(16) { 7 }
