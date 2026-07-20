@@ -58,3 +58,52 @@ class QueueEdgeScrollTest {
     }
 
     @Test
+    fun `a row barely inside the zone already moves the list`() {
+        // A fifth of the top speed at the near edge of the zone rather than
+        // nothing: reaching it should read as a response, not as a stall.
+        val barely = speed(top = 49.5f)
+        assertTrue("$barely", barely <= -200f && barely > -250f)
+    }
+
+    @Test
+    fun `the ramp is even across the zone`() {
+        // Halfway in: the fifth it starts from, plus half of the rest.
+        assertEquals(-600f, speed(top = 25f), 0.01f)
+        assertEquals(600f, speed(top = 475f), 0.01f)
+    }
+
+    @Test
+    fun `the zone is measured from the viewport, not from zero`() {
+        // Content padding puts the viewport's start above the first row's own
+        // offset. This row sits 150px clear of it, so it shouldn't scroll —
+        // which measuring from 0 would have it doing at full speed.
+        assertEquals(0f, speed(top = 0f, viewportStart = -200, viewportEnd = 400), 0f)
+        // The same viewport, with the row now at the top edge of it.
+        assertEquals(-1000f, speed(top = -200f, viewportStart = -200, viewportEnd = 400), 0.01f)
+    }
+
+    @Test
+    fun `a viewport too short to clear both edges scrolls neither way`() {
+        // A 100px row and 50px zones in 120px of viewport: it is in both zones
+        // wherever it sits, and running away in whichever won the tie would be
+        // worse than staying put.
+        assertEquals(0f, speed(top = 10f, viewportStart = 0, viewportEnd = 120), 0f)
+    }
+
+    @Test
+    fun `no zone is no auto-scroll`() {
+        // Before the list is measured there is no density to size a zone from.
+        assertEquals(
+            0f,
+            edgeScrollSpeed(
+                top = 0f,
+                bottom = 100f,
+                viewportStart = 0,
+                viewportEnd = 600,
+                zone = 0f,
+                speed = 1000f,
+            ),
+            0f,
+        )
+    }
+}
