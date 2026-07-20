@@ -190,3 +190,97 @@ class MediaTaggerTest {
 
         val b0 = tagged[sizeFieldOffset].toInt() and 0xFF
         val b1 = tagged[sizeFieldOffset + 1].toInt() and 0xFF
+        val decoded = ((b0 and 0x3F) shl 8) or b1
+        val newBodyLength = tagged.size - (sizeFieldOffset + 2)
+        assertEquals(newBodyLength.toLong(), decoded.toLong())
+    }
+
+    @Test
+    fun `webm tagging is a no-op without a recognisable ebml header`() {
+        val bytes = ByteArray(20) { it.toByte() }
+        val tagged = WebmTagger.tag(bytes, "Title", "Artist", null, null, null, "image/jpeg")
+        assertSame(bytes, tagged)
+    }
+
+    /** As for MP4: lyrics alone have to be reason enough to append a `Tags` element. */
+    @Test
+    fun `webm tagging writes lyrics into a LYRICS simpletag on their own`() {
+        val unknownSize = byteArrayOf(0x01) + ByteArray(7) { 0xFF.toByte() }
+        val original = buildFakeWebm(ByteArray(10) { (it + 1).toByte() }, unknownSize)
+
+        val tagged = WebmTagger.tag(original, "", "", null, LRC, null, "image/jpeg")
+
+        assertNotSame(original, tagged)
+        assertArrayEquals(original, tagged.copyOfRange(0, original.size))
+        assertTrue(tagged.indexOfBytes("LYRICS".toByteArray(Charsets.US_ASCII)) >= 0)
+        assertTrue(tagged.indexOfBytes(LRC.toByteArray(Charsets.UTF_8)) >= 0)
+    }
+
+    // ---- FLAC ---------------------------------------------------------------
+
+    private val flacMagic = "fLaC".toByteArray(Charsets.US_ASCII)
+
+    private fun flacBlock(type: Int, payload: ByteArray, last: Boolean = false): ByteArray =
+        byteArrayOf(
+            (type or if (last) 0x80 else 0).toByte(),
+            (payload.size ushr 16).toByte(),
+            (payload.size ushr 8).toByte(),
+            payload.size.toByte(),
+        ) + payload
+
+    /**
+     * The metadata chain of [bytes] as (type, payload), and where the audio
+     * frames begin.
+     *
+     * Walking to the last-block flag rather than to a known count is the point:
+     * a flag left set on a block that is no longer last stops the walk early and
+     * every assertion made off the result then fails, which is exactly the bug
+     * worth catching.
+     */
+    private fun flacChain(bytes: ByteArray): Pair<List<Pair<Int, ByteArray>>, Int> {
+        assertArrayEquals(flacMagic, bytes.copyOfRange(0, 4))
+        val blocks = mutableListOf<Pair<Int, ByteArray>>()
+        var offset = 4
+        while (true) {
+            val flags = bytes[offset].toInt() and 0xFF
+            val length = ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
+                ((bytes[offset + 2].toInt() and 0xFF) shl 8) or (bytes[offset + 3].toInt() and 0xFF)
+            blocks += (flags and 0x7F) to bytes.copyOfRange(offset + 4, offset + 4 + length)
+            offset += 4 + length
+            if (flags and 0x80 != 0) return blocks to offset
+        }
+    }
+
+    private fun le32(value: Int): ByteArray = byteArrayOf(
+        value.toByte(),
+        (value ushr 8).toByte(),
+        (value ushr 16).toByte(),
+        (value ushr 24).toByte(),
+    )
+
+    private fun readU32Le(bytes: ByteArray, offset: Int): Int =
+        (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
+            ((bytes[offset + 2].toInt() and 0xFF) shl 16) or ((bytes[offset + 3].toInt() and 0xFF) shl 24)
+
+    private fun vorbisComment(vendor: String, fields: List<String>): ByteArray {
+        val vendorBytes = vendor.toByteArray(Charsets.UTF_8)
+        var out = le32(vendorBytes.size) + vendorBytes + le32(fields.size)
+        for (field in fields) {
+            val encoded = field.toByteArray(Charsets.UTF_8)
+            out += le32(encoded.size) + encoded
+        }
+        return out
+    }
+
+    @Test
+    fun `flac tagging keeps the frames, carries other blocks and spends the padding`() {
+        val streamInfo = ByteArray(34) { it.toByte() }
+        val seekTable = ByteArray(18) { (it + 100).toByte() }
+        val frames = ByteArray(64) { (it + 1).toByte() }
+        val original = flacMagic +
+            flacBlock(TYPE_STREAMINFO, streamInfo) +
+            flacBlock(TYPE_SEEKTABLE, seekTable) +
+            flacBlock(TYPE_PADDING, ByteArray(200), last = true) +
+            frames
+        val cover = byteArrayOf(9, 8, 7, 6, 5)
+
