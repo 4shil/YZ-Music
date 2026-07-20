@@ -11,3 +11,17 @@ import org.junit.Test
 class QueueSectionsTest {
 
     /** `.` is a track the user queued, `~` one AutoPlay did. */
+    private fun start(queue: String, currentIndex: Int) =
+        autoplaySectionStart(queue.map { it == '~' }, currentIndex)
+
+    @Test
+    fun `the section starts where AutoPlay's tracks do`() {
+        assertEquals(3, start("...~~~", currentIndex = 0))
+    }
+
+    @Test
+    fun `a queue with nothing from AutoPlay has the section at its end`() {
+        assertEquals(4, start("....", currentIndex = 1))
+    }
+
+    @Test
