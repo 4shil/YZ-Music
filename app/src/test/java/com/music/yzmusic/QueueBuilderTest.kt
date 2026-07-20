@@ -124,3 +124,21 @@ class QueueBuilderTest {
     }
 
     @Test
+    fun `extend honours the limit`() {
+        val candidates = (1..10).map { song("v$it", "Song $it", "Artist $it") }
+        assertEquals(3, QueueBuilder.extend(emptyList(), candidates, limit = 3).size)
+    }
+
+    @Test
+    fun `one artist cannot take over the station`() {
+        val candidates = (1..6).map { song("v$it", "Song $it", "Badshah") }
+        val extra = QueueBuilder.extend(
+            existing = listOf(song("seed", "Seed", "Diljit Dosanjh")),
+            candidates = candidates,
+            limit = 10,
+        )
+        assertEquals(2, extra.size)
+    }
+
+    @Test
+    fun `the seed's own artist gets more room than the rest`() {
