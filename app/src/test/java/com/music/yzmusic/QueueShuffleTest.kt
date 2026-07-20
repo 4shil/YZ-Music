@@ -22,3 +22,35 @@ class QueueShuffleTest {
 
     @Test
     fun `the queue ends up in the order asked for`() {
+        val queue = listOf("a", "b", "c", "d", "e")
+        assertEquals(
+            listOf("a", "b", "e", "c", "d"),
+            applied(queue, from = 2, target = listOf("e", "c", "d")),
+        )
+    }
+
+    @Test
+    fun `everything up to and including the playing track is left alone`() {
+        val queue = listOf("a", "b", "c", "d")
+        // Shuffle at index 1 may only touch what comes after it.
+        val out = applied(queue, from = 2, target = listOf("d", "c"))
+        assertEquals(listOf("a", "b"), out.take(2))
+        assertEquals(listOf("a", "b", "d", "c"), out)
+    }
+
+    @Test
+    fun `an order already in place costs no moves`() {
+        val queue = listOf("a", "b", "c", "d")
+        assertTrue(QueueShuffle.moves(queue, from = 1, target = listOf("b", "c", "d")).isEmpty())
+    }
+
+    @Test
+    fun `a queue holding the same track twice keeps both copies`() {
+        val queue = listOf("a", "b", "c", "b")
+        assertEquals(
+            listOf("a", "b", "b", "c"),
+            applied(queue, from = 1, target = listOf("b", "b", "c")),
+        )
+    }
+
+    @Test
