@@ -105,3 +105,187 @@ class SourcesTest {
 
     /** With no measured bitrate, what the source said it was sending will do. */
     @Test
+    fun `falls back to the declared bitrate for the quality tier`() {
+        val claimed = NerdStats.Snapshot(
+            mimeType = "audio/mp4a-latm",
+            bitrateKbps = null,
+            sampleRateHz = 44_100,
+            channels = 2,
+            claimed = StreamFormat(codec = "aac", kbps = 320),
+        )
+        assertTrue(claimed.isHiQuality)
+
+        val silent = NerdStats.Snapshot(mimeType = "audio/mp4a-latm", bitrateKbps = null, sampleRateHz = null, channels = null)
+        assertFalse(silent.isHiQuality)
+    }
+
+    // ---- Cross-source matching ---------------------------------------------
+
+    private fun song(title: String, artist: String, duration: String? = null) =
+        Song(videoId = "x", title = title, artist = artist, thumbnailUrl = null, durationText = duration)
+
+    private fun matches(candidate: Song, title: String, artist: String, durationSec: Int? = null) =
+        TrackMatcher.matches(candidate, title, artist, durationSec)
+
+    @Test
+    fun `matches the same recording across differing catalogue titles`() {
+        assertTrue(
+            matches(
+                song("Bohemian Rhapsody (Remastered 2011)", "Queen"),
+                title = "Bohemian Rhapsody",
+                artist = "Queen",
+            ),
+        )
+        assertTrue(
+            matches(
+                song("Sunflower", "Post Malone, Swae Lee"),
+                title = "Sunflower (feat. Swae Lee)",
+                artist = "Post Malone",
+            ),
+        )
+        // Punctuation and case are not identity.
+        assertTrue(
+            matches(
+                song("Don't Stop Me Now", "QUEEN"),
+                title = "Dont Stop Me Now",
+                artist = "Queen",
+            ),
+        )
+    }
+
+    /**
+     * The one that sent this back for a rewrite. YouTube files the track under
+     * the film it is from and credits the lead singer; the module holds the
+     * same audio under the bare title and credits the duet. Every part of that
+     * disagreement is packaging.
+     */
+    @Test
+    fun `matches a film credit against a bare catalogue listing`() {
+        assertTrue(
+            matches(
+                song("Paniyon Sa", "Atif Aslam, Tulsi Kumar", duration = "4:07"),
+                title = "Paniyon Sa (From \"Satyameva Jayate\")",
+                artist = "Atif Aslam",
+                durationSec = 247,
+            ),
+        )
+        // And the other way round, which is how a module-queued track finds
+        // its YouTube seed for radio.
+        assertTrue(
+            matches(
+                song("Paniyon Sa (From \"Satyameva Jayate\")", "Atif Aslam"),
+                title = "Paniyon Sa",
+                artist = "Atif Aslam, Tulsi Kumar",
+            ),
+        )
+    }
+
+    /** The trailing labels an upload hangs on a title with no brackets to hold them. */
+    @Test
+    fun `strips upload labelling from either side`() {
+        assertTrue(matches(song("Tum Hi Ho", "Arijit Singh"), "Tum Hi Ho Full Song", "Arijit Singh"))
+        assertTrue(
+            matches(
+                song("Kesariya", "Arijit Singh"),
+                title = "Kesariya - Brahmastra | Official Video",
+                artist = "Arijit Singh",
+            ),
+        )
+        // "Artist - Title" uploads: the head is the credit, not the song.
+        assertTrue(
+            matches(
+                song("Believer", "Imagine Dragons"),
+                title = "Imagine Dragons - Believer",
+                artist = "Imagine Dragons",
+            ),
+        )
+    }
+
+    @Test
+    fun `refuses a different song by the same artist`() {
+        assertFalse(
+            matches(
+                song("The Show Must Go On", "Queen"),
+                title = "Bohemian Rhapsody",
+                artist = "Queen",
+            ),
+        )
+    }
+
+    /**
+     * The dangerous case: same title, different artist. A cover, a tribute
+     * album, or a completely unrelated song that happens to share a name — all
+     * of which a loose matcher would happily play instead.
+     */
+    @Test
+    fun `refuses a cover by a different artist`() {
+        assertFalse(
+            matches(
+                song("Hurt", "Johnny Cash"),
+                title = "Hurt",
+                artist = "Nine Inch Nails",
+            ),
+        )
+    }
+
+    @Test
+    fun `accepts a shared artist when catalogues credit differently`() {
+        assertTrue(
+            matches(
+                song("Numb / Encore", "Jay-Z & Linkin Park"),
+                title = "Numb / Encore",
+                artist = "Linkin Park",
+            ),
+        )
+    }
+
+    /**
+     * Film catalogues credit from opposite ends: YouTube Music files this
+     * under the composer, every store under the singer, and the two credits
+     * share nothing at all. An exact runtime is what says they are the same
+     * master anyway.
+     */
+    @Test
+    fun `accepts a composer credit against a singer credit on an exact runtime`() {
+        assertTrue(
+            matches(
+                song("Jhak Maar Ke", "Neeraj Shridhar", duration = "3:53"),
+                title = "Jhak Maar Ke",
+                artist = "Pritam",
+                durationSec = 233,
+            ),
+        )
+        // The remix and the acoustic cover from the same result set are the
+        // reason this is safe: neither agrees on length.
+        assertFalse(
+            matches(
+                song("Jhak Maar Ke", "Leo Lz Mix", duration = "4:01"),
+                title = "Jhak Maar Ke",
+                artist = "Pritam",
+                durationSec = 233,
+            ),
+        )
+    }
+
+    /**
+     * The runtime may only stand in for a credit when there *is* a runtime.
+     * Without one there is nothing corroborating anything, and an unrelated
+     * song sharing a title must still lose.
+     */
+    @Test
+    fun `will not waive the credit check without a runtime to back it`() {
+        assertFalse(matches(song("Jhak Maar Ke", "Neeraj Shridhar"), "Jhak Maar Ke", "Pritam"))
+        assertFalse(
+            matches(
+                song("Jhak Maar Ke", "Neeraj Shridhar", duration = "3:53"),
+                title = "Jhak Maar Ke",
+                artist = "Pritam",
+                durationSec = null,
+            ),
+        )
+    }
+
+    /** A properly credited copy always outranks one the runtime merely vouched for. */
+    @Test
+    fun `prefers a credited match over a runtime-vouched one`() {
+        val target = TrackMatcher.Target("Jhak Maar Ke", "Pritam, Neeraj Shridhar", durationSec = 233)
