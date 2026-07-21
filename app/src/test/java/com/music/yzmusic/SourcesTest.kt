@@ -385,3 +385,306 @@ class SourcesTest {
         val target = TrackMatcher.Target("Sakhiyaan", "Maninder Buttar", durationSec = 180)
         val djEdit = song("Sakhiyaan", "Maninder Buttar", duration = "3:05")
             .copy(albumName = "Punjabi Dj Holi songs", sourceQuality = "LOSSLESS")
+        val albumCut = song("Sakhiyaan", "Maninder Buttar", duration = "3:00")
+            .copy(albumName = "Sakhiyaan")
+        // Both are acceptable matches on title and artist alone...
+        assertTrue(TrackMatcher.matches(djEdit, target.title, target.artist))
+        // ...and the runtime is the only thing that separates them.
+        assertEquals(albumCut, TrackMatcher.best(listOf(djEdit, albumCut), target))
+        // Including when lossless is being asked for and only the wrong cut
+        // claims to have it, which is the case that actually shipped broken.
+        assertEquals(
+            listOf(albumCut),
+            SourceResolver.preferred(listOf(djEdit, albumCut), target, wantsLossless = true),
+        )
+    }
+
+    /** With no runtime to separate them, the declared tier is the tiebreak again. */
+    @Test
+    fun `prefers the lossless copy when nothing separates the recordings`() {
+        val target = TrackMatcher.Target("Sakhiyaan", "Maninder Buttar", durationSec = 180)
+        val plain = song("Sakhiyaan", "Maninder Buttar", duration = "3:00")
+        val lossless = song("Sakhiyaan", "Maninder Buttar", duration = "3:00")
+            .copy(sourceQuality = "LOSSLESS")
+        assertEquals(
+            listOf(lossless, plain),
+            SourceResolver.preferred(listOf(plain, lossless), target, wantsLossless = true),
+        )
+    }
+
+    // ---- Deciding whether an upgrade is worth the seam -----------------------
+
+    /**
+     * Lossless is always worth it — it is what was asked for, and the reason
+     * the second look happens at all.
+     */
+    @Test
+    fun `always swaps to lossless`() {
+        val youtube = StreamFormat(codec = "opus", kbps = 160)
+        assertTrue(SourceResolver.worthSwapping(StreamFormat(codec = "flac"), youtube))
+        // Even against a lossy stream that is nominally the higher bitrate.
+        assertTrue(
+            SourceResolver.worthSwapping(StreamFormat(codec = "flac"), StreamFormat(codec = "aac", kbps = 320)),
+        )
+    }
+
+    /**
+     * The Shaayraana case: no catalogue had a lossless copy, one had a 320kbps
+     * AAC, and the track played on YouTube's 160kbps Opus because the only
+     * question being asked was "is this lossless".
+     */
+    @Test
+    fun `swaps to a lossy stream that is clearly better than what is playing`() {
+        val youtube = StreamFormat(codec = "opus", kbps = 160)
+        assertTrue(SourceResolver.worthSwapping(StreamFormat(codec = "aac", kbps = 320), youtube))
+    }
+
+    /** A margin too narrow to hear does not earn a break in the audio. */
+    @Test
+    fun `refuses a lossy swap that gains little`() {
+        assertFalse(
+            SourceResolver.worthSwapping(
+                StreamFormat(codec = "mp3", kbps = 192),
+                StreamFormat(codec = "aac", kbps = 128),
+            ),
+        )
+        // And never a downgrade, however the codecs compare.
+        assertFalse(
+            SourceResolver.worthSwapping(
+                StreamFormat(codec = "mp3", kbps = 128),
+                StreamFormat(codec = "opus", kbps = 160),
+            ),
+        )
+    }
+
+    /**
+     * An unstated bitrate on either side is not evidence of an improvement.
+     * Swapping on one would be gambling the listener's audio on a guess.
+     */
+    @Test
+    fun `refuses a lossy swap it cannot measure`() {
+        val playing = StreamFormat(codec = "opus", kbps = 160)
+        assertFalse(SourceResolver.worthSwapping(StreamFormat(codec = "aac"), playing))
+        assertFalse(SourceResolver.worthSwapping(StreamFormat(codec = "aac", kbps = 320), null))
+        assertFalse(
+            SourceResolver.worthSwapping(StreamFormat(codec = "aac", kbps = 320), StreamFormat(codec = "opus")),
+        )
+    }
+
+    // ---- Ranking two copies of the same recording ---------------------------
+
+    /**
+     * The '9:45' case, reduced to the comparison at the heart of it: a module
+     * ranked above JioSaavn offered 128kbps and JioSaavn held 320kbps, and the
+     * walk has to be able to say which of those it would rather have.
+     *
+     * Note this is a different question from [SourceResolver.worthSwapping] —
+     * that one asks whether a difference earns a break in the audio, this one
+     * only asks which is better.
+     */
+    @Test
+    fun `ranks a higher-bitrate lossy stream above a lower one`() {
+        assertTrue(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "mp4", kbps = 320),
+                StreamFormat(codec = "mp3", kbps = 128),
+            ),
+        )
+        assertFalse(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "mp3", kbps = 128),
+                StreamFormat(codec = "mp4", kbps = 320),
+            ),
+        )
+    }
+
+    /** Codec decides before bitrate: no lossy rendition outranks a lossless one. */
+    @Test
+    fun `ranks lossless above any lossy bitrate`() {
+        assertTrue(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "flac"),
+                StreamFormat(codec = "mp4", kbps = 320),
+            ),
+        )
+        assertFalse(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "mp4", kbps = 320),
+                StreamFormat(codec = "flac"),
+            ),
+        )
+    }
+
+    /**
+     * Nothing to compare against is beaten by anything — this is what makes the
+     * first source's answer the floor rather than a special case.
+     */
+    @Test
+    fun `anything beats no stream at all`() {
+        assertTrue(SourceResolver.isBetter(StreamFormat(codec = "mp3", kbps = 128), null))
+    }
+
+    /**
+     * An equal stream does not displace the one already held. The walk asks
+     * sources in rank order, so a tie has to leave the higher-ranked source's
+     * copy in place rather than drifting to whoever answered last.
+     */
+    @Test
+    fun `an equal stream does not displace the one already held`() {
+        assertFalse(
+            SourceResolver.isBetter(
+                StreamFormat(codec = "mp4", kbps = 320),
+                StreamFormat(codec = "aac", kbps = 320),
+            ),
+        )
+        assertFalse(
+            SourceResolver.isBetter(StreamFormat(codec = "flac"), StreamFormat(codec = "alac")),
+        )
+    }
+
+    /**
+     * An unstated bitrate ranks as nothing rather than as a win. A source that
+     * declines to describe its stream should not be able to displace one that
+     * has stated a good rate — see [StreamFormat] on why null means "not
+     * stated" and is never inferred.
+     */
+    @Test
+    fun `an undescribed lossy stream does not outrank a stated one`() {
+        assertFalse(
+            SourceResolver.isBetter(StreamFormat(codec = "aac"), StreamFormat(codec = "mp4", kbps = 320)),
+        )
+        assertTrue(
+            SourceResolver.isBetter(StreamFormat(codec = "mp4", kbps = 320), StreamFormat(codec = "aac")),
+        )
+    }
+
+    @Test
+    fun `has nothing to offer when no candidate is the recording`() {
+        val target = TrackMatcher.Target("Paniyon Sa", "Atif Aslam")
+        assertNull(TrackMatcher.best(listOf(song("Paniyon Sa", "Some Cover Band")), target))
+        assertNull(TrackMatcher.best(emptyList(), target))
+    }
+
+    // ---- What a lossy source has to beat to become a file -------------------
+
+    /**
+     * The case the floor exists for: JioSaavn's top rendition is better than
+     * anything YouTube's AAC ladder holds, so a download takes it rather than
+     * filing a copy worse than the one that would have been streamed.
+     */
+    @Test
+    fun `a 320 from a source is worth keeping over youtube's aac`() {
+        assertTrue(SourceResolver.beatsYouTubeAac(StreamFormat(codec = "mp4", kbps = 320)))
+    }
+
+    /**
+     * Below the top of YouTube's own ladder, a source's copy is trading one
+     * lossy file for another and giving up the more reliable fetch to do it —
+     * including at 256, where the two are a wash and the tie goes to YouTube.
+     */
+    @Test
+    fun `a thinner rendition loses to youtube's aac`() {
+        assertFalse(SourceResolver.beatsYouTubeAac(StreamFormat(codec = "mp3", kbps = 128)))
+        assertFalse(SourceResolver.beatsYouTubeAac(StreamFormat(codec = "mp4", kbps = 160)))
+        assertFalse(SourceResolver.beatsYouTubeAac(StreamFormat(codec = "aac", kbps = 256)))
+    }
+
+    /**
+     * A download has to name the file before the first byte lands, so a source
+     * that described its rendition as nothing has said nothing worth keeping —
+     * unlike playback, which can hand the URL to the decoder and find out.
+     */
+    @Test
+    fun `an unstated rendition is not worth keeping`() {
+        assertFalse(SourceResolver.beatsYouTubeAac(StreamFormat()))
+        assertFalse(SourceResolver.beatsYouTubeAac(StreamFormat(codec = "mp4")))
+    }
+
+    // ---- Which sources are worth asking before a track is played ------------
+
+    /**
+     * Read-ahead resolves the track *after* the one playing, so a source that
+     * needs ten seconds to answer is usually still answering when the listener
+     * arrives — and a wasted module resolve costs a QuickJS engine and several
+     * backend searches, where a wasted JioSaavn one costs a round trip. Only
+     * JioSaavn earns the speculative ask.
+     */
+    @Test
+    fun `only the quick source is worth resolving ahead of playback`() {
+        assertTrue(SourceKind.JIOSAAVN.worthPrefetching)
+        assertFalse(SourceKind.MODULE.worthPrefetching)
+        assertFalse(SourceKind.CUSTOM_MODULE.worthPrefetching)
+    }
+
+    /**
+     * YouTube is warmed ahead of time too, but through its own read-ahead,
+     * which speaks video ids and needs no cross-source match. Marking it here
+     * would send it through the substitution path to find itself.
+     */
+    @Test
+    fun `youtube is not prefetched as a substitute for itself`() {
+        assertFalse(SourceKind.YOUTUBE.worthPrefetching)
+    }
+
+    // ---- Racing the sources -------------------------------------------------
+
+    /**
+     * A source that answers after [answerAfterMs] with a stream of [format], or
+     * with nothing at all when [format] is null.
+     *
+     * [asked] records that it was reached, which is how the tests below tell a
+     * source that was beaten from one that was never asked — the distinction
+     * the whole '9:45' investigation turned on.
+     */
+    private class FakeSource(
+        override val displayName: String,
+        private val answerAfterMs: Long,
+        private val format: StreamFormat?,
+        override val kind: SourceKind = SourceKind.JIOSAAVN,
+    ) : MusicSource {
+        override val configId = displayName
+        var asked = false
+            private set
+        var cancelled = false
+            private set
+
+        override suspend fun health() = SourceHealth.Ok()
+
+        override suspend fun search(query: String, limit: Int, waitForAll: Boolean): List<Song> {
+            asked = true
+            try {
+                delay(answerAfterMs)
+            } catch (e: CancellationException) {
+                cancelled = true
+                throw e
+            }
+            if (format == null) return emptyList()
+            return listOf(
+                Song(
+                    videoId = "$displayName-1",
+                    title = RACE_TITLE,
+                    artist = RACE_ARTIST,
+                    thumbnailUrl = null,
+                    durationText = "2:00",
+                ),
+            )
+        }
+
+        override suspend fun stream(trackId: String, request: StreamRequest): SourceStream? =
+            format?.let { SourceStream(url = "https://$displayName/$trackId", format = it) }
+    }
+
+    private fun raceTarget() = TrackMatcher.Target(RACE_TITLE, RACE_ARTIST, durationSec = 120)
+
+    /**
+     * The '9:45' case itself, as a race rather than a queue.
+     *
+     * JioSaavn answered in ~0.4s and the module in ~13.5s. Walked in rank order
+     * the module's slowness was JioSaavn's too, so the whole lookup lost the
+     * race against YouTube and the listener got 160kbps Opus. Raced, the quick
+     * answer is the one that starts the track — and the slow source is left to
+     * [SourceResolver.upgradeFor], which judges it against what is playing.
+     */
+    @Test
+    fun `takes the quick answer rather than waiting for a slow better one`() = runBlocking {
+        val slow = FakeSource("Ricky's Addon", answerAfterMs = 2_000, format = StreamFormat("flac"))
