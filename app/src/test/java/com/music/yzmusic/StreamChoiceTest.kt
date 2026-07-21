@@ -65,3 +65,31 @@ class StreamChoiceTest {
      * honoured after the map has been pushed well past its limit.
      */
     @Test
+    fun `overflow drops the oldest choice rather than all of them`() {
+        repeat(40) { StreamChoice.remember("track-$it", stream("host-$it.example"), substituted = true) }
+
+        // The newest write is always honoured under either policy: it is the
+        // track being read right now.
+        assertNotNull(StreamChoice.of("track-39"))
+        assertEquals("https://host-39.example/track.mp4", StreamChoice.of("track-39")?.url)
+
+        // This is the assertion that separates evicting-the-oldest from
+        // emptying the map. `track-20` is one of the twenty most recent writes,
+        // so any bounded map worth the name still holds it — but a `clear()` on
+        // overflow throws it out along with everything else, and the cache entry
+        // it was standing behind becomes free for another source to finish.
+        assertNotNull(
+            "a recent choice was evicted, so overflow is still emptying the map wholesale",
+            StreamChoice.of("track-20"),
+        )
+        assertEquals("https://host-20.example/track.mp4", StreamChoice.of("track-20")?.url)
+    }
+
+    /** Releasing a track lets the next resolve decide afresh. */
+    @Test
+    fun `forgetting a choice reopens the question`() {
+        StreamChoice.remember("track-5", stream("aac.saavncdn.com"), substituted = true)
+        StreamChoice.forget("track-5")
+        assertNull(StreamChoice.of("track-5"))
+    }
+}
