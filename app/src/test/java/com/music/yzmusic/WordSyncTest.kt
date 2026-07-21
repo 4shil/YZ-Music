@@ -165,3 +165,65 @@ class WordSyncTest {
     // ---- LyricsPlus / YouLy+ syllables --------------------------------------
 
     @Test
+    fun `merges lyricsplus syllables on their trailing space`() {
+        val lines = LyricsPlus.parse(
+            LyricsPlus.Response(
+                type = "Word",
+                lyrics = listOf(
+                    LyricsPlus.Line(
+                        time = 30_189,
+                        duration = 2_340,
+                        text = "long enough",
+                        syllabus = listOf(
+                            LyricsPlus.Syllable(time = 30_189, duration = 341, text = "long "),
+                            LyricsPlus.Syllable(time = 31_839, duration = 157, text = "e"),
+                            LyricsPlus.Syllable(time = 31_996, duration = 533, text = "nough"),
+                        ),
+                    ),
+                ),
+            ),
+        ).sung()
+        val line = lines.single()
+        assertEquals("long enough", line.text)
+        assertEquals(listOf("long", "enough"), line.words.map { it.text })
+        assertEquals(30_189L, line.words[0].startMs)
+        assertEquals(32_529L, line.words[1].endMs)
+    }
+
+    // ---- Instrumental breaks -------------------------------------------------
+
+    private fun lineSynced(vararg rows: Triple<Long, Long?, String>) = LyricsPlus.parse(
+        LyricsPlus.Response(
+            type = "Line",
+            lyrics = rows.map { (time, duration, text) ->
+                LyricsPlus.Line(time = time, duration = duration, text = text, syllabus = emptyList())
+            },
+        ),
+    )
+
+    /**
+     * "Qayde Se", as LyricsPlus actually serves it: `type: Line`, empty
+     * syllabus, and each line's duration running right up to the next stamp.
+     * Ten seconds between stamps is one line sung over ten seconds, not a
+     * ten-second break, so nothing but the intro should be marked.
+     */
+    @Test
+    fun `a slowly sung line-synced song gets no break between its lines`() {
+        val lines = lineSynced(
+            Triple(19_740L, 10_020L, "दिल जला के मुस्कुराने की जो आदत हुई है मुझे"),
+            Triple(29_760L, 9_910L, "लग रहा है, क़ायदे से अब मोहब्बत हुई है मुझे"),
+            Triple(39_670L, 10_000L, "मेरी तुम्हीं से है जवाब-दारी"),
+        )
+        // Only the 19.7s run-up before the first word.
+        assertEquals(1, lines.count { it.isGap })
+        assertTrue(lines.first().isGap)
+        assertEquals(3, lines.sung().size)
+    }
+
+    /**
+     * The bug this guards: a break stamped at the same millisecond as a line
+     * shadows it forever, because the cursor takes the *last* line whose stamp
+     * has passed. Every line would show as a note and none would light up.
+     */
+    @Test
+    fun `no break ever shares a stamp with the line it follows`() {
