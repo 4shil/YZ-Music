@@ -688,3 +688,66 @@ class SourcesTest {
     @Test
     fun `takes the quick answer rather than waiting for a slow better one`() = runBlocking {
         val slow = FakeSource("Ricky's Addon", answerAfterMs = 2_000, format = StreamFormat("flac"))
+        val quick = FakeSource("JioSaavn", answerAfterMs = 5, format = StreamFormat("mp4", kbps = 320))
+        val elapsed = measureTimeMillis {
+            val (source, stream) = SourceResolver.bestAcross(
+                listOf(slow, quick), raceTarget(), StreamRequest.Lossless,
+            )!!
+            assertEquals("JioSaavn", source.displayName)
+            assertEquals(320, stream.format.kbps)
+        }
+        // Nowhere near the slow source's two seconds.
+        assertTrue("took ${elapsed}ms, so it waited for the slow source", elapsed < 1_000)
+        // Asked, though — being beaten is not the same as being skipped, and
+        // skipping is the bug this replaced.
+        assertTrue(slow.asked)
+    }
+
+    /**
+     * A slow source is cancelled once an answer is in hand rather than left
+     * running: nothing is waiting on it, and the second look re-asks it
+     * properly. Left running it would spend a listener's radio for nothing.
+     */
+    @Test
+    fun `abandons the sources still running once it has an answer`() = runBlocking {
+        val slow = FakeSource("Ricky's Addon", answerAfterMs = 2_000, format = StreamFormat("flac"))
+        val quick = FakeSource("JioSaavn", answerAfterMs = 5, format = StreamFormat("mp4", kbps = 320))
+        SourceResolver.bestAcross(listOf(slow, quick), raceTarget(), StreamRequest.Lossless)
+        assertTrue("the slow source was left running", slow.cancelled)
+    }
+
+    /**
+     * Answers that arrive together are still ranked. Racing gives up ordering
+     * between a fast source and a slow one; it does not give up ordering
+     * between two that answered at the same moment.
+     */
+    @Test
+    fun `prefers the better of two answers that arrive together`() = runBlocking {
+        val worse = FakeSource("Ricky's Addon", answerAfterMs = 5, format = StreamFormat("mp3", kbps = 128))
+        val better = FakeSource("JioSaavn", answerAfterMs = 5, format = StreamFormat("mp4", kbps = 320))
+        val (source, stream) = SourceResolver.bestAcross(
+            listOf(worse, better), raceTarget(), StreamRequest.Lossless,
+        )!!
+        assertEquals("JioSaavn", source.displayName)
+        assertEquals(320, stream.format.kbps)
+    }
+
+    /**
+     * A source that simply doesn't have the track must not end the race. This
+     * is the difference between "nobody has it" and "the first one to answer
+     * didn't have it", and returning null on the latter is how a catalogue that
+     * held the track went unheard.
+     */
+    @Test
+    fun `keeps waiting when the first source to answer has nothing`() = runBlocking {
+        val empty = FakeSource("Ricky's Addon", answerAfterMs = 5, format = null)
+        val holder = FakeSource("JioSaavn", answerAfterMs = 200, format = StreamFormat("mp4", kbps = 320))
+        val (source, _) = SourceResolver.bestAcross(
+            listOf(empty, holder), raceTarget(), StreamRequest.Lossless,
+        )!!
+        assertEquals("JioSaavn", source.displayName)
+    }
+
+    /** Nobody has it: the race ends when the last source has said so. */
+    @Test
+    fun `has nothing when no source holds the track`() = runBlocking {
