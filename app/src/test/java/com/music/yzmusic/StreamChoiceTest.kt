@@ -21,3 +21,17 @@ import org.junit.Test
  */
 class StreamChoiceTest {
 
+    private fun stream(host: String) = SourceStream(
+        url = "https://$host/track.mp4",
+        format = StreamFormat(codec = "mp4", kbps = 320),
+    )
+
+    @Before
+    @After
+    fun reset() {
+        // Ids used below, cleared both ways round so a failure can't leak into
+        // the next test through the shared object.
+        (0..80).forEach { StreamChoice.forget("track-$it") }
+    }
+
+    @Test
