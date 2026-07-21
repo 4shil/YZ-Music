@@ -41,3 +41,27 @@ class StreamChoiceTest {
     }
 
     @Test
+    fun `a track nothing has chosen for is free to resolve`() {
+        assertNull(StreamChoice.of("track-2"))
+    }
+
+    /** Only the substituted ones, so the recovery path can tell them apart. */
+    @Test
+    fun `remembers whether the copy came from a substitute`() {
+        StreamChoice.remember("track-3", stream("aac.saavncdn.com"), substituted = true)
+        StreamChoice.remember("track-4", stream("googlevideo.com"), substituted = false)
+        assertEquals(true, StreamChoice.isSubstitute("track-3"))
+        assertEquals(false, StreamChoice.isSubstitute("track-4"))
+    }
+
+    /**
+     * The eviction that mattered. Overflow used to `clear()` the whole map,
+     * which releases every track being served — including ones with bytes
+     * half-written under a key only their own stream may finish.
+     *
+     * Read-ahead made this reachable: it pins the next track and caches its
+     * bytes before the listener gets there, so a pin now has to survive other
+     * tracks being remembered in between. The most recent entries must still be
+     * honoured after the map has been pushed well past its limit.
+     */
+    @Test
