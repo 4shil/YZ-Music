@@ -354,3 +354,35 @@ class WordSyncTest {
     }
 
     @Test
+    fun `each word blooms and lets go rather than staying lit`() {
+        val word = LyricLine(0, "ah", listOf(LyricWord(0, 1_000, "ah")))
+        // Dark at both ends of the word, brightest somewhere in the middle.
+        assertEquals(0f, word.glowIntensity(0), 0.01f)
+        assertEquals(0f, word.glowIntensity(1_000), 0.01f)
+        assertTrue(word.glowIntensity(500) > 0.9f)
+    }
+
+    @Test
+    fun `pauses between and after words are dark`() {
+        val gapped = LyricLine(
+            timeMs = 0,
+            text = "one two",
+            words = listOf(LyricWord(0, 200, "one"), LyricWord(900, 1_100, "two")),
+        )
+        assertEquals(0f, gapped.glowIntensity(500), 0.001f)
+        assertEquals(0f, gapped.glowIntensity(5_000), 0.001f)
+    }
+
+    @Test
+    fun `a line with no word timings never glows`() {
+        val plain = LyricLine(0, "no timings here")
+        assertEquals(0f, plain.glowIntensity(500), 0.001f)
+    }
+
+    @Test
+    fun `a line with no word timings reveals whole`() {
+        val plain = LyricLine(1_000, "no timings here")
+        assertEquals(0f, plain.revealedChars(999), 0.01f)
+        assertEquals(15f, plain.revealedChars(1_000), 0.01f)
+    }
+}
