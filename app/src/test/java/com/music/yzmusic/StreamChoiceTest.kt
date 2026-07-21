@@ -21,3 +21,23 @@ import org.junit.Test
  */
 class StreamChoiceTest {
 
+    private fun stream(host: String) = SourceStream(
+        url = "https://$host/track.mp4",
+        format = StreamFormat(codec = "mp4", kbps = 320),
+    )
+
+    @Before
+    @After
+    fun reset() {
+        // Ids used below, cleared both ways round so a failure can't leak into
+        // the next test through the shared object.
+        (0..80).forEach { StreamChoice.forget("track-$it") }
+    }
+
+    @Test
+    fun `a remembered choice is handed back`() {
+        StreamChoice.remember("track-1", stream("aac.saavncdn.com"), substituted = true)
+        assertEquals("https://aac.saavncdn.com/track.mp4", StreamChoice.of("track-1")?.url)
+    }
+
+    @Test
