@@ -751,3 +751,226 @@ class SourcesTest {
     /** Nobody has it: the race ends when the last source has said so. */
     @Test
     fun `has nothing when no source holds the track`() = runBlocking {
+        val a = FakeSource("Ricky's Addon", answerAfterMs = 5, format = null)
+        val b = FakeSource("JioSaavn", answerAfterMs = 10, format = null)
+        assertNull(SourceResolver.bestAcross(listOf(a, b), raceTarget(), StreamRequest.Lossless))
+    }
+
+    /**
+     * The 'Bounce' case: a source whose answer is *refused* must not hold up one
+     * whose answer is taken.
+     *
+     * This is the upgrade path's shape — [SourceResolver.upgradeFor] passes a
+     * predicate that drops anything [SourceResolver.worthSwapping] rejects — and
+     * it went wrong differently from the '9:45' case. Nothing was skipped here:
+     * the slow module was asked, answered 128kbps, and was correctly refused.
+     * The cost was that it was asked *first and alone*, so the 320kbps answer
+     * that did get taken waited 12.65s behind a stream nobody wanted.
+     */
+    @Test
+    fun `a refused answer from a slow source does not hold up an accepted one`() = runBlocking {
+        val playing = StreamFormat(codec = "opus", kbps = 141)
+        val slowRefused = FakeSource("Ricky's Addon", answerAfterMs = 2_000, format = StreamFormat("mp3", kbps = 128))
+        val quickTaken = FakeSource("JioSaavn", answerAfterMs = 5, format = StreamFormat("mp4", kbps = 320))
+        val elapsed = measureTimeMillis {
+            val (source, stream) = SourceResolver.bestAcross(
+                listOf(slowRefused, quickTaken),
+                raceTarget(),
+                StreamRequest.Lossless,
+                waitForAll = true,
+                strictLength = true,
+            ) { _, candidate -> SourceResolver.worthSwapping(candidate.format, playing) }!!
+            assertEquals("JioSaavn", source.displayName)
+            assertEquals(320, stream.format.kbps)
+        }
+        assertTrue("took ${elapsed}ms — it waited for the refused answer", elapsed < 1_000)
+    }
+
+    /**
+     * A refused answer is not an answer. When the only quick source is one whose
+     * stream fails the predicate, the race has to keep running rather than
+     * report that nothing was found.
+     */
+    @Test
+    fun `keeps waiting when the quick answer is refused`() = runBlocking {
+        val playing = StreamFormat(codec = "opus", kbps = 141)
+        val quickRefused = FakeSource("Ricky's Addon", answerAfterMs = 5, format = StreamFormat("mp3", kbps = 128))
+        val slowTaken = FakeSource("JioSaavn", answerAfterMs = 200, format = StreamFormat("mp4", kbps = 320))
+        val (source, _) = SourceResolver.bestAcross(
+            listOf(quickRefused, slowTaken),
+            raceTarget(),
+            StreamRequest.Lossless,
+        ) { _, candidate -> SourceResolver.worthSwapping(candidate.format, playing) }!!
+        assertEquals("JioSaavn", source.displayName)
+    }
+
+    // ---- Asking ------------------------------------------------------------
+
+    /**
+     * What a source is asked for. The raw title is never one of the queries:
+     * a catalogue that lists "Paniyon Sa" has never stored the film name
+     * YouTube prints alongside it, and scoring against words it doesn't hold
+     * is how a source that had the track answered as if it didn't.
+     */
+    @Test
+    fun `asks for the title a catalogue would file the track under`() {
+        val queries = TrackMatcher.queries(
+            TrackMatcher.Target("Paniyon Sa (From \"Satyameva Jayate\") | Official Video", "Atif Aslam, Tulsi Kumar"),
+        )
+        assertEquals(listOf("paniyon sa atif aslam", "paniyon sa"), queries)
+    }
+
+    /** A version marker is part of what to search for, not packaging to drop. */
+    @Test
+    fun `keeps the version marker in the query`() {
+        assertEquals(
+            "shape of you acoustic",
+            TrackMatcher.queries(TrackMatcher.Target("Shape of You (Acoustic)", "")).single(),
+        )
+    }
+
+    @Test
+    fun `has nothing to ask for without a title`() {
+        assertTrue(TrackMatcher.queries(TrackMatcher.Target("", "Atif Aslam")).isEmpty())
+    }
+
+    // ---- The mid-track swap guard ------------------------------------------
+
+    /**
+     * The check standing between a listener and having their audio cut for a
+     * different recording. Stricter than ordinary matching on purpose, and it
+     * refuses anything it cannot actually check.
+     */
+    @Test
+    fun `only swaps in a copy of demonstrably the same length`() {
+        val playing = TrackMatcher.Target("Jo Tere Sang", "Jeet Gannguli", durationSec = 306)
+        assertTrue(TrackMatcher.withinSeconds(song("Jo Tere Sang", "x", "5:06"), playing, 2))
+        assertTrue(TrackMatcher.withinSeconds(song("Jo Tere Sang", "x", "5:04"), playing, 2))
+        assertFalse(TrackMatcher.withinSeconds(song("Jo Tere Sang", "x", "5:12"), playing, 2))
+        // A candidate that never said how long it is cannot be checked, and an
+        // unverifiable swap is not worth making.
+        assertFalse(TrackMatcher.withinSeconds(song("Jo Tere Sang", "x"), playing, 2))
+        // Neither is one where nothing is playing to compare against.
+        assertFalse(
+            TrackMatcher.withinSeconds(
+                song("Jo Tere Sang", "x", "5:06"),
+                TrackMatcher.Target("Jo Tere Sang", "Jeet Gannguli"),
+                2,
+            ),
+        )
+    }
+
+    // ---- Stream URLs a module should not be trusted with --------------------
+
+    /**
+     * The August 2026 Tidal fault: the module pasted its own origin into the
+     * path of the URL it was building, and the server 404'd every one. Rejected
+     * on sight so the resolver walks on to the next source instead of spending
+     * a playback attempt discovering it.
+     */
+    @Test
+    fun `rejects a stream URL carrying a second copy of its own origin`() {
+        val blob = "eyJhbGciOiJIUzI1NiJ9"
+        assertTrue(
+            ModuleSource.malformed(
+                "https://sp-ad-fa.audio.tidal.com/mediatracks/$blob/" +
+                    "https://sp-ad-fa.audio.tidal.com/mediatracks/$blob/0.mp4?token=1756000000~c2ln",
+            ),
+        )
+        // The URL the module meant to send, which must still be played.
+        assertFalse(
+            ModuleSource.malformed(
+                "https://sp-ad-fa.audio.tidal.com/mediatracks/$blob/0.mp4?token=1756000000~c2ln",
+            ),
+        )
+    }
+
+    /**
+     * Two schemes in a URL is not the fault — handing a proxy its target is a
+     * legitimate thing for a module to do, in the query or in the path, and
+     * refusing those would take working catalogues offline.
+     */
+    @Test
+    fun `accepts a URL that passes another URL along to a proxy`() {
+        assertFalse(ModuleSource.malformed("https://cdn.example.com/get?url=https://real.host/f.flac"))
+        assertFalse(ModuleSource.malformed("https://cdn.example.com/https://real.host/f.flac"))
+    }
+
+    /**
+     * The Xiaomi report, which failed a step earlier than the doubled URL: the
+     * player threw `HttpDataSourceException: Malformed URL` out of OkHttp's
+     * parser without making a request. Anything that parser refuses has to be
+     * refused here too, or it becomes an unplayable track.
+     */
+    @Test
+    fun `rejects a stream URL the player's own parser would refuse`() {
+        assertTrue(ModuleSource.malformed("/mediatracks/blob/0.mp4"))
+        assertTrue(ModuleSource.malformed("sp-ad-fa.audio.tidal.com/mediatracks/blob/0.mp4"))
+        assertTrue(ModuleSource.malformed("yzmusic://watch?v=rpemDBaFK0c"))
+        assertTrue(ModuleSource.malformed(""))
+        // A module returning its error text, or nothing, in the URL field.
+        assertTrue(ModuleSource.malformed("undefined"))
+        assertTrue(ModuleSource.malformed("null"))
+    }
+
+    /**
+     * A module gets to name a server, not a file on this device. Anything but
+     * http(s) is refused, so a module cannot have the player read local storage
+     * on its behalf.
+     */
+    @Test
+    fun `refuses to let a module point the player at anything but http`() {
+        assertTrue(ModuleSource.malformed("file:///data/data/com.music.yzmusic/files/x.flac"))
+        assertTrue(ModuleSource.malformed("content://media/external/audio/media/42"))
+        assertTrue(ModuleSource.malformed("ftp://cdn.example.com/f.mp3"))
+    }
+
+    @Test
+    fun `accepts an origin with no path of its own`() {
+        // Nothing duplicated and the parser is happy; whether a server answers
+        // it is for the server to say.
+        assertFalse(ModuleSource.malformed("https://sp-ad-fa.audio.tidal.com"))
+    }
+
+    // ---- Quality tiers -----------------------------------------------------
+
+    /**
+     * Every module spells its quality differently, and the spelling is all
+     * there is to go on when choosing which catalogue to open a track from.
+     */
+    @Test
+    fun `reads a tier out of whatever a module calls it`() {
+        assertEquals("LOSSLESS", ModuleSource.qualityTier("LOSSLESS"))
+        assertEquals("LOSSLESS", ModuleSource.qualityTier("FLAC 16-bit / 44.1kHz"))
+        assertEquals("LOSSLESS", ModuleSource.qualityTier("hires-96"))
+        assertEquals("HIGH", ModuleSource.qualityTier("HIGH"))
+        assertEquals("HIGH", ModuleSource.qualityTier("320kbps"))
+        assertEquals("LOW", ModuleSource.qualityTier("128kbps"))
+        assertEquals("LOW", ModuleSource.qualityTier("LOW"))
+        assertNull(ModuleSource.qualityTier(""))
+        assertNull(ModuleSource.qualityTier("Deadbeat"))
+    }
+
+    /** The codec wins the tie: a bit depth alongside FLAC is still FLAC. */
+    @Test
+    fun `does not mistake a bit depth for a bitrate tier`() {
+        assertEquals("LOSSLESS", ModuleSource.qualityTier("24-bit / 192 kHz"))
+        assertEquals("LOSSLESS", ModuleSource.qualityTier("FLAC 128"))
+    }
+
+    @Test
+    fun `orders tiers worst to best`() {
+        assertEquals(listOf("LOW", "HIGH", "LOSSLESS"), ModuleSource.TIERS)
+    }
+
+    // ---- Runtime parsing ---------------------------------------------------
+
+    @Test
+    fun `reads a runtime off a queue row`() {
+        assertEquals(225, TrackMatcher.secondsOf("3:45"))
+        assertEquals(3723, TrackMatcher.secondsOf("1:02:03"))
+        assertNull(TrackMatcher.secondsOf(null))
+        assertNull(TrackMatcher.secondsOf("live"))
+        assertNull(TrackMatcher.secondsOf("0:00"))
+    }
+}
