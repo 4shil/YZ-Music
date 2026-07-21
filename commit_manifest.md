@@ -61,3 +61,34 @@ As mandated by policy, the following dates contain **zero** commits:
 ### Commit 5: `97d3f1d`
 - **Message**: `feat(playback): implement Media3 playback engine, crossfade, and smart analysis`
 - **Files Changed**: `app/src/main/java/com/music/yzmusic/playback/*`
+- **Purpose**: Implements `PlaybackService`, `PlayerConnection`, `CrossfadeController`, `AudioCache`, `QualityUpgrade`, `StreamChoice`, and smart transitions using `yzmusic://` synthetic URIs and fallback extras.
+- **Validation**: Unit tests and playback transition logic verified.
+- **Evidence Source**: Media3 session and playback architecture.
+- **Confidence**: HIGH
+
+### Commit 6: `0ec68f8`
+- **Message**: `feat(download): implement high-fidelity download manager and media tagger`
+- **Files Changed**: `app/src/main/java/com/music/yzmusic/download/*`
+- **Purpose**: Implements background downloading, FLAC Vorbis vendor tags (`YZ Music`), MP4 atom metadata, WebM tagging, and storage management in the device Music directory.
+- **Validation**: `MediaTaggerTest` passed.
+- **Evidence Source**: Audio downloader and media tagger implementations.
+- **Confidence**: HIGH
+
+### Commit 7: `f02526b`
+- **Message**: `feat(ui): implement Material 3 theme, YZMusicIcons, and custom typography`
+- **Files Changed**: `app/src/main/java/com/music/yzmusic/ui/theme/*`, `app/src/main/java/com/music/yzmusic/ui/icons/YZMusicIcons.kt`, `app/src/main/res/drawable/*`, `themes.xml`
+- **Purpose**: Implements dynamic artwork-extracted color palettes, custom `YZMusicIcons` vector set, Telegram-style typography, and theme definitions.
+- **Validation**: Compose theme compilation passed.
+- **Evidence Source**: Design assets and UI theme tokens.
+- **Confidence**: HIGH
+
+### Commit 8: `1cc27ce`
+- **Message**: `feat(ui): implement core player screens, now playing, and components`
+- **Files Changed**: `app/src/main/java/com/music/yzmusic/MainActivity.kt`, `ui/player/*`, `ui/components/*`, `ui/screens/*`, `ui/replay/*`, `widget/*`, `debug/preview/*`
+- **Purpose**: Implements `MainActivity`, `NowPlayingScreen`, frosted glass bars, search, library, local music, replay stories, and home screen interactive widgets.
+- **Validation**: Compose UI preview and activity compilation verified.
+- **Evidence Source**: Jetpack Compose screen components and layouts.
+- **Confidence**: HIGH
+
+### Commit 9: `dc3df6d`
+- **Message**: `i18n: add localized UI strings and resources for global language support`
