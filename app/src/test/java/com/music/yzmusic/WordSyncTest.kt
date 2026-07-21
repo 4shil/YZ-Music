@@ -254,3 +254,103 @@ class WordSyncTest {
             Triple(1_000L, 2_000L, "before the solo"),
             Triple(30_000L, 2_000L, "after the solo"),
         )
+        val gap = lines.single { it.isGap && it.timeMs > 0 }
+        // The note lands when the singing stopped, not when the next line was due.
+        assertEquals(3_000L, gap.timeMs)
+    }
+
+    /** Same for line-synced TTML, where the end lives on the `<p>`. */
+    @Test
+    fun `line-synced ttml takes its break from the paragraph end`() {
+        val lines = TtmlLyrics.parse(
+            """
+            <tt><body><div>
+              <p begin="1.0" end="3.0">before the solo</p>
+              <p begin="30.0" end="32.0">after the solo</p>
+            </div></body></tt>
+            """.trimIndent(),
+        )
+        assertEquals(2, lines.sung().size)
+        assertEquals(3_000L, lines.single { it.isGap && it.timeMs > 0 }.timeMs)
+    }
+
+    // ---- The sweep's own arithmetic -----------------------------------------
+
+    private val line = LyricLine(
+        timeMs = 1_000,
+        text = "one two",
+        words = listOf(
+            LyricWord(1_000, 1_500, "one"),
+            LyricWord(2_000, 2_400, "two"),
+        ),
+    )
+
+    @Test
+    fun `reveal runs across a word over that word's own span`() {
+        assertEquals(0f, line.revealedChars(500), 0.01f)
+        assertEquals(0f, line.revealedChars(1_000), 0.01f)
+        // Halfway through "one".
+        assertEquals(1.5f, line.revealedChars(1_250), 0.01f)
+        assertEquals(3f, line.revealedChars(1_500), 0.01f)
+    }
+
+    @Test
+    fun `the pause between words fills the space between them`() {
+        // 1500..2000 is silence; the space at index 3 fills across it rather
+        // than the highlight sitting still on the end of "one".
+        assertEquals(3.5f, line.revealedChars(1_750), 0.01f)
+        assertEquals(4f, line.revealedChars(2_000), 0.01f)
+    }
+
+    @Test
+    fun `reveal covers the whole line once the last word is done`() {
+        assertEquals(7f, line.revealedChars(2_400), 0.01f)
+        assertEquals(7f, line.revealedChars(99_000), 0.01f)
+    }
+
+    @Test
+    fun `a repeated word lines up with its own occurrence`() {
+        val repeated = LyricLine(
+            timeMs = 0,
+            text = "go go go",
+            words = listOf(
+                LyricWord(0, 100, "go"),
+                LyricWord(1_000, 1_100, "go"),
+                LyricWord(2_000, 2_100, "go"),
+            ),
+        )
+        // Start of the third "go" is character 6, not character 0.
+        assertEquals(6f, repeated.revealedChars(2_000), 0.01f)
+    }
+
+    // ---- Glow intensity ------------------------------------------------------
+
+    /** Peak intensity reached anywhere inside a word of the given length. */
+    private fun peakGlowFor(heldMs: Long): Float {
+        val held = LyricLine(
+            timeMs = 0,
+            text = "ah",
+            words = listOf(LyricWord(0, heldMs, "ah")),
+        )
+        return (0..heldMs step 5).maxOf { held.glowIntensity(it) }
+    }
+
+    @Test
+    fun `a held note blooms and patter barely does`() {
+        val slow = peakGlowFor(900)
+        val quick = peakGlowFor(120)
+        assertEquals(1f, slow, 0.02f)
+        assertTrue("patter should stay dim, was $quick", quick < 0.3f)
+        assertTrue("a held note should far outglow patter", slow > quick * 3f)
+    }
+
+    @Test
+    fun `intensity climbs with how long the word is held`() {
+        val steps = listOf(150L, 300L, 500L, 800L).map { peakGlowFor(it) }
+        steps.zipWithNext { lower, higher ->
+            assertTrue("$lower should not exceed $higher", lower <= higher + 0.001f)
+        }
+        assertTrue("the shortest and longest should differ", steps.last() - steps.first() > 0.5f)
+    }
+
+    @Test
