@@ -289,3 +289,99 @@ class SourcesTest {
     @Test
     fun `prefers a credited match over a runtime-vouched one`() {
         val target = TrackMatcher.Target("Jhak Maar Ke", "Pritam, Neeraj Shridhar", durationSec = 233)
+        val vouched = song("Jhak Maar Ke", "Some Uploader", duration = "3:53")
+        val credited = song("Jhak Maar Ke", "Neeraj Shridhar", duration = "3:53")
+        assertEquals(credited, TrackMatcher.best(listOf(vouched, credited), target))
+    }
+
+    /** A name inside another name is not a shared credit. */
+    @Test
+    fun `refuses an artist whose name merely contains the one asked for`() {
+        assertFalse(matches(song("No One Knows", "Queens of the Stone Age"), "No One Knows", "Queen"))
+    }
+
+    /**
+     * A different take is a different recording, and the direction it is asked
+     * for in doesn't change that.
+     */
+    @Test
+    fun `refuses a different take of the same song`() {
+        assertFalse(matches(song("Shape of You (Acoustic)", "Ed Sheeran"), "Shape of You", "Ed Sheeran"))
+        assertFalse(matches(song("Shape of You", "Ed Sheeran"), "Shape of You (Acoustic)", "Ed Sheeran"))
+        assertFalse(matches(song("Creep (Live)", "Radiohead"), "Creep", "Radiohead"))
+        assertFalse(matches(song("Faded", "Alan Walker"), "Faded (Slowed + Reverb)", "Alan Walker"))
+        // A stem carries the right title and the right artist and is not the
+        // song — this one was one candidate away from playing.
+        assertFalse(
+            matches(
+                song("Apna Bana Le - Arijit Singh Vocals Only", "Arijit Singh, Sachin-Jigar"),
+                title = "Apna Bana Le (From \"Bhediya\")",
+                artist = "Arijit Singh",
+            ),
+        )
+        assertFalse(matches(song("Kesariya (Instrumental)", "Arijit Singh"), "Kesariya", "Arijit Singh"))
+        // Both sides saying the same thing is still a match.
+        assertTrue(matches(song("Creep (Live)", "Radiohead"), "Creep [Live]", "Radiohead"))
+    }
+
+    /** Version-shaped words that describe the ordinary release, not a new take. */
+    @Test
+    fun `treats an album or radio version as the plain track`() {
+        assertTrue(matches(song("Africa", "Toto"), "Africa (Album Version)", "Toto"))
+        assertTrue(matches(song("Clocks", "Coldplay"), "Clocks (Radio Edit)", "Coldplay"))
+    }
+
+    /** The signal a title can't give: a loop, a snippet, or a whole album side. */
+    @Test
+    fun `refuses a candidate whose runtime is nowhere near`() {
+        assertFalse(
+            matches(
+                song("Levitating", "Dua Lipa", duration = "1:00:12"),
+                title = "Levitating",
+                artist = "Dua Lipa",
+                durationSec = 203,
+            ),
+        )
+        // A few seconds of trimmed silence is not a different recording.
+        assertTrue(
+            matches(
+                song("Levitating", "Dua Lipa", duration = "3:25"),
+                title = "Levitating",
+                artist = "Dua Lipa",
+                durationSec = 203,
+            ),
+        )
+    }
+
+    /** With no artist to check against, the title alone has to carry it. */
+    @Test
+    fun `falls back to title alone when no artist is known`() {
+        assertTrue(matches(song("Clair de Lune", "Debussy"), "Clair de Lune", ""))
+        assertFalse(matches(song("Reverie", "Debussy"), "Clair de Lune", ""))
+    }
+
+    // ---- Choosing between candidates ---------------------------------------
+
+    /**
+     * Search backends rank however they like. The right copy is the one whose
+     * runtime and credit agree, not the one that came back first.
+     */
+    @Test
+    fun `picks the closest candidate rather than the first acceptable one`() {
+        val target = TrackMatcher.Target("Paniyon Sa", "Atif Aslam", durationSec = 247)
+        val wrongLength = song("Paniyon Sa", "Atif Aslam", duration = "4:32")
+        val right = song("Paniyon Sa", "Atif Aslam, Tulsi Kumar", duration = "4:06")
+        assertEquals(right, TrackMatcher.best(listOf(wrongLength, right), target))
+    }
+
+    /**
+     * A declared tier is a reason to prefer one copy of a recording over
+     * another. It is not a reason to play a different recording — the DJ edit
+     * on a compilation carries the right title and the right artist, and only
+     * its runtime gives it away.
+     */
+    @Test
+    fun `refuses to let a lossless label outrank the right runtime`() {
+        val target = TrackMatcher.Target("Sakhiyaan", "Maninder Buttar", durationSec = 180)
+        val djEdit = song("Sakhiyaan", "Maninder Buttar", duration = "3:05")
+            .copy(albumName = "Punjabi Dj Holi songs", sourceQuality = "LOSSLESS")
