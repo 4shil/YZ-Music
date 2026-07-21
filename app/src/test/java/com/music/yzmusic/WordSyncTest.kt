@@ -109,3 +109,59 @@ class WordSyncTest {
     }
 
     @Test
+    fun `parses every ttml clock shape`() {
+        assertEquals(27_395L, TtmlLyrics.time("27.395"))
+        assertEquals(65_200L, TtmlLyrics.time("1:05.20"))
+        assertEquals(3_723_400L, TtmlLyrics.time("1:02:03.4"))
+        assertEquals(1_500L, TtmlLyrics.time("1.5s"))
+        assertEquals(250L, TtmlLyrics.time("250ms"))
+        assertNull(TtmlLyrics.time(""))
+        assertNull(TtmlLyrics.time(null))
+    }
+
+    @Test
+    fun `bad xml yields nothing rather than throwing`() {
+        assertEquals(emptyList<LyricLine>(), TtmlLyrics.parse("<tt><body><p begin="))
+    }
+
+    // ---- Enhanced LRC, as SimpMusic serves rich sync ------------------------
+
+    @Test
+    fun `reads word timings out of enhanced lrc`() {
+        val lines = EnhancedLrc.parse(
+            """
+            [00:27.39]<00:27.39>I <00:27.54>been <00:27.74>tryna <00:28.07>call
+            [00:30.18]<00:30.18>on <00:30.39>my <00:30.64>own
+            """.trimIndent(),
+        ).sung()
+        assertEquals(2, lines.size)
+        assertEquals("I been tryna call", lines[0].text)
+        assertEquals(listOf("I", "been", "tryna", "call"), lines[0].words.map { it.text })
+        // Only starts are written down, so a word ends where the next begins...
+        assertEquals(27_540L, lines[0].words[0].endMs)
+        // ...and the last word of a line ends where the next line starts.
+        assertEquals(30_180L, lines[0].words.last().endMs)
+    }
+
+    @Test
+    fun `plain lrc is left for the line-synced parser`() {
+        assertEquals(
+            emptyList<LyricLine>(),
+            EnhancedLrc.parse("[00:12.00] no word stamps here\n[00:15.00] none here either"),
+        )
+    }
+
+    @Test
+    fun `decodes the html entities simpmusic escapes`() {
+        val line = EnhancedLrc.parse("[00:01.00]<00:01.00>don&#x27;t <00:01.50>stop").sung().single()
+        assertEquals("don't stop", line.text)
+    }
+
+    @Test
+    fun `does not double-decode an escaped ampersand`() {
+        assertEquals("&#x27;", EnhancedLrc.decodeEntities("&amp;#x27;"))
+    }
+
+    // ---- LyricsPlus / YouLy+ syllables --------------------------------------
+
+    @Test
