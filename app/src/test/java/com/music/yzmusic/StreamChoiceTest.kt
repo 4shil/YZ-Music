@@ -35,3 +35,9 @@ class StreamChoiceTest {
     }
 
     @Test
+    fun `a remembered choice is handed back`() {
+        StreamChoice.remember("track-1", stream("aac.saavncdn.com"), substituted = true)
+        assertEquals("https://aac.saavncdn.com/track.mp4", StreamChoice.of("track-1")?.url)
+    }
+
+    @Test
