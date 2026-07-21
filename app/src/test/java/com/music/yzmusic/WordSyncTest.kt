@@ -227,3 +227,30 @@ class WordSyncTest {
      */
     @Test
     fun `no break ever shares a stamp with the line it follows`() {
+        val lines = lineSynced(
+            Triple(19_740L, 10_020L, "one"),
+            Triple(29_760L, 9_910L, "two"),
+            Triple(39_670L, 10_000L, "three"),
+        )
+        val sungStamps = lines.sung().map { it.timeMs }.toSet()
+        val clashes = lines.filter { it.isGap && it.timeMs in sungStamps }
+        assertEquals(emptyList<LyricLine>(), clashes)
+    }
+
+    /** With no duration to go on, the distance to the next stamp proves nothing. */
+    @Test
+    fun `a line-synced source with no durations gets no synthesised breaks`() {
+        val lines = lineSynced(
+            Triple(1_000L, null, "one"),
+            Triple(20_000L, null, "two"),
+        )
+        assertEquals(0, lines.count { it.isGap })
+    }
+
+    /** A stated end well short of the next line is a real break, and is drawn. */
+    @Test
+    fun `a stated line end short of the next stamp is marked as a break`() {
+        val lines = lineSynced(
+            Triple(1_000L, 2_000L, "before the solo"),
+            Triple(30_000L, 2_000L, "after the solo"),
+        )
