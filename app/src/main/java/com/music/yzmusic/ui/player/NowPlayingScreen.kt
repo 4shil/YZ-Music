@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.player
+package com.music.yzmusic.ui.player
 
 import android.database.ContentObserver
 import android.graphics.Bitmap
@@ -77,8 +77,12 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragHandle
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
+import androidx.compose.material.icons.rounded.Downloading
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
+import com.music.yzmusic.download.Downloads
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MoreHoriz
@@ -607,6 +611,7 @@ fun NowPlayingScreen(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onToggleAutoplay: () -> Unit,
+    onDownload: () -> Unit = {},
     onJumpTo: (Int) -> Unit,
     onRemoveFromQueue: (Int) -> Unit,
     onMoveInQueue: (Int, Int) -> Unit,
@@ -637,6 +642,8 @@ fun NowPlayingScreen(
 
     val syncedLyricsEnabled by AppSettings.syncedLyrics.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
+    val activeDownloads by Downloads.active.collectAsStateWithLifecycle()
+    val savedDownloads by Downloads.saved.collectAsStateWithLifecycle()
 
     // Animated cover art: the looping video some labels publish alongside a
     // release, laid over the sleeve. A miss is the normal answer — see
@@ -700,37 +707,6 @@ fun NowPlayingScreen(
     var lyricsOpen by remember { mutableStateOf(false) }
     LaunchedEffect(song.videoId) { lyricsOpen = false }
 
-    // Back out of the lyrics panel to the player, and only from the player
-    // itself out to the mini player.
-    //
-    // The BackHandler can't do that on its own. The player is a
-    // ModalBottomSheet, and from API 33 the sheet puts its own dismiss
-    // straight onto the window's OnBackInvokedDispatcher when its layout
-    // attaches — at PRIORITY_DEFAULT, which is also where the dialog
-    // dispatcher that every BackHandler in here feeds ends up. Equal
-    // priority, and the platform picks whichever registered last: the
-    // sheet's, every time. So back put the whole player away with the panel
-    // still open on top of it.
-    //
-    // Outranking it while the panel is open is the fix, and only while it is
-    // open: shut, the sheet keeps its own back handling and with it the
-    // predictive-back shrink, which is the right animation for a gesture
-    // that really is dismissing the player. Below 33 there is no window
-    // dispatcher to outrank and the BackHandler is already the newest
-    // callback on the dialog's, so it wins there unaided.
-    BackHandler(enabled = lyricsOpen) { lyricsOpen = false }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        val view = LocalView.current
-        DisposableEffect(view, lyricsOpen) {
-            val callback = if (lyricsOpen) {
-                OverlayBack.register(view) { lyricsOpen = false }
-            } else {
-                null
-            }
-            onDispose { OverlayBack.unregister(view, callback) }
-        }
-    }
-
     // 0 = full sleeve, 1 = queue. Everything that moves reads off this.
     //
     // Plain state driven by an animation rather than [animateFloatAsState],
@@ -750,6 +726,53 @@ fun NowPlayingScreen(
     // [QUEUE_CARRY_FRACTION] has to fall back to 0 just as surely as one that
     // carried has to finish reaching 1.
     var queueReleased by remember { mutableIntStateOf(0) }
+
+    // Back out of the lyrics panel to the player, and only from the player
+    // itself out to the mini player.
+    //
+    // The BackHandler can't do that on its own. The player is a
+    // ModalBottomSheet, and from API 33 the sheet puts its own dismiss
+    // straight onto the window's OnBackInvokedDispatcher when its layout
+    // attaches — at PRIORITY_DEFAULT, which is also where the dialog
+    // dispatcher that every BackHandler in here feeds ends up. Equal
+    // priority, and the platform picks whichever registered last: the
+    // sheet's, every time. So back put the whole player away with the panel
+    // still open on top of it.
+    //
+    // Outranking it while the panel is open is the fix, and only while it is
+    // open: shut, the sheet keeps its own back handling and with it the
+    // predictive-back shrink, which is the right animation for a gesture
+    // that really is dismissing the player. Below 33 there is no window
+    // dispatcher to outrank and the BackHandler is already the newest
+    // callback on the dialog's, so it wins there unaided.
+    BackHandler(enabled = lyricsOpen || queueOpen) {
+        if (queueOpen) {
+            queueOpen = false
+            queueReleased++
+        }
+        if (lyricsOpen) {
+            lyricsOpen = false
+        }
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val view = LocalView.current
+        DisposableEffect(view, lyricsOpen, queueOpen) {
+            val callback = if (lyricsOpen || queueOpen) {
+                OverlayBack.register(view) {
+                    if (queueOpen) {
+                        queueOpen = false
+                        queueReleased++
+                    }
+                    if (lyricsOpen) {
+                        lyricsOpen = false
+                    }
+                }
+            } else {
+                null
+            }
+            onDispose { OverlayBack.unregister(view, callback) }
+        }
+    }
     LaunchedEffect(queueOpen, queueDragging, queueReleased) {
         if (queueDragging) return@LaunchedEffect
         val target = if (queueOpen) 1f else 0f
@@ -1182,7 +1205,41 @@ fun NowPlayingScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(topStrip),
+                    .height(topStrip)
+                    .then(
+                        if (queueOpen || lyricsOpen) {
+                            Modifier.pointerInput(queueOpen, lyricsOpen) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, overSlop ->
+                                        if (overSlop > 0f) change.consume()
+                                    }
+                                    if (drag != null) {
+                                        var pulled = 0f
+                                        val velocity = VelocityTracker()
+                                        velocity.addPointerInputChange(drag)
+                                        verticalDrag(drag.id) { change ->
+                                            velocity.addPointerInputChange(change)
+                                            pulled += change.positionChange().y
+                                            change.consume()
+                                        }
+                                        val flick = velocity.calculateVelocity().y
+                                        if (pulled >= with(density) { 32.dp.toPx() } || flick >= QUEUE_FLICK_VELOCITY) {
+                                            haptics.play(Haptic.Tap)
+                                            if (queueOpen) {
+                                                queueOpen = false
+                                                queueReleased++
+                                            } else if (lyricsOpen) {
+                                                lyricsOpen = false
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Modifier
+                        }
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 if (!docked) {
@@ -1214,16 +1271,8 @@ fun NowPlayingScreen(
                     //    left unconsumed for the sheet to dismiss with, so the
                     //    player closes from the picture as well as from the
                     //    handle; up is taken here and drags the queue in.
-                    //  * The queue or the lyrics — the header those panels sit
-                    //    below, and nothing else. Down closes the player, up does
-                    //    nothing: there is no sleeve left to pull away from.
-                    //
-                    // The header is worked out from the state rather than read
-                    // off the sleeve, which is the whole point of doing it here:
-                    // the sleeve is still on its way for [QUEUE_TRAVEL_MS] after
-                    // the queue opens, and a hole that waited for it spent that
-                    // half second lying across a list the finger was already
-                    // scrolling.
+                    //  * The queue or the lyrics — downward gestures return to
+                    //    the full player without dismissing/closing the player.
                     .onGloballyPositioned { dismissBandSpace = it }
                     .pointerInput(Unit) {
                         awaitEachGesture {
@@ -1268,17 +1317,68 @@ fun NowPlayingScreen(
                                             queueReleased++
                                         },
                                     )
+                                } else if (queueOpen || queueSlide.floatValue > 0.01f) {
+                                    val fullTravel = (dismissBandBottom - dismissBandTop - HEADER_HEIGHT.toPx()).let {
+                                        if (it > 50f) it else with(density) { 300.dp.toPx() }
+                                    }
+                                    dragQueueOut(
+                                        down = down,
+                                        travel = fullTravel,
+                                        slide = queueSlide,
+                                        onHold = { queueDragging = it },
+                                        onSettle = { open ->
+                                            if (open != queueOpen) {
+                                                haptics.play(
+                                                    if (open) Haptic.Expand else Haptic.Tap,
+                                                )
+                                                queueOpen = open
+                                            }
+                                            queueReleased++
+                                        },
+                                    )
+                                } else if (lyricsOpen) {
+                                    dragLyricsOut(
+                                        down = down,
+                                        threshold = with(density) { 48.dp.toPx() },
+                                        onDismiss = {
+                                            haptics.play(Haptic.Tap)
+                                            lyricsOpen = false
+                                        },
+                                    )
                                 }
                                 return@awaitEachGesture
                             }
-                            // What detectVerticalDragGestures does, minus the
-                            // callbacks: cross the slop, then hold the gesture
-                            // to the end so nothing downstream of the first
-                            // event reaches the sheet either.
-                            val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, _ ->
-                                change.consume()
+                            if (panelUp) {
+                                val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, _ ->
+                                    change.consume()
+                                }
+                                if (drag != null) {
+                                    var pulled = 0f
+                                    val velocity = VelocityTracker()
+                                    velocity.addPointerInputChange(drag)
+                                    verticalDrag(drag.id) { change ->
+                                        velocity.addPointerInputChange(change)
+                                        pulled += change.positionChange().y
+                                        change.consume()
+                                    }
+                                    val flick = velocity.calculateVelocity().y
+                                    if (pulled >= with(density) { 48.dp.toPx() } || flick >= QUEUE_FLICK_VELOCITY) {
+                                        if (queueOpen) {
+                                            haptics.play(Haptic.Tap)
+                                            queueOpen = false
+                                            queueReleased++
+                                        } else if (lyricsOpen) {
+                                            haptics.play(Haptic.Tap)
+                                            lyricsOpen = false
+                                        }
+                                    }
+                                }
+                            } else {
+                                val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, _ ->
+                                    change.consume()
+                                }
+                                if (drag != null) verticalDrag(drag.id) { it.consume() }
                             }
-                            if (drag != null) verticalDrag(drag.id) { it.consume() }
                         }
                     }
                     .padding(horizontal = PLAYER_GUTTER),
@@ -1719,6 +1819,10 @@ fun NowPlayingScreen(
                         positionMs = positionMs,
                         isPlaying = isPlaying,
                         onSeekToLine = onSeek,
+                        onClose = {
+                            haptics.play(Haptic.Tap)
+                            lyricsOpen = false
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(top = HEADER_HEIGHT + 10.dp)
@@ -1754,6 +1858,11 @@ fun NowPlayingScreen(
                             onRemove = onRemoveFromQueue,
                             onMove = onMoveInQueue,
                             onClear = onClearQueue,
+                            onClose = {
+                                haptics.play(Haptic.Tap)
+                                queueOpen = false
+                                queueReleased++
+                            },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -2077,7 +2186,7 @@ fun NowPlayingScreen(
                 Spacer(Modifier.height(24.dp))
             }
 
-            // ---- Shuffle · Repeat · AutoPlay · Queue ----
+            // ---- Shuffle · Repeat · Download · Queue ----
             // These live here rather than in the queue panel so their state is
             // readable without opening anything.
             Row(
@@ -2111,12 +2220,24 @@ fun NowPlayingScreen(
                         else -> Haptic.Select
                     },
                 )
+                val isDownloaded = savedDownloads.containsKey(song.videoId)
+                val isDownloading = activeDownloads.containsKey(song.videoId)
+                val downloadIcon = when {
+                    isDownloaded -> Icons.Rounded.DownloadDone
+                    isDownloading -> Icons.Rounded.Downloading
+                    else -> Icons.Rounded.Download
+                }
+                val downloadDesc = when {
+                    isDownloaded -> "Saved to Downloads"
+                    isDownloading -> "Downloading"
+                    else -> "Download"
+                }
                 BottomGlyph(
-                    icon = YZMusicIcons.Infinity,
-                    contentDescription = if (autoplayEnabled) "AutoPlay on" else "AutoPlay off",
-                    onClick = onToggleAutoplay,
-                    highlighted = autoplayEnabled,
-                    haptic = if (autoplayEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
+                    icon = downloadIcon,
+                    contentDescription = downloadDesc,
+                    onClick = onDownload,
+                    highlighted = isDownloaded || isDownloading,
+                    haptic = Haptic.Tap,
                 )
                 BottomGlyph(
                     icon = Icons.AutoMirrored.Rounded.QueueMusic,
@@ -2204,6 +2325,86 @@ private suspend fun AwaitPointerEventScope.dragQueueIn(
     }
     onHold(false)
     onSettle(open)
+}
+
+/**
+ * The downward half of the queue's vertical gesture: dragged down from the
+ * header or sleeve, the queue slides back down, returning to the full player.
+ *
+ * All pointer events are consumed so the enclosing sheet never reads a drag as
+ * a request to minimize or dismiss the player.
+ */
+private suspend fun AwaitPointerEventScope.dragQueueOut(
+    down: PointerInputChange,
+    travel: Float,
+    slide: MutableFloatState,
+    onHold: (Boolean) -> Unit,
+    onSettle: (Boolean) -> Unit,
+) {
+    if (travel < 1f) return
+
+    var pulled = 0f
+    val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, overSlop ->
+        if (overSlop > 0f) {
+            pulled = overSlop
+            change.consume()
+        }
+    }
+    if (drag == null || pulled <= 0f) return
+
+    onHold(true)
+    val velocity = VelocityTracker()
+    velocity.addPointerInputChange(drag)
+    slide.floatValue = (1f - (pulled / travel)).coerceIn(0f, 1f)
+    verticalDrag(drag.id) { change ->
+        velocity.addPointerInputChange(change)
+        pulled += change.positionChange().y
+        slide.floatValue = (1f - (pulled / travel)).coerceIn(0f, 1f)
+        change.consume()
+    }
+
+    val flick = velocity.calculateVelocity().y
+    val open = when {
+        flick >= QUEUE_FLICK_VELOCITY -> false
+        flick <= -QUEUE_FLICK_VELOCITY -> true
+        else -> slide.floatValue >= (1f - QUEUE_CARRY_FRACTION)
+    }
+    onHold(false)
+    onSettle(open)
+}
+
+/**
+ * Deliberate downward drag from the lyrics header or dismiss band, returning
+ * to the full player.
+ *
+ * Consumes all pointer events so the enclosing sheet never dismisses the player.
+ */
+private suspend fun AwaitPointerEventScope.dragLyricsOut(
+    down: PointerInputChange,
+    threshold: Float,
+    onDismiss: () -> Unit,
+) {
+    var pulled = 0f
+    val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, overSlop ->
+        if (overSlop > 0f) {
+            pulled = overSlop
+            change.consume()
+        }
+    }
+    if (drag == null || pulled <= 0f) return
+
+    val velocity = VelocityTracker()
+    velocity.addPointerInputChange(drag)
+    verticalDrag(drag.id) { change ->
+        velocity.addPointerInputChange(change)
+        pulled += change.positionChange().y
+        change.consume()
+    }
+
+    val flick = velocity.calculateVelocity().y
+    if (flick >= QUEUE_FLICK_VELOCITY || pulled >= threshold) {
+        onDismiss()
+    }
 }
 
 
@@ -2493,6 +2694,7 @@ private fun LyricsPanel(
     positionMs: Long,
     isPlaying: Boolean,
     onSeekToLine: (Long) -> Unit,
+    onClose: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val clock = rememberLyricClock(positionMs, isPlaying)
@@ -2527,7 +2729,14 @@ private fun LyricsPanel(
         }
     }
     val listState = rememberLazyListState()
-    val keepScroll = remember(listState) { keepScrollInList(listState) }
+    val dismissThreshold = with(LocalDensity.current) { 56.dp.toPx() }
+    val keepScroll = remember(listState, dismissThreshold) {
+        keepScrollInList(
+            listState = listState,
+            thresholdPx = dismissThreshold,
+            onDeliberateDown = onClose,
+        )
+    }
     var browsing by remember { mutableStateOf(false) }
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
@@ -3116,25 +3325,54 @@ private fun BottomGlyph(
 }
 
 /**
- * Swallows whatever scroll the queue list itself didn't use. The player is a
+ * Swallows whatever scroll the queue or lyrics list itself didn't use. The player is a
  * ModalBottomSheet, and the sheet's own nested-scroll handler reads that
- * leftover as "drag me down" — so scrolling the queue would slide the player
+ * leftover as "drag me down" — so scrolling the list would slide the player
  * away. Consuming it here keeps the gesture inside the list.
  *
- * A downward *fling* has to be caught in the pre-phase, before the sheet sees
- * it, but only at the top of the list — otherwise the queue could never fling.
+ * When the list is already at the top (!listState.canScrollBackward), a deliberate
+ * downward drag exceeding [thresholdPx] or a downward fling invokes [onDeliberateDown]
+ * to return to the full player without dismissing/closing the entire player.
  */
-private fun keepScrollInList(listState: LazyListState) = object : NestedScrollConnection {
+private fun keepScrollInList(
+    listState: LazyListState,
+    thresholdPx: Float = 0f,
+    onDeliberateDown: (() -> Unit)? = null,
+) = object : NestedScrollConnection {
+    var accumulatedDown = 0f
+
     override fun onPostScroll(
         consumed: Offset,
         available: Offset,
         source: NestedScrollSource,
-    ): Offset = available
+    ): Offset {
+        if (onDeliberateDown != null && !listState.canScrollBackward && available.y > 0f) {
+            accumulatedDown += available.y
+            if (accumulatedDown >= thresholdPx) {
+                accumulatedDown = 0f
+                onDeliberateDown()
+            }
+        } else if (available.y < 0f) {
+            accumulatedDown = 0f
+        }
+        return available
+    }
 
-    override suspend fun onPreFling(available: Velocity): Velocity =
-        if (available.y > 0f && !listState.canScrollBackward) available else Velocity.Zero
+    override suspend fun onPreFling(available: Velocity): Velocity {
+        if (available.y > 0f && !listState.canScrollBackward) {
+            if (onDeliberateDown != null && available.y >= QUEUE_FLICK_VELOCITY) {
+                accumulatedDown = 0f
+                onDeliberateDown()
+            }
+            return available
+        }
+        return Velocity.Zero
+    }
 
-    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+        accumulatedDown = 0f
+        return available
+    }
 }
 
 /** A credit that links somewhere, when [browseId] is known. */
@@ -3205,10 +3443,18 @@ private fun InlineQueue(
     onRemove: (Int) -> Unit,
     onMove: (Int, Int) -> Unit,
     onClear: () -> Unit,
+    onClose: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val keepScroll = remember(listState) { keepScrollInList(listState) }
+    val dismissThreshold = with(LocalDensity.current) { 56.dp.toPx() }
+    val keepScroll = remember(listState, dismissThreshold) {
+        keepScrollInList(
+            listState = listState,
+            thresholdPx = dismissThreshold,
+            onDeliberateDown = onClose,
+        )
+    }
     // Where AutoPlay's tracks start. The queue is kept with them last, so this
     // is one boundary rather than a category to test row by row.
     val autoplayStart = remember(queue, currentIndex) {

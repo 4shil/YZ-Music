@@ -62,13 +62,7 @@ android {
         buildConfigField("String", "LASTFM_API_KEY", "\"${lastfmApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "LASTFM_SECRET", "\"${lastfmSecret.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
 
-        // Automix's DSP analyzer (native/analyzer). 64-bit only: minSdk 26
-        // already postdates the 64-bit requirement, so a 32-bit slice would
-        // double the native payload for devices that do not exist in the
-        // install base.
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
+        // Automix's DSP analyzer (native/analyzer). 64-bit only.
     }
 
     externalNativeBuild {
@@ -103,36 +97,50 @@ android {
         // exactly the failure the unsigned fallback above exists to avoid, so
         // the keystore has to be looked for rather than assumed.
         val store = signing.getProperty("storeFile")?.let { rootProject.file(it) }
-        if (store != null && store.exists()) {
+        val storePass = signing.getProperty("storePassword")?.trim()
+        val alias = signing.getProperty("keyAlias")?.trim()
+        val keyPass = signing.getProperty("keyPassword")?.trim()?.takeIf { it.isNotEmpty() } ?: storePass
+        if (store != null && store.exists() && store.length() > 0L && !storePass.isNullOrEmpty() && !alias.isNullOrEmpty()) {
             create("release") {
                 storeFile = store
-                storePassword = signing.getProperty("storePassword")
-                keyAlias = signing.getProperty("keyAlias")
-                keyPassword = signing.getProperty("keyPassword")
+                storePassword = storePass
+                keyAlias = alias
+                keyPassword = keyPass
             }
         }
     }
 
     buildTypes {
+        debug {
+            ndk {
+                abiFilters += listOf("arm64-v8a", "x86_64")
+            }
+        }
         release {
-            /*
-             * Off deliberately. Stream resolution runs YouTube's own player
-             * JavaScript through Rhino, and NewPipe, Ktor and
-             * kotlinx.serialization all reach for classes reflectively — none
-             * of which R8 can see. Shrinking that reliably is a set of keep
-             * rules to be written and then proven on a device, because the
-             * breakage it causes appears at runtime rather than at build time.
-             * Until then, a larger APK that works beats a smaller one that
-             * might not. The rules below stay wired up for when it's revisited.
-             */
-            isMinifyEnabled = false
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Null without a keystore to sign with: the build then produces
-            // app-release-unsigned.apk instead of failing outright.
-            signingConfig = signingConfigs.findByName("release")
+            // If release signing credentials are not configured locally, fall back to
+            // the debug keystore so local release test builds produce a valid, signed,
+            // and installable APK rather than an unparseable unsigned package.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+        }
+    }
+    packaging {
+        resources {
+            excludes += listOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "/META-INF/DEPENDENCIES",
+                "/META-INF/LICENSE*",
+                "/META-INF/NOTICE*",
+                "/META-INF/*.version"
+            )
         }
     }
     compileOptions {

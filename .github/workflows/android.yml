@@ -18,16 +18,29 @@ jobs:
         cache: gradle
 
     - name: Setup Secrets (Keystore & local.properties)
+      env:
+        MODULE_INDEX_URL: ${{ secrets.MODULE_INDEX_URL }}
+        LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+        LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        echo "MODULE_INDEX_URL=${{ secrets.MODULE_INDEX_URL }}" > local.properties
-        echo "LASTFM_API_KEY=${{ secrets.LASTFM_API_KEY }}" >> local.properties
-        echo "LASTFM_SECRET=${{ secrets.LASTFM_SECRET }}" >> local.properties
-        
-        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > yzmusic-release.jks
-        echo "storeFile=yzmusic-release.jks" > keystore.properties
-        echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" >> keystore.properties
-        echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> keystore.properties
-        echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> keystore.properties
+        echo "MODULE_INDEX_URL=$MODULE_INDEX_URL" > local.properties
+        echo "LASTFM_API_KEY=$LASTFM_API_KEY" >> local.properties
+        echo "LASTFM_SECRET=$LASTFM_SECRET" >> local.properties
+
+        if [ -n "$KEYSTORE_BASE64" ]; then
+          echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > yzmusic-release.jks
+          KEY_PASS="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          if [ -s yzmusic-release.jks ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ]; then
+            echo "storeFile=yzmusic-release.jks" > keystore.properties
+            echo "storePassword=$KEYSTORE_PASSWORD" >> keystore.properties
+            echo "keyAlias=$KEY_ALIAS" >> keystore.properties
+            echo "keyPassword=$KEY_PASS" >> keystore.properties
+          fi
+        fi
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -35,12 +48,11 @@ jobs:
     - name: Run Unit Tests
       run: ./gradlew testProdDebugUnitTest
 
-    - name: Build Signed Prod Release APK
+    - name: Build Prod Release APK
       run: ./gradlew assembleProdRelease
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: yzmusic-prod-release-signed
-        path: app/build/outputs/apk/prod/release/app-prod-release.apk
-
+        name: yzmusic-prod-release
+        path: app/build/outputs/apk/prod/release/*.apk
