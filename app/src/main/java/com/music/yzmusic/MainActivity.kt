@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic
+package com.music.yzmusic
 
 import android.Manifest
 import android.content.Intent
@@ -1191,6 +1191,7 @@ private fun YZMusicApp(
                 // this path and the notification use exactly one loader.
                 controller?.toggleAutoplay()
             },
+            onDownload = { downloadSong(song) },
             onJumpTo = { controller?.seekToDefaultPosition(it) },
             onRemoveFromQueue = { controller?.removeMediaItem(it) },
             onMoveInQueue = { from, to -> controller?.moveMediaItem(from, to) },

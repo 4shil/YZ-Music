@@ -42,3 +42,7 @@ keystore.properties
 # Commit manifest files and synthetic generator
 commit_manifest*.md
 generate_synthetic_history.js
+
+# Design assets
+Logo design/
+

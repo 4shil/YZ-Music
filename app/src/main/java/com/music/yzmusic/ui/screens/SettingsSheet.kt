@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.screens
+package com.music.yzmusic.ui.screens
 
 import android.content.Context
 import android.content.Intent
@@ -75,6 +75,8 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,6 +85,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.launch
+import com.music.yzmusic.playback.smart.SmartAudioModelManager
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -363,6 +368,49 @@ fun SettingsScreen(
                 },
                 onClick = { AppSettings.setSmartFadeEnabled(!smartFade) },
             )
+            if (smartFade) {
+                RowDivider()
+                val ctx = LocalContext.current
+                val scope = rememberCoroutineScope()
+                val modelState by SmartAudioModelManager.downloadState.collectAsState()
+                LaunchedEffect(Unit) {
+                    SmartAudioModelManager.checkStatus(ctx)
+                }
+                val (modelSubtitle, modelActionText) = when (val s = modelState) {
+                    is SmartAudioModelManager.DownloadState.Ready ->
+                        "Neural beat & vocal models active" to null
+                    is SmartAudioModelManager.DownloadState.Downloading ->
+                        "Downloading neural models: ${s.progressPercent}%" to null
+                    is SmartAudioModelManager.DownloadState.Error ->
+                        "Download failed · Tap to retry" to "Retry"
+                    is SmartAudioModelManager.DownloadState.NotDownloaded ->
+                        "Native DSP active · Neural models optional (13 MB)" to "Download"
+                }
+                SettingsRow(
+                    icon = Icons.Rounded.Download,
+                    title = "Neural Audio Refinement",
+                    subtitle = modelSubtitle,
+                    trailing = modelActionText?.let { action ->
+                        {
+                            Text(
+                                text = action,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    },
+                    onClick = {
+                        if (modelState is SmartAudioModelManager.DownloadState.NotDownloaded ||
+                            modelState is SmartAudioModelManager.DownloadState.Error
+                        ) {
+                            scope.launch {
+                                SmartAudioModelManager.downloadModels(ctx)
+                            }
+                        }
+                    },
+                )
+            }
             RowDivider()
             SettingsRow(
                 icon = Icons.AutoMirrored.Rounded.VolumeOff,

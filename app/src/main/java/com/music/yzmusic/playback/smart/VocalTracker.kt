@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Ported from Orchard (https://github.com/SFG5453/Orchard).
  *
  * Copyright (C) 2026 SFG545 (original Orchard implementation)
@@ -101,12 +101,8 @@ class VocalTracker(private val context: Context) {
         synchronized(lock) {
             session?.let { return it }
             return runCatching {
-                val file = File(context.filesDir, MODEL_ASSET)
-                if (!file.exists() || file.length() == 0L) {
-                    context.assets.open(MODEL_ASSET).use { input ->
-                        file.outputStream().use { output -> input.copyTo(output) }
-                    }
-                }
+                val file = SmartAudioModelManager.getModelFile(context, SmartAudioModelManager.ModelType.VOCAL)
+                    ?: return null
                 val options = OrtSession.SessionOptions().apply {
                     setIntraOpNumThreads(INFERENCE_THREADS)
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
