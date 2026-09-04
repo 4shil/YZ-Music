@@ -1,8 +1,14 @@
-﻿package com.music.yzmusic.ui.components
+package com.music.yzmusic.ui.components
 
+import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,11 +28,25 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -42,6 +62,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
+import kotlinx.coroutines.launch
 
 /**
  * The transport buttons' touch target. Material's default 48dp is what a bar
@@ -115,11 +136,136 @@ fun MiniPlayer(
     hazeState: HazeState,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onPrevious: () -> Unit = {},
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val haptics = rememberHaptics()
+    val density = LocalDensity.current
+    val touchSlop = LocalViewConfiguration.current.touchSlop
+    val minDisplacement = remember(density) { with(density) { 48.dp.toPx() } }
+    val minVelocity = remember(density) { with(density) { 500.dp.toPx() } }
+    val maxDragPx = remember(density) { with(density) { 120.dp.toPx() } }
+    val coroutineScope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    var lastActionTime by remember { mutableLongStateOf(0L) }
+    val classifier = remember(touchSlop, minDisplacement, minVelocity) {
+        MiniPlayerGestureClassifier(
+            touchSlopPx = touchSlop,
+            minDisplacementPx = minDisplacement,
+            minVelocityPx = minVelocity,
+        )
+    }
+
+    LaunchedEffect(song.videoId) {
+        if (offsetX.value != 0f) {
+            offsetX.snapTo(0f)
+        }
+    }
+
+    val gestureModifier = Modifier.pointerInput(song.videoId) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val velocityTracker = VelocityTracker()
+            velocityTracker.addPosition(down.uptimeMillis, down.position)
+            var totalX = 0f
+            var totalY = 0f
+            classifier.reset()
+
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (!change.pressed) {
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                    break
+                }
+                velocityTracker.addPosition(change.uptimeMillis, change.position)
+                val delta = change.positionChange()
+                totalX += delta.x
+                totalY += delta.y
+
+                val lock = classifier.onMove(totalX, totalY)
+                if (lock == DirectionLock.HORIZONTAL) {
+                    change.consume()
+                    coroutineScope.launch {
+                        offsetX.snapTo((totalX * 0.65f).coerceIn(-maxDragPx, maxDragPx))
+                    }
+                }
+            }
+
+            val velocity = velocityTracker.calculateVelocity()
+            val action = classifier.onRelease(totalX, totalY, velocity.x, velocity.y)
+            val now = SystemClock.uptimeMillis()
+            val canAct = (now - lastActionTime) >= 300L
+
+            when (action) {
+                MiniPlayerAction.NEXT -> {
+                    if (canAct) {
+                        lastActionTime = now
+                        haptics.play(Haptic.SkipNext)
+                        onNext()
+                    }
+                    coroutineScope.launch {
+                        offsetX.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMedium,
+                            ),
+                        )
+                    }
+                }
+                MiniPlayerAction.PREVIOUS -> {
+                    if (canAct) {
+                        lastActionTime = now
+                        haptics.play(Haptic.SkipNext)
+                        onPrevious()
+                    }
+                    coroutineScope.launch {
+                        offsetX.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMedium,
+                            ),
+                        )
+                    }
+                }
+                MiniPlayerAction.EXPAND -> {
+                    if (canAct) {
+                        lastActionTime = now
+                        onExpand()
+                    }
+                    if (offsetX.value != 0f) {
+                        coroutineScope.launch {
+                            offsetX.animateTo(
+                                targetValue = 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMedium,
+                                ),
+                            )
+                        }
+                    }
+                }
+                MiniPlayerAction.NONE -> {
+                    if (offsetX.value != 0f) {
+                        coroutineScope.launch {
+                            offsetX.animateTo(
+                                targetValue = 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMedium,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // percent rather than a dp figure, so the corner stays exactly half the
     // height if the row's contents ever change it — which is what keeps a pill
     // a pill instead of a rounded rectangle. Same idiom as [FloatingBottomBar]
@@ -137,6 +283,19 @@ fun MiniPlayer(
                 },
             )
             .border(0.5.dp, Color.White.copy(alpha = 0.10f), shape)
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Next track") {
+                        onNext()
+                        true
+                    },
+                    CustomAccessibilityAction("Previous track") {
+                        onPrevious()
+                        true
+                    },
+                )
+            }
+            .then(gestureModifier)
             // Deliberately silent: the whole bar is the target, so it catches
             // stray taps meant for the page behind it, and the sheet rising is
             // its own confirmation. The glyphs on it still buzz.
@@ -145,6 +304,9 @@ fun MiniPlayer(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .graphicsLayer {
+                    translationX = offsetX.value
+                }
                 .padding(
                     horizontal = ROW_PADDING_HORIZONTAL,
                     vertical = ROW_PADDING_VERTICAL,

@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.components
+package com.music.yzmusic.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -187,7 +187,7 @@ fun FrostedTopBar(
                         painter = painterResource(R.drawable.ic_logo),
                         contentDescription = null,
                         colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
-                        modifier = Modifier.height(18.dp),
+                        modifier = Modifier.size(44.dp),
                     )
                     // The dev flavor gets its own applicationId so it can sit
                     // installed next to the prod build; this badge is the
