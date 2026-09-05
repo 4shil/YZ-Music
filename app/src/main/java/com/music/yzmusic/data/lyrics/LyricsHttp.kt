@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data.lyrics
+package com.music.yzmusic.data.lyrics
 
 import com.music.yzmusic.data.Http
 import kotlinx.serialization.json.Json
@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
  */
 private const val LYRICS_TIMEOUT_SECONDS = 6L
 
-internal const val LYRICS_AGENT = "YZ Music (https://github.com/bitchord)"
+internal const val LYRICS_AGENT = "YZ Music (https://github.com/4shil/YZ-Music)"
 
 internal val lyricsJson = Json { ignoreUnknownKeys = true; isLenient = true }
 

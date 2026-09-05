@@ -1,7 +1,10 @@
 package com.music.yzmusic
 
+import com.music.yzmusic.data.YtMusicRepository
 import com.music.yzmusic.data.innertube.InnertubeParser
+import com.music.yzmusic.data.model.ShelfItem
 import com.music.yzmusic.data.model.ShelfType
+import com.music.yzmusic.data.model.Song
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
@@ -763,5 +766,310 @@ class InnertubeParserExploreTest {
         assertEquals("episode_vid_123", item.videoId)
         assertNull(item.browseId) // Stripped MPED browseId so it doesn't 404
         assertTrue(item.isVideo)
+    }
+
+    @Test
+    fun testGridShelfWithStraplineAndMoreParams() {
+        val gridJson = """
+        {
+          "gridRenderer": {
+            "header": {
+              "gridHeaderRenderer": {
+                "title": {
+                  "runs": [
+                    {
+                      "text": "Featured Playlists",
+                      "navigationEndpoint": {
+                        "browseEndpoint": {
+                          "browseId": "VLPL_discover_more",
+                          "params": "ggMP_more_params_123"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "strapline": { "runs": [{ "text": "DISCOVER" }] }
+              }
+            },
+            "items": [
+              {
+                "musicTwoRowItemRenderer": {
+                  "title": { "runs": [{ "text": "Playlist One" }] },
+                  "subtitle": { "runs": [{ "text": "Curated by YZ" }] },
+                  "navigationEndpoint": {
+                    "browseEndpoint": {
+                      "browseId": "VLPL_one"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+        """
+        val shelves = InnertubeParser.parseHome(parseSection(gridJson))
+        assertEquals(1, shelves.size)
+        val shelf = shelves[0]
+        assertEquals("Featured Playlists", shelf.title)
+        assertEquals("DISCOVER", shelf.subtitle)
+        assertEquals("DISCOVER", shelf.strapline)
+        assertEquals("VLPL_discover_more", shelf.moreBrowseId)
+        assertEquals("ggMP_more_params_123", shelf.moreParams)
+        assertEquals(1, shelf.items.size)
+    }
+
+    @Test
+    fun testCollectSongsDeepWithMultiRowItem() {
+        val pageJson = """
+        {
+          "contents": {
+            "singleColumnBrowseResultsRenderer": {
+              "tabs": [
+                {
+                  "tabRenderer": {
+                    "content": {
+                      "sectionListRenderer": {
+                        "contents": [
+                          {
+                            "musicShelfRenderer": {
+                              "title": { "runs": [{ "text": "Episodes" }] },
+                              "contents": [
+                                {
+                                  "musicMultiRowListItemRenderer": {
+                                    "title": {
+                                      "runs": [
+                                        {
+                                          "text": "Episode 101",
+                                          "navigationEndpoint": {
+                                            "watchEndpoint": { "videoId": "ep_101_vid" }
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    "secondTitle": { "runs": [{ "text": "Host Name" }] },
+                                    "subtitle": { "runs": [{ "text": "45 mins" }] },
+                                    "onTap": {
+                                      "watchEndpoint": { "videoId": "ep_101_vid" }
+                                    },
+                                    "thumbnailRenderer": {
+                                      "musicThumbnailRenderer": {
+                                        "thumbnail": {
+                                          "thumbnails": [
+                                            { "url": "https://lh3.googleusercontent.com/art_ep=w544-h544", "width": 544, "height": 544 }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+        """
+        val parsed = Json.parseToJsonElement(pageJson) as JsonObject
+        val songs = InnertubeParser.collectSongsDeep(parsed)
+        assertEquals(1, songs.size)
+        val song = songs[0]
+        assertEquals("Episode 101", song.title)
+        assertEquals("ep_101_vid", song.videoId)
+        assertEquals("Host Name", song.artist)
+        assertTrue(song.isVideo)
+    }
+
+    @Test
+    fun testCarouselShelfMoodGenreClassification() {
+        val carousel = """
+        {
+          "musicCarouselShelfRenderer": {
+            "header": {
+              "musicCarouselShelfBasicHeaderRenderer": {
+                "title": { "runs": [{ "text": "Explore" }] }
+              }
+            },
+            "contents": [
+              {
+                "musicNavigationButtonRenderer": {
+                  "buttonText": { "runs": [{ "text": "New releases" }] },
+                  "clickCommand": {
+                    "browseEndpoint": {
+                      "browseId": "FEmusic_new_releases"
+                    }
+                  }
+                }
+              },
+              {
+                "musicNavigationButtonRenderer": {
+                  "buttonText": { "runs": [{ "text": "Charts" }] },
+                  "clickCommand": {
+                    "browseEndpoint": {
+                      "browseId": "FEmusic_charts"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+        """
+        val shelves = InnertubeParser.parseHome(parseSection(carousel))
+        assertEquals(1, shelves.size)
+        val shelf = shelves[0]
+        assertEquals("Explore", shelf.title)
+        assertEquals(ShelfType.MOOD_GENRE, shelf.type)
+        assertEquals(2, shelf.items.size)
+        assertEquals("New releases", shelf.items[0].title)
+        assertEquals("FEmusic_new_releases", shelf.items[0].browseId)
+        assertEquals("Charts", shelf.items[1].title)
+        assertEquals("FEmusic_charts", shelf.items[1].browseId)
+    }
+
+    @Test
+    fun testParseVideoWithRectangleAspectRatioAndInlineBadge() {
+        val carousel = """
+        {
+          "musicCarouselShelfRenderer": {
+            "header": {
+              "musicCarouselShelfBasicHeaderRenderer": {
+                "title": { "runs": [{ "text": "New music videos" }] }
+              }
+            },
+            "contents": [
+              {
+                "musicTwoRowItemRenderer": {
+                  "title": { "runs": [{ "text": "Trending Video Track" }] },
+                  "subtitle": { "runs": [{ "text": "Superstar • 50M views" }] },
+                  "aspectRatio": "MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_RECTANGLE_16_9",
+                  "subtitleBadges": [
+                    {
+                      "musicInlineBadgeRenderer": {
+                        "accessibilityData": {
+                          "accessibilityData": {
+                            "label": "Explicit"
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "navigationEndpoint": {
+                    "watchEndpoint": {
+                      "videoId": "widescreen_vid_999"
+                    }
+                  },
+                  "thumbnailRenderer": {
+                    "musicThumbnailRenderer": {
+                      "thumbnail": {
+                        "thumbnails": [
+                          { "url": "https://i.ytimg.com/vi/widescreen_vid_999/hqdefault.jpg", "width": 480, "height": 360 }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+        """
+        val shelves = InnertubeParser.parseHome(parseSection(carousel))
+        assertEquals(1, shelves.size)
+        val shelf = shelves[0]
+        assertEquals("New music videos", shelf.title)
+        assertEquals(ShelfType.VIDEO, shelf.type)
+        assertEquals(1, shelf.items.size)
+        val item = shelf.items[0]
+        assertEquals("Trending Video Track", item.title)
+        assertEquals("widescreen_vid_999", item.videoId)
+        assertTrue(item.isVideo)
+        assertEquals("Explicit", item.badge)
+    }
+
+    @Test
+    fun testParseRealVideoChartWithVideoIdsNotDropped() {
+        val carousel = """
+        {
+          "musicCarouselShelfRenderer": {
+            "header": {
+              "musicCarouselShelfBasicHeaderRenderer": {
+                "title": { "runs": [{ "text": "Video charts" }] }
+              }
+            },
+            "contents": [
+              {
+                "musicTwoRowItemRenderer": {
+                  "title": { "runs": [{ "text": "Chart Video Hit" }] },
+                  "subtitle": { "runs": [{ "text": "Chart Artist" }] },
+                  "navigationEndpoint": {
+                    "watchEndpoint": { "videoId": "chart_vid_777" }
+                  }
+                }
+              }
+            ]
+          }
+        }
+        """
+        val shelves = InnertubeParser.parseHome(parseSection(carousel))
+        assertEquals(1, shelves.size)
+        val shelf = shelves[0]
+        assertEquals("Video charts", shelf.title)
+        assertEquals(1, shelf.items.size)
+        assertEquals("Chart Video Hit", shelf.items[0].title)
+        assertEquals("chart_vid_777", shelf.items[0].videoId)
+    }
+
+    @Test
+    fun testTop100ChartsShelfValidation() {
+        val shelf = YtMusicRepository.TOP_100_CHARTS_SHELF
+        assertEquals("Top 100 & Viral Charts", shelf.title)
+        assertEquals("TOP 100", shelf.strapline)
+        assertTrue(shelf.items.size >= 4)
+        assertTrue(shelf.items.any { it.title.contains("Top 100: Global") && it.browseId?.startsWith("VLPL") == true })
+        assertTrue(shelf.items.any { it.title.contains("Viral 50") && it.browseId?.startsWith("VLPL") == true })
+        assertTrue(shelf.items.any { it.title.contains("Music Videos") && it.browseId?.startsWith("VLPL") == true })
+    }
+
+    @Test
+    fun testGenreChartsShelfValidation() {
+        val shelf = YtMusicRepository.GENRE_CHARTS_SHELF
+        assertEquals("Genre Charts", shelf.title)
+        assertEquals("GENRE CHARTS", shelf.strapline)
+        assertTrue(shelf.items.size >= 8)
+        assertTrue(shelf.items.any { it.title.contains("Pop") && it.browseId?.startsWith("VLPL") == true })
+        assertTrue(shelf.items.any { it.title.contains("Hip-Hop") && it.browseId?.startsWith("VLPL") == true })
+        assertTrue(shelf.items.any { it.title.contains("Rock") && it.browseId?.startsWith("VLPL") == true })
+        assertTrue(shelf.items.any { it.title.contains("R&B") && it.browseId?.startsWith("VLPL") == true })
+        assertTrue(shelf.items.any { it.title.contains("Electronic") && it.browseId?.startsWith("VLPL") == true })
+    }
+
+    @Test
+    fun testUniversalSongMappingFromShelfItem() {
+        val item = ShelfItem(
+            title = "Global Hit Song",
+            subtitle = "Song • Chart Artist",
+            thumbnailUrl = "https://lh3.googleusercontent.com/art1",
+            videoId = "hit_song_123",
+            browseId = null,
+            isVideo = false,
+        )
+        val song = Song(
+            videoId = item.videoId!!,
+            title = item.title,
+            artist = InnertubeParser.artistFromSubtitle(item.subtitle).ifBlank { item.subtitle },
+            thumbnailUrl = item.thumbnailUrl,
+            isVideo = item.isVideo,
+        )
+        assertEquals("hit_song_123", song.videoId)
+        assertEquals("Global Hit Song", song.title)
+        assertEquals("Chart Artist", song.artist)
+        assertEquals("https://lh3.googleusercontent.com/art1", song.thumbnailUrl)
+        assertFalse(song.isVideo)
     }
 }

@@ -194,6 +194,8 @@ fun MediaItem.toSong() = Song(
         ?: mediaMetadata.extras?.getString("bitchord.albumId"),
     albumName = mediaMetadata.albumTitle?.toString(),
     fromAutoplay = this.fromAutoplay,
+    setVideoId = mediaMetadata.extras?.getString(EXTRA_QUEUE_ITEM_ID)
+        ?: mediaMetadata.extras?.getString("bitchord.queueItemId"),
     localUri = mediaMetadata.extras?.getString(EXTRA_LOCAL_URI)
         ?: mediaMetadata.extras?.getString("bitchord.localUri"),
     localPath = mediaMetadata.extras?.getString(EXTRA_LOCAL_PATH)
@@ -211,6 +213,7 @@ val MediaItem.fromAutoplay: Boolean
  * the player, and the UI only ever sees it back through a MediaController.
  */
 private const val EXTRA_FROM_AUTOPLAY = "yzmusic.fromAutoplay"
+private const val EXTRA_QUEUE_ITEM_ID = "yzmusic.queueItemId"
 
 /**
  * The artist and album pages this track hangs under, when they are known.
@@ -399,20 +402,19 @@ fun Song.toMediaItem(): MediaItem {
             // back a null duration, [LastPlayed] stored a null, and the restored
             // queue lost the `&d=` its matching depends on.
             .apply {
-                if (fromAutoplay || offlineUri != null || durationText != null ||
-                    artistId != null || albumId != null
-                ) {
-                    setExtras(
-                        bundleOf(
-                            EXTRA_FROM_AUTOPLAY to fromAutoplay,
-                            EXTRA_LOCAL_URI to offlineUri,
-                            EXTRA_LOCAL_PATH to localPath,
-                            EXTRA_DURATION to durationText,
-                            EXTRA_ARTIST_ID to artistId,
-                            EXTRA_ALBUM_ID to albumId,
-                        ),
-                    )
-                }
+                val queueItemId = setVideoId?.takeIf { it.isNotBlank() }
+                    ?: java.util.UUID.randomUUID().toString()
+                setExtras(
+                    bundleOf(
+                        EXTRA_FROM_AUTOPLAY to fromAutoplay,
+                        EXTRA_LOCAL_URI to offlineUri,
+                        EXTRA_LOCAL_PATH to localPath,
+                        EXTRA_DURATION to durationText,
+                        EXTRA_ARTIST_ID to artistId,
+                        EXTRA_ALBUM_ID to albumId,
+                        EXTRA_QUEUE_ITEM_ID to queueItemId,
+                    ),
+                )
             }
             .build(),
     )

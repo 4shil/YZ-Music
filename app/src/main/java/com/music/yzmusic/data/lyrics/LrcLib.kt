@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data.lyrics
+package com.music.yzmusic.data.lyrics
 
 import com.music.yzmusic.data.Http
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +25,7 @@ import kotlin.math.abs
 object LrcLib {
 
     private const val BASE = "https://lrclib.net/api"
-    private const val AGENT = "YZ Music (https://github.com/bitchord)"
+    private const val AGENT = "YZ Music (https://github.com/4shil/YZ-Music)"
 
     private val json = Json { ignoreUnknownKeys = true }
 
