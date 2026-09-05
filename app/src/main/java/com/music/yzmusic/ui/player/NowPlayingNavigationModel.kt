@@ -314,6 +314,211 @@ class FullPlayerSwipeUpTracker(
     }
 }
 
+enum class FullPlayerGestureAction {
+    NONE,
+    SWIPE_UP_QUEUE,
+    SWIPE_LEFT_NEXT,
+    SWIPE_RIGHT_PREVIOUS,
+    DOUBLE_TAP_SEEK_BACKWARD,
+    DOUBLE_TAP_SEEK_FORWARD,
+}
+
+/**
+ * Calculates target seek position clamped to boundaries.
+ */
+object FullPlayerSeekCalculator {
+    const val DEFAULT_GUARD_MS = 1500L
+
+    fun calculateTarget(
+        isForward: Boolean,
+        currentPosMs: Long,
+        durationMs: Long,
+        seekAmountSeconds: Int,
+        guardMs: Long = DEFAULT_GUARD_MS,
+    ): Long {
+        val deltaMs = seekAmountSeconds * 1000L
+        return if (isForward) {
+            if (durationMs > 0L) {
+                (currentPosMs + deltaMs).coerceAtMost((durationMs - guardMs).coerceAtLeast(0L))
+            } else {
+                (currentPosMs + deltaMs).coerceAtLeast(0L)
+            }
+        } else {
+            (currentPosMs - deltaMs).coerceAtLeast(0L)
+        }
+    }
+}
+
+/**
+ * Coordinated gesture tracker for the Full Player.
+ *
+ * Disambiguates between:
+ * - Tap / Double-Tap: Movement <= touchSlop, two taps within doubleTapTimeoutMs on the same half (left = backward, right = forward).
+ * - Horizontal Swipe: |dx| >= thresholdPx & |dx| > |dy| * 1.25, or horizontal flick. (dx < 0 -> next, dx > 0 -> previous).
+ * - Vertical Upward Swipe: -dy >= thresholdPx & -dy > |dx| * 1.25, or upward flick. (opens Queue).
+ * - Vertical Downward Swipe: dy > 0 & dy > |dx| * 1.25. (no-op on player body).
+ */
+class FullPlayerGestureTracker(
+    val thresholdPx: Float,
+    val flickVelocityPx: Float = 400f,
+    val minFlickDistancePx: Float = 20f,
+    val touchSlopPx: Float = 24f,
+    val doubleTapTimeoutMs: Long = 350L,
+) {
+    var gestureHandled: Boolean = false
+        private set
+
+    var isLockedHorizontal: Boolean = false
+        private set
+
+    var isLockedVertical: Boolean = false
+        private set
+
+    var totalDx: Float = 0f
+        private set
+
+    var totalDy: Float = 0f
+        private set
+
+    var lastTapTimeMs: Long = 0L
+        private set
+
+    var lastTapX: Float = 0f
+        private set
+
+    var lastTapY: Float = 0f
+        private set
+
+    /**
+     * Updates pointer displacement from start position.
+     * Returns the detected gesture action if a threshold was crossed.
+     */
+    fun onPosition(totalX: Float, totalY: Float): FullPlayerGestureAction {
+        if (gestureHandled) return FullPlayerGestureAction.NONE
+
+        totalDx = totalX
+        totalDy = totalY
+
+        val absDx = kotlin.math.abs(totalDx)
+        val absDy = kotlin.math.abs(totalDy)
+
+        // Direction locking once movement exceeds touch slop
+        if (!isLockedHorizontal && !isLockedVertical) {
+            if (absDx > touchSlopPx && absDx > absDy * 1.25f) {
+                isLockedHorizontal = true
+                lastTapTimeMs = 0L // invalidate tap candidate
+            } else if (absDy > touchSlopPx && absDy > absDx * 1.25f) {
+                isLockedVertical = true
+                lastTapTimeMs = 0L // invalidate tap candidate
+            }
+        }
+
+        // Horizontal navigation
+        if (isLockedHorizontal || (!isLockedVertical && absDx > absDy * 1.25f)) {
+            if (absDx >= thresholdPx) {
+                gestureHandled = true
+                lastTapTimeMs = 0L
+                return if (totalDx < 0f) {
+                    FullPlayerGestureAction.SWIPE_LEFT_NEXT
+                } else {
+                    FullPlayerGestureAction.SWIPE_RIGHT_PREVIOUS
+                }
+            }
+            return FullPlayerGestureAction.NONE
+        }
+
+        // Vertical upward navigation (Queue)
+        if (isLockedVertical || (!isLockedHorizontal && totalDy < 0f && -totalDy > absDx * 1.25f)) {
+            if (totalDy < 0f && -totalDy >= thresholdPx && -totalDy > absDx * 1.25f) {
+                gestureHandled = true
+                lastTapTimeMs = 0L
+                return FullPlayerGestureAction.SWIPE_UP_QUEUE
+            }
+            return FullPlayerGestureAction.NONE
+        }
+
+        return FullPlayerGestureAction.NONE
+    }
+
+    /**
+     * Checks flick velocity on pointer release.
+     */
+    fun onRelease(velocityX: Float, velocityY: Float): FullPlayerGestureAction {
+        if (gestureHandled) return FullPlayerGestureAction.NONE
+
+        val absDx = kotlin.math.abs(totalDx)
+        val absDy = kotlin.math.abs(totalDy)
+
+        // Upward flick
+        if (!isLockedHorizontal && totalDy <= -minFlickDistancePx && velocityY <= -flickVelocityPx && -totalDy > absDx * 1.25f) {
+            gestureHandled = true
+            lastTapTimeMs = 0L
+            return FullPlayerGestureAction.SWIPE_UP_QUEUE
+        }
+
+        // Horizontal flick
+        val absVx = kotlin.math.abs(velocityX)
+        if (!isLockedVertical && absDx >= minFlickDistancePx && absVx >= flickVelocityPx && absDx > absDy * 1.25f) {
+            gestureHandled = true
+            lastTapTimeMs = 0L
+            return if (velocityX < 0f) {
+                FullPlayerGestureAction.SWIPE_LEFT_NEXT
+            } else {
+                FullPlayerGestureAction.SWIPE_RIGHT_PREVIOUS
+            }
+        }
+
+        return FullPlayerGestureAction.NONE
+    }
+
+    /**
+     * Records a tap that lifted without exceeding touchSlop.
+     * Returns DOUBLE_TAP_SEEK_BACKWARD or DOUBLE_TAP_SEEK_FORWARD if this tap completes a double-tap.
+     */
+    fun onTap(x: Float, y: Float, containerWidth: Float, currentTimeMs: Long): FullPlayerGestureAction {
+        val absDx = kotlin.math.abs(totalDx)
+        val absDy = kotlin.math.abs(totalDy)
+        if (absDx > touchSlopPx || absDy > touchSlopPx || isLockedHorizontal || isLockedVertical || gestureHandled) {
+            lastTapTimeMs = 0L
+            return FullPlayerGestureAction.NONE
+        }
+
+        val midpoint = containerWidth / 2f
+        val thisIsRight = x >= midpoint
+        val timeSinceLast = currentTimeMs - lastTapTimeMs
+        val isWithinWindow = lastTapTimeMs > 0L && timeSinceLast in 1..doubleTapTimeoutMs
+        val lastIsRight = lastTapX >= midpoint
+
+        if (isWithinWindow && thisIsRight == lastIsRight) {
+            // Double-tap recognized! Reset last tap so subsequent tap starts a new cycle.
+            lastTapTimeMs = 0L
+            return if (thisIsRight) {
+                FullPlayerGestureAction.DOUBLE_TAP_SEEK_FORWARD
+            } else {
+                FullPlayerGestureAction.DOUBLE_TAP_SEEK_BACKWARD
+            }
+        } else {
+            // First tap recorded
+            lastTapTimeMs = currentTimeMs
+            lastTapX = x
+            lastTapY = y
+            return FullPlayerGestureAction.NONE
+        }
+    }
+
+    fun invalidateTap() {
+        lastTapTimeMs = 0L
+    }
+
+    fun onGestureEnd() {
+        gestureHandled = false
+        isLockedHorizontal = false
+        isLockedVertical = false
+        totalDx = 0f
+        totalDy = 0f
+    }
+}
+
 enum class QueueSwipeDownAction {
     NONE,
     SCROLL_TO_TOP,

@@ -26,6 +26,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -635,6 +636,7 @@ fun NowPlayingScreen(
     var doubleTapSeekDirection by remember { mutableStateOf<Int?>(null) } // -1 = backward, 1 = forward
     var doubleTapSeekSeconds by remember { mutableIntStateOf(10) }
     var doubleTapSeekTrigger by remember { mutableLongStateOf(0L) }
+    val swipeDragOffset = remember { Animatable(0f) }
 
     LaunchedEffect(doubleTapSeekTrigger) {
         if (doubleTapSeekTrigger > 0L) {
@@ -1122,9 +1124,43 @@ fun NowPlayingScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .nestedScroll(swallowDownToSheet)
-                .fullPlayerSwipeUp(
+                .fullPlayerGestures(
                     enabled = sheetState == PanelSheetState.COLLAPSED && navMode == NowPlayingMode.FULL_PLAYER,
                     onSwipeUp = ::openQueue,
+                    onNext = onNext,
+                    onPrevious = onPrevious,
+                    onDoubleTapSeek = { isForward ->
+                        val currentSeek = currentSeekSeconds
+                        val currentPos = currentPositionMs
+                        val currentDur = currentDurationMs
+                        doubleTapSeekDirection = if (isForward) 1 else -1
+                        doubleTapSeekSeconds = currentSeek
+                        doubleTapSeekTrigger = System.currentTimeMillis()
+                        haptics.play(if (isForward) Haptic.SkipNext else Haptic.SkipPrevious)
+                        val target = FullPlayerSeekCalculator.calculateTarget(
+                            isForward = isForward,
+                            currentPosMs = currentPos,
+                            durationMs = currentDur,
+                            seekAmountSeconds = currentSeek,
+                            guardMs = SEEK_END_GUARD_MS,
+                        )
+                        currentOnSeek(target)
+                    },
+                    onHorizontalDragOffset = { dx ->
+                        scope.launch {
+                            if (dx != 0f) {
+                                swipeDragOffset.snapTo((dx * 0.18f).coerceIn(-32f, 32f))
+                            } else {
+                                swipeDragOffset.animateTo(
+                                    0f,
+                                    spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    ),
+                                )
+                            }
+                        }
+                    },
                 ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -1359,6 +1395,7 @@ fun NowPlayingScreen(
                             val idle = artScale + (1f - artScale) * p
                             scaleX = idle
                             scaleY = idle
+                            translationX = swipeDragOffset.value
                         }
                         // Collapsed, the sleeve is the way back: tapping the
                         // thumbnail puts the queue or the lyrics away again.
@@ -1380,32 +1417,7 @@ fun NowPlayingScreen(
                                         closeToFullPlayer()
                                     }
                                 }
-                            } else {
-                                Modifier.pointerInput(Unit) {
-                                    detectDoubleTapSeek { isForward ->
-                                        val currentSeek = currentSeekSeconds
-                                        val currentPos = currentPositionMs
-                                        val currentDur = currentDurationMs
-                                        doubleTapSeekDirection = if (isForward) 1 else -1
-                                        doubleTapSeekSeconds = currentSeek
-                                        doubleTapSeekTrigger = System.currentTimeMillis()
-                                        haptics.play(if (isForward) Haptic.SkipNext else Haptic.SkipPrevious)
-                                        val seekDelta = currentSeek * 1000L
-                                        val target = if (isForward) {
-                                            if (currentDur > 0) {
-                                                (currentPos + seekDelta).coerceAtMost(
-                                                    (currentDur - SEEK_END_GUARD_MS).coerceAtLeast(0L),
-                                                )
-                                            } else {
-                                                currentPos + seekDelta
-                                            }
-                                        } else {
-                                            (currentPos - seekDelta).coerceAtLeast(0L)
-                                        }
-                                        currentOnSeek(target)
-                                    }
-                                }
-                            },
+                            } else Modifier
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -1567,22 +1579,33 @@ fun NowPlayingScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(20.dp))
-                                    .background(Color.Black.copy(alpha = 0.50f))
+                                    .background(Color.Black.copy(alpha = 0.45f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                             ) {
-                                Icon(
-                                    imageVector = if (isFwd) Icons.Rounded.FastForward else Icons.Rounded.FastRewind,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp),
-                                )
+                                if (!isFwd) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FastRewind,
+                                        contentDescription = null,
+                                        tint = Color.White.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
                                 Text(
-                                    text = "${if (isFwd) "+" else "−"}${doubleTapSeekSeconds}s",
+                                    text = "${doubleTapSeekSeconds}s",
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.SemiBold,
                                     ),
-                                    color = Color.White,
+                                    color = Color.White.copy(alpha = 0.9f),
                                 )
+                                if (isFwd) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FastForward,
+                                        contentDescription = null,
+                                        tint = Color.White.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
                             }
                         }
                     }
@@ -4034,107 +4057,46 @@ private object OverlayBack {
 }
 
 /**
- * Detects double-taps on the left or right half of the playback area.
- * Completely non-intrusive: does not consume down or drag events, allowing
- * vertical sheet dismiss and horizontal track swipes to work unimpeded.
- */
-private suspend fun PointerInputScope.detectDoubleTapSeek(
-    onDoubleTap: (Boolean) -> Unit,
-) {
-    val doubleTapTimeout = 350L
-    val touchSlop = viewConfiguration.touchSlop
-    val longPressTimeout = 500L
-
-    awaitEachGesture {
-        val down1 = awaitFirstDown(requireUnconsumed = false)
-        val downTime1 = System.currentTimeMillis()
-        val downPos1 = down1.position
-        val isForward1 = downPos1.x >= size.width / 2f
-
-        var up1: PointerInputChange? = null
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Main)
-            val change = event.changes.firstOrNull { it.id == down1.id } ?: break
-            if ((change.position - downPos1).getDistance() > touchSlop) {
-                return@awaitEachGesture
-            }
-            if (!change.pressed) {
-                up1 = change
-                break
-            }
-        }
-        val firstUp = up1 ?: return@awaitEachGesture
-        if (System.currentTimeMillis() - downTime1 > longPressTimeout) return@awaitEachGesture
-
-        var down2: PointerInputChange? = null
-        try {
-            withTimeout(doubleTapTimeout) {
-                while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Main)
-                    val candidate = event.changes.firstOrNull { it.changedToDown() }
-                    if (candidate != null) {
-                        down2 = candidate
-                        break
-                    }
-                }
-            }
-        } catch (_: TimeoutCancellationException) {
-            return@awaitEachGesture
-        }
-        val secondDown = down2 ?: return@awaitEachGesture
-        val downTime2 = System.currentTimeMillis()
-        val downPos2 = secondDown.position
-        val isForward2 = downPos2.x >= size.width / 2f
-
-        // Both taps must land on the same half (left for rewind, right for forward)
-        if (isForward1 != isForward2) return@awaitEachGesture
-
-        var up2: PointerInputChange? = null
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Main)
-            val change = event.changes.firstOrNull { it.id == secondDown.id } ?: break
-            if ((change.position - downPos2).getDistance() > touchSlop) {
-                return@awaitEachGesture
-            }
-            if (!change.pressed) {
-                up2 = change
-                break
-            }
-        }
-        if (up2 == null) return@awaitEachGesture
-        if (System.currentTimeMillis() - downTime2 > longPressTimeout) return@awaitEachGesture
-
-        onDoubleTap(isForward2)
-    }
-}
-
-/**
- * Detects a deliberate upward swipe on the Full Player to open Queue.
+ * Detects coordinated gestures on the Full Player:
+ * 1. Double-tap seek:
+ *    - Left half (< width / 2) -> seek backward
+ *    - Right half (>= width / 2) -> seek forward
+ * 2. Horizontal swipe:
+ *    - Left swipe (dx < 0) -> next track
+ *    - Right swipe (dx > 0) -> previous track
+ * 3. Vertical swipe up:
+ *    - Upward swipe (-dy > 0) -> open Queue
  *
- * Requirements:
- * - Works anywhere on non-interactive areas (artwork, metadata, background, lower player area).
- * - Exactly ONE deliberate swipe opens Queue (never requires two swipes).
- * - Directionally locked: clear UP = Queue; horizontal movement never opens Queue.
- * - Accidental movements do nothing.
- * - Does not steal touches from interactive controls (e.g. ThinSlider, buttons).
+ * Requirements enforced:
+ * - Directionally locked: horizontal dominant -> song change, vertical dominant up -> Queue.
+ * - Tap vs Swipe: swipes exceed threshold, double tap requires two taps within doubleTapTimeoutMs with movement <= touchSlop.
+ * - Single tap does not seek or change track.
+ * - Child interactive controls (ThinSlider, buttons) consume their pointer events on PointerEventPass.Main;
+ *   if an event is consumed before a gesture is classified, this detector immediately aborts.
+ * - Non-interactive areas across the entire Full Player bounds respond cleanly.
  */
-private fun Modifier.fullPlayerSwipeUp(
+private fun Modifier.fullPlayerGestures(
     enabled: Boolean,
     onSwipeUp: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    onDoubleTapSeek: (isForward: Boolean) -> Unit,
+    onHorizontalDragOffset: ((Float) -> Unit)? = null,
 ): Modifier {
     if (!enabled) return this
 
     return this.pointerInput(enabled) {
         val thresholdPx = 48.dp.toPx()
-        val flickVelocityPx = 450.dp.toPx()
+        val flickVelocityPx = 400.dp.toPx()
         val minFlickDistancePx = 20.dp.toPx()
         val touchSlopPx = viewConfiguration.touchSlop
 
-        val tracker = FullPlayerSwipeUpTracker(
+        val tracker = FullPlayerGestureTracker(
             thresholdPx = thresholdPx,
             flickVelocityPx = flickVelocityPx,
             minFlickDistancePx = minFlickDistancePx,
             touchSlopPx = touchSlopPx,
+            doubleTapTimeoutMs = 350L,
         )
 
         awaitEachGesture {
@@ -4145,21 +4107,42 @@ private fun Modifier.fullPlayerSwipeUp(
             velocityTracker.addPosition(down.uptimeMillis, down.position)
             tracker.onGestureEnd()
 
+            var wasConsumedByChild = false
+            var completedAction: FullPlayerGestureAction = FullPlayerGestureAction.NONE
+
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Main)
                 val change = event.changes.firstOrNull { it.id == pointerId } ?: break
 
-                // If a child control (e.g. ThinSlider) consumed position changes, abort swipe-up
+                // If a child control (e.g. ThinSlider or IconButton) consumed position changes, abort
                 if (change.isConsumed && !tracker.gestureHandled) {
+                    wasConsumedByChild = true
+                    tracker.invalidateTap()
+                    onHorizontalDragOffset?.invoke(0f)
                     break
                 }
 
                 if (!change.pressed) {
+                    // Finger lifted (Up event)
                     val velocity = velocityTracker.calculateVelocity()
-                    if (tracker.onRelease(velocity.y)) {
+                    val flickAction = tracker.onRelease(velocity.x, velocity.y)
+                    if (flickAction != FullPlayerGestureAction.NONE) {
+                        completedAction = flickAction
                         change.consume()
-                        onSwipeUp()
+                    } else if (!tracker.gestureHandled) {
+                        // Check tap / double-tap
+                        val tapAction = tracker.onTap(
+                            x = change.position.x,
+                            y = change.position.y,
+                            containerWidth = size.width.toFloat(),
+                            currentTimeMs = System.currentTimeMillis(),
+                        )
+                        if (tapAction != FullPlayerGestureAction.NONE) {
+                            completedAction = tapAction
+                            change.consume()
+                        }
                     }
+                    onHorizontalDragOffset?.invoke(0f)
                     break
                 }
 
@@ -4167,9 +4150,16 @@ private fun Modifier.fullPlayerSwipeUp(
                 val totalDx = change.position.x - startPos.x
                 val totalDy = change.position.y - startPos.y
 
-                if (tracker.onPosition(totalDx, totalDy)) {
+                // Subtle visual horizontal drag feedback if moving horizontally
+                if (!tracker.isLockedVertical && kotlin.math.abs(totalDx) > touchSlopPx) {
+                    onHorizontalDragOffset?.invoke(totalDx)
+                }
+
+                val action = tracker.onPosition(totalDx, totalDy)
+                if (action != FullPlayerGestureAction.NONE) {
+                    completedAction = action
                     change.consume()
-                    onSwipeUp()
+                    onHorizontalDragOffset?.invoke(0f)
                     // Consume remaining drag events of this gesture until finger lifts
                     while (true) {
                         val nextEvent = awaitPointerEvent(PointerEventPass.Main)
@@ -4178,6 +4168,17 @@ private fun Modifier.fullPlayerSwipeUp(
                         if (!nextChange.pressed) break
                     }
                     break
+                }
+            }
+
+            if (!wasConsumedByChild) {
+                when (completedAction) {
+                    FullPlayerGestureAction.SWIPE_UP_QUEUE -> onSwipeUp()
+                    FullPlayerGestureAction.SWIPE_LEFT_NEXT -> onNext()
+                    FullPlayerGestureAction.SWIPE_RIGHT_PREVIOUS -> onPrevious()
+                    FullPlayerGestureAction.DOUBLE_TAP_SEEK_BACKWARD -> onDoubleTapSeek(false)
+                    FullPlayerGestureAction.DOUBLE_TAP_SEEK_FORWARD -> onDoubleTapSeek(true)
+                    FullPlayerGestureAction.NONE -> Unit
                 }
             }
         }

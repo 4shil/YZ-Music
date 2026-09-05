@@ -511,7 +511,7 @@ fun SettingsScreen(
                 onClick = { AppSettings.setSkipSilence(!skipSilence) },
             )
             RowDivider()
-            val seekOptions = listOf(5, 10, 15)
+            val seekOptions = listOf(5, 10, 25)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
