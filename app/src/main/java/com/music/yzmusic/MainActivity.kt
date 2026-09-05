@@ -87,7 +87,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.music.yzmusic.auth.DiscordLoginScreen
 import com.music.yzmusic.auth.YtMusicLoginScreen
 import com.music.yzmusic.data.AppUpdateChecker
 import com.music.yzmusic.data.LocalMediaRepository
@@ -107,9 +106,6 @@ import com.music.yzmusic.data.scrobbling.LastFM
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.data.settings.ThemeMode
 import com.music.yzmusic.ui.screens.AccountAndScrobblingScreen
-import com.music.yzmusic.ui.screens.DiscordDialog
-import com.music.yzmusic.ui.screens.DiscordDialogHost
-import com.music.yzmusic.ui.screens.DiscordScreen
 import com.music.yzmusic.ui.screens.HistoryScreen
 import com.music.yzmusic.ui.screens.SettingsScreen
 import com.music.yzmusic.ui.screens.SourcesScreen
@@ -303,13 +299,6 @@ private fun YZMusicApp(
      * restored over an empty one would be a manager with nothing to manage.
      */
     var showDownloadManager by remember { mutableStateOf(false) }
-    // Discord Rich Presence: its own page under Account & integrations, its own
-    // full-screen sign-in, and one slot for whichever of its alerts is open.
-    // The alerts live out here rather than on the page because their scrim has
-    // to cover the tab bar and mini player, which are drawn after it.
-    var showDiscord by remember { mutableStateOf(false) }
-    var showDiscordLogin by remember { mutableStateOf(false) }
-    var discordDialog by remember { mutableStateOf<DiscordDialog?>(null) }
     var songActions by remember { mutableStateOf<Song?>(null) }
     /**
      * Whether the track menu that is up was opened from the player.
@@ -1253,10 +1242,7 @@ private fun YZMusicApp(
             enabled = detail != null && !showSettings && !showAccountScrobbling && !showSources &&
                 !showReplay,
         ) { viewModel.closeDetail() }
-        BackHandler(enabled = showDiscord) {
-            showDiscord = false
-        }
-        BackHandler(enabled = showAccountScrobbling && !showDiscord) {
+        BackHandler(enabled = showAccountScrobbling) {
             showAccountScrobbling = false
         }
         BackHandler(enabled = showSources) {
@@ -1281,7 +1267,6 @@ private fun YZMusicApp(
         BackHandler(enabled = showUpdateDialog) { showUpdateDialog = false }
         BackHandler(enabled = showListenBrainzLogin) { showListenBrainzLogin = false }
         BackHandler(enabled = showLastfmLogin) { showLastfmLogin = false }
-        BackHandler(enabled = discordDialog != null) { discordDialog = null }
         BackHandler(enabled = customModuleAlert) { customModuleAlert = false }
         BackHandler(enabled = showHistory) { showHistory = false }
         // Disabled while a detail page is open over the grid: that one's own
@@ -1298,7 +1283,6 @@ private fun YZMusicApp(
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 AnimatedContent(
                     targetState = when {
-                        showDiscord -> "discord"
                         showHistory -> "history"
                         // `&& detail == null`: a card opened from the grid
                         // stacks a detail page over it exactly as one opened
@@ -1359,7 +1343,7 @@ private fun YZMusicApp(
                     // the identical copy fading in behind it.
                     val live = detailStack.lastOrNull()?.takeIf {
                         it.browseId == key && key != "settings" && key != "account_scrobbling" &&
-                            key != "discord" && key != "replay" && key != "history" &&
+                            key != "replay" && key != "history" &&
                             key != "library_show_all"
                     }
                     // Held for the same reason, one step further on: a popped
@@ -1423,15 +1407,6 @@ private fun YZMusicApp(
                             contentPadding = listPadding,
                             listState = replayListState,
                         )
-                    } else if (key == "discord") {
-                        DiscordScreen(
-                            song = player.song,
-                            positionMs = player.position.positionMs,
-                            durationMs = player.durationMs,
-                            onOpenLogin = { showDiscordLogin = true },
-                            onOpenDialog = { discordDialog = it },
-                            contentPadding = listPadding,
-                        )
                     } else if (key == "account_scrobbling") {
                         AccountAndScrobblingScreen(
                             signedIn = signedIn,
@@ -1444,7 +1419,6 @@ private fun YZMusicApp(
                             onSignOut = { viewModel.signOut() },
                             onOpenListenBrainzLogin = { showListenBrainzLogin = true },
                             onOpenLastfmLogin = { showLastfmLogin = true },
-                            onOpenDiscord = { showDiscord = true },
                             contentPadding = listPadding,
                         )
                     } else if (key == "sources") {
@@ -1565,13 +1539,22 @@ private fun YZMusicApp(
                                 play(songs, songs.indices.random())
                             },
                             onSectionItemClick = { item ->
-                                item.browseId?.let { id ->
-                                    viewModel.openDetail(
-                                        browseId = id,
+                                when {
+                                    item.videoId != null -> playRadio(
+                                        Song(
+                                            videoId = item.videoId,
+                                            title = item.title,
+                                            artist = InnertubeParser.artistFromSubtitle(item.subtitle),
+                                            thumbnailUrl = item.thumbnailUrl,
+                                            isVideo = item.isVideo,
+                                        ),
+                                    )
+                                    item.browseId != null -> viewModel.openDetail(
+                                        browseId = item.browseId,
                                         title = item.title,
                                         subtitle = item.subtitle,
                                         thumbnailUrl = item.thumbnailUrl,
-                                        type = BrowseType.ALBUM,
+                                        params = item.params,
                                     )
                                 }
                             },
@@ -1635,6 +1618,7 @@ private fun YZMusicApp(
                                         title = item.title,
                                         subtitle = item.subtitle,
                                         thumbnailUrl = item.thumbnailUrl,
+                                        params = item.params,
                                     )
                                 }
                             },
@@ -1664,6 +1648,7 @@ private fun YZMusicApp(
                                             // everything downstream read.
                                             artist = InnertubeParser.artistFromSubtitle(item.subtitle),
                                             thumbnailUrl = item.thumbnailUrl,
+                                            isVideo = item.isVideo,
                                         ),
                                     )
                                     item.browseId != null -> viewModel.openDetail(
@@ -1671,10 +1656,21 @@ private fun YZMusicApp(
                                         title = item.title,
                                         subtitle = item.subtitle,
                                         thumbnailUrl = item.thumbnailUrl,
+                                        params = item.params,
                                     )
                                 }
                             },
                             onItemLongPress = onBrowseLongPress,
+                            onShowAll = { shelf ->
+                                shelf.moreBrowseId?.let { browseId ->
+                                    viewModel.openDetail(
+                                        browseId = browseId,
+                                        title = shelf.title,
+                                        subtitle = shelf.subtitle,
+                                        params = shelf.moreParams,
+                                    )
+                                }
+                            },
                             onRetry = viewModel::loadExplore,
                             refreshing = MainViewModel.Feed.EXPLORE in refreshing,
                             onRefresh = { viewModel.refresh(MainViewModel.Feed.EXPLORE) },
@@ -1785,7 +1781,6 @@ private fun YZMusicApp(
 
                 FrostedTopBar(
                     title = when {
-                        showDiscord -> "Discord"
                         showHistory -> "History"
                         libraryShowAll != null && detail == null -> libraryShowAll?.title.orEmpty()
                         showAccountScrobbling -> "Account & scrobbling"
@@ -1800,7 +1795,7 @@ private fun YZMusicApp(
                     // Search has no large in-list header to hand the title back to —
                     // the field takes that space — so its bar title is always up.
                     scrolled = when {
-                        showSettings || showAccountScrobbling || showSources || showDiscord || showHistory ||
+                        showSettings || showAccountScrobbling || showSources || showHistory ||
                             (libraryShowAll != null && detail == null) -> true
                         // The page leads with its own large "Replay", so the bar
                         // stays out of the way until that has been scrolled off.
@@ -1811,7 +1806,6 @@ private fun YZMusicApp(
                     refreshing = currentFeed != null && currentFeed in refreshing,
                     pullFraction = { currentPull?.distanceFraction ?: 0f },
                     onBack = when {
-                        showDiscord -> ({ showDiscord = false })
                         showHistory -> ({ showHistory = false })
                         libraryShowAll != null && detail == null -> ({ libraryShowAll = null })
                         showAccountScrobbling -> ({ showAccountScrobbling = false })
@@ -1840,7 +1834,7 @@ private fun YZMusicApp(
                             // Left of the account photo, and only on Library itself:
                             // a history is a record of what was played, which reads
                             // as that tab's business rather than every tab's.
-                            if (!showHistory && !showReplay && !showDiscord && libraryShowAll == null &&
+                            if (!showHistory && !showReplay && libraryShowAll == null &&
                                 detail == null && selectedTab == TAB_LIBRARY
                             ) {
                                 IconButton(
@@ -2444,53 +2438,10 @@ private fun YZMusicApp(
             )
         }
 
-        // ---- Discord sign-in (full screen WebView) ----
-        if (showDiscordLogin) {
-            BackHandler { showDiscordLogin = false }
-            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                Column(Modifier.fillMaxSize()) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton(onClick = { showDiscordLogin = false }) {
-                            Icon(
-                                Icons.Rounded.Close,
-                                contentDescription = "Close",
-                                tint = MaterialTheme.colorScheme.onBackground,
-                            )
-                        }
-                        Text(
-                            "Sign in to Discord",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
-                        )
-                    }
-                    DiscordLoginScreen(
-                        onTokenCaptured = { token ->
-                            AppSettings.setDiscordToken(token)
-                            showDiscordLogin = false
-                        },
-                    )
-                }
-            }
-        }
-
         if (showSpotifyCanvasAuth) {
             BackHandler { showSpotifyCanvasAuth = false }
             SpotifyCanvasAuthScreen(
                 onNavigateUp = { showSpotifyCanvasAuth = false }
-            )
-        }
-
-        discordDialog?.let { which ->
-            DiscordDialogHost(
-                which = which,
-                hazeState = hazeState,
-                onDismiss = { discordDialog = null },
             )
         }
 

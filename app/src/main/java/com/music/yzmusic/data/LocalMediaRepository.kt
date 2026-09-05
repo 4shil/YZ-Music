@@ -165,6 +165,7 @@ object LocalMediaRepository {
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.DATA,
         )
 
@@ -185,6 +186,7 @@ object LocalMediaRepository {
                 val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                 val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val trackCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
                 val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
                 val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
@@ -196,6 +198,8 @@ object LocalMediaRepository {
                     val rawAlbum = cursor.getString(albumCol)
                     val albumId = cursor.getLong(albumIdCol)
                     val durationMs = cursor.getLong(durationCol)
+                    val rawTrack = cursor.getInt(trackCol)
+                    val trackNumber = (rawTrack % 1_000).takeIf { it > 0 }
                     val path = cursor.getString(dataCol)
 
                     val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
@@ -212,7 +216,9 @@ object LocalMediaRepository {
                             artist = artist,
                             thumbnailUrl = artworkUrl,
                             durationText = durationText,
+                            albumId = albumId.takeIf { it > 0 }?.toString(),
                             albumName = albumName,
+                            trackNumber = trackNumber,
                             localUri = contentUri,
                             localPath = path,
                         )
@@ -250,6 +256,7 @@ object LocalMediaRepository {
         var artist = "Unknown Artist"
         var albumName: String? = null
         var durationText: String? = null
+        var trackNumber: Int? = null
 
         runCatching {
             val retriever = MediaMetadataRetriever()
@@ -258,11 +265,13 @@ object LocalMediaRepository {
             val metaArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
             val metaAlbum = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
             val metaDur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            val metaTrack = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
 
             if (!metaTitle.isNullOrBlank()) title = metaTitle
             if (!metaArtist.isNullOrBlank()) artist = metaArtist
             albumName = metaAlbum.cleanTag()
             if (metaDur != null && metaDur > 0) durationText = formatDuration(metaDur)
+            trackNumber = metaTrack?.substringBefore('/')?.trim()?.toIntOrNull()
             retriever.release()
         }
 
@@ -273,6 +282,7 @@ object LocalMediaRepository {
             thumbnailUrl = scanned?.artworkUrl,
             durationText = durationText,
             albumName = albumName ?: scanned?.albumName,
+            trackNumber = trackNumber,
             localUri = uriStr,
         )
     }

@@ -12,6 +12,8 @@ data class Song(
     val albumId: String? = null,
     /** Names the album page header, which [albumId] alone can't. */
     val albumName: String? = null,
+    /** Position within an album when the source exposes it. */
+    val trackNumber: Int? = null,
     /** A music-video upload rather than the catalogue track. */
     val isVideo: Boolean = false,
     /**
@@ -145,6 +147,8 @@ enum class SearchFilter(val label: String, val params: String?) {
     PLAYLISTS("Playlists", "EgWKAQIoAWoKEAkQChAFEAMQBA=="),
 }
 
+enum class ShelfType { DEFAULT, HERO, MOOD_GENRE, RANKED, VIDEO }
+
 /** A card in a home-feed carousel: either a track (videoId) or an album/playlist (browseId). */
 data class ShelfItem(
     val title: String,
@@ -152,6 +156,10 @@ data class ShelfItem(
     val thumbnailUrl: String?,
     val videoId: String?,
     val browseId: String?,
+    val params: String? = null,
+    val stripeColor: Long? = null,
+    val customIndex: String? = null,
+    val isVideo: Boolean = false,
 )
 
 /** The signed-in Google account, as YouTube Music reports it. */
@@ -166,6 +174,9 @@ data class HomeShelf(
     val items: List<ShelfItem>,
     /** YouTube's "strapline" — the grey line Apple Music runs under a heading. */
     val subtitle: String = "",
+    val type: ShelfType = ShelfType.DEFAULT,
+    val moreBrowseId: String? = null,
+    val moreParams: String? = null,
 )
 
 /** A page of the Home feed, plus the token for the next one — null once exhausted. */
@@ -221,6 +232,7 @@ data class DetailPage(
     val subscriberCountText: String? = null,
     /** "3.4M monthly listeners" off an artist page's header. */
     val monthlyListenerCount: String? = null,
+    val params: String? = null,
 )
 
 /**

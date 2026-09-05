@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui
+package com.music.yzmusic.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -12,7 +12,11 @@ import com.music.yzmusic.data.lyrics.EmbeddedLyrics
 import com.music.yzmusic.data.lyrics.LyricLine
 import com.music.yzmusic.data.lyrics.LyricsRepository
 import com.music.yzmusic.data.lyrics.LyricsSource
+import com.music.yzmusic.data.lyrics.LyricsTranslation
+import com.music.yzmusic.data.lyrics.LyricsTranslationStage
+import com.music.yzmusic.data.lyrics.LyricsTranslationState
 import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.DebugLog as Log
 import com.music.yzmusic.data.innertube.Innertube
 import com.music.yzmusic.data.innertube.PlaybackTracker
 import com.music.yzmusic.data.innertube.StreamResolver
@@ -82,6 +86,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _homeLoadingMore = MutableStateFlow(false)
     val homeLoadingMore: StateFlow<Boolean> = _homeLoadingMore.asStateFlow()
+
+    private var loadMoreJob: Job? = null
+    private var lastLoadMoreErrorTime = 0L
+    private var consecutiveEmptyPages = 0
 
     private val _explore = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
     val explore: StateFlow<UiState<List<HomeShelf>>> = _explore.asStateFlow()
@@ -173,6 +181,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _lyricsChecked = MutableStateFlow(false)
     val lyricsChecked: StateFlow<Boolean> = _lyricsChecked.asStateFlow()
 
+    // ---- Lyrics Translation ----
+    private val _lyricsTranslation = MutableStateFlow<LyricsTranslationState>(LyricsTranslationState.Idle)
+    val lyricsTranslation: StateFlow<LyricsTranslationState> = _lyricsTranslation.asStateFlow()
+
+    private var lyricsTranslationJob: Job? = null
+    private val lyricsTranslationGeneration = AtomicLong(0L)
+
     private var lyricsJob: Job? = null
 
     /**
@@ -211,6 +226,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         lyricsFor = key
         _lyrics.value = null
         _lyricsSource.value = null
+        lyricsTranslationJob?.cancel()
+        lyricsTranslationGeneration.incrementAndGet()
+        _lyricsTranslation.value = LyricsTranslationState.Idle
         lyricsJob?.cancel()
         if (sources.isEmpty()) {
             // Switched off, or every source unticked. Nothing to look up, and
@@ -247,6 +265,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _lyrics.value = found?.lines
             _lyricsSource.value = found?.source
             _lyricsChecked.value = true
+        }
+    }
+
+    /**
+     * Translates lyrics on device via ML Kit. Bounded to recent songs and
+     * cancels automatically if track changes before completion.
+     */
+    fun translateLyrics(targetLanguageTag: String, requireWifi: Boolean = false) {
+        val sourceLines = _lyrics.value?.takeIf { it.isNotEmpty() } ?: return
+        val trackId = lyricsFor?.first ?: return
+        val target = Locale.forLanguageTag(targetLanguageTag).language.ifBlank { targetLanguageTag }
+
+        val current = _lyricsTranslation.value
+        if (current is LyricsTranslationState.Ready && Locale.forLanguageTag(current.targetLanguageTag).language == target) return
+        if (current is LyricsTranslationState.Loading && Locale.forLanguageTag(current.targetLanguageTag).language == target) return
+
+        lyricsTranslationJob?.cancel()
+        val generation = lyricsTranslationGeneration.incrementAndGet()
+        lyricsTranslationJob = viewModelScope.launch {
+            val result = LyricsTranslation.translate(sourceLines, target, requireWifi) { stage ->
+                if (generation == lyricsTranslationGeneration.get() && lyricsFor?.first == trackId) {
+                    _lyricsTranslation.value = LyricsTranslationState.Loading(target, stage)
+                }
+            }
+            if (generation == lyricsTranslationGeneration.get() && lyricsFor?.first == trackId) {
+                _lyricsTranslation.value = result
+            }
         }
     }
 
@@ -990,12 +1035,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun fetchHome() {
+        loadMoreJob?.cancel()
+        _homeLoadingMore.value = false
+        lastLoadMoreErrorTime = 0L
+        consecutiveEmptyPages = 0
         homeContinuation = null
-        homeSeenTitles.clear()
+        synchronized(homeSeenTitles) {
+            homeSeenTitles.clear()
+        }
         _home.value = YtMusicRepository.home().fold(
             onSuccess = { feed ->
                 homeContinuation = feed.continuation
-                val shelves = feed.shelves.filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
+                val shelves = feed.shelves.filter { shelf ->
+                    val titleKey = shelf.title.trim().lowercase(Locale.ROOT)
+                    if (titleKey.isEmpty()) true
+                    else synchronized(homeSeenTitles) { homeSeenTitles.add(titleKey) }
+                }
                 if (shelves.isEmpty()) UiState.Error("No results from YouTube Music")
                 else UiState.Success(shelves)
             },
@@ -1011,20 +1066,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun loadMoreHome() {
         val token = homeContinuation ?: return
         if (_homeLoadingMore.value) return
+        if (System.currentTimeMillis() - lastLoadMoreErrorTime < 2500L) return
         _homeLoadingMore.value = true
-        viewModelScope.launch {
-            YtMusicRepository.moreHome(token).onSuccess { feed ->
-                val added = feed.shelves.filter { homeSeenTitles.add(it.title.lowercase(Locale.ROOT)) }
-                // A page with nothing new signals the feed has looped back on
-                // itself rather than run dry with a token still attached —
-                // treat it the same as exhausted so scrolling can't spin here.
-                homeContinuation = feed.continuation.takeIf { added.isNotEmpty() }
-                if (added.isNotEmpty()) {
-                    val existing = (_home.value as? UiState.Success)?.data ?: emptyList()
-                    _home.value = UiState.Success(existing + added)
-                }
+        loadMoreJob = viewModelScope.launch {
+            try {
+                YtMusicRepository.moreHome(token).fold(
+                    onSuccess = { feed ->
+                        lastLoadMoreErrorTime = 0L
+                        val nextToken = feed.continuation?.takeIf { it != token }
+                        val added = feed.shelves.filter { shelf ->
+                            val titleKey = shelf.title.trim().lowercase(Locale.ROOT)
+                            if (titleKey.isEmpty()) true
+                            else synchronized(homeSeenTitles) { homeSeenTitles.add(titleKey) }
+                        }
+                        if (added.isEmpty()) {
+                            consecutiveEmptyPages++
+                            if (consecutiveEmptyPages >= 3 || nextToken == null) {
+                                homeContinuation = null
+                            } else {
+                                homeContinuation = nextToken
+                            }
+                        } else {
+                            consecutiveEmptyPages = 0
+                            homeContinuation = nextToken
+                            val existing = (_home.value as? UiState.Success)?.data ?: emptyList()
+                            _home.value = UiState.Success(existing + added)
+                        }
+                    },
+                    onFailure = { error ->
+                        lastLoadMoreErrorTime = System.currentTimeMillis()
+                        Log.w("YZ Music", "Failed to load more home: ${error.message}")
+                    }
+                )
+            } finally {
+                _homeLoadingMore.value = false
             }
-            _homeLoadingMore.value = false
         }
     }
 
@@ -1428,6 +1504,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         subtitle: String = "",
         thumbnailUrl: String? = null,
         type: BrowseType = BrowseType.OTHER,
+        params: String? = null,
     ) {
         val resolved = browseTypeOf(browseId, type)
         _detailStack.value += DetailPage(
@@ -1437,6 +1514,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             thumbnailUrl = thumbnailUrl,
             songs = UiState.Loading,
             type = resolved,
+            params = params,
         )
         viewModelScope.launch {
             var sections = emptyList<HomeShelf>()
@@ -1505,7 +1583,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 else -> {
-                    YtMusicRepository.browseSongs(browseId).fold(
+                    YtMusicRepository.browseSongs(browseId, params).fold(
                         onSuccess = { page ->
                             // Free here — the page that returned these rows is
                             // the one thing that states who made the playlist,
@@ -1521,7 +1599,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                 if (thumbnailUrl == null) artwork = header.thumbnailUrl
                             }
                             description = page.description
-                            if (page.songs.isEmpty()) {
+                            sections = page.sections
+                            if (page.songs.isEmpty() && page.sections.isEmpty()) {
                                 UiState.Error(NO_TRACKS)
                             } else {
                                 more = page.continuation

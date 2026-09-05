@@ -47,7 +47,6 @@ import com.music.yzmusic.data.LikeState
 import com.music.yzmusic.data.NerdStats
 import com.music.yzmusic.data.TrackLog
 import com.music.yzmusic.data.YtMusicRepository
-import com.music.yzmusic.data.discord.DiscordRPC
 import com.music.yzmusic.data.innertube.PlaybackTracker
 import com.music.yzmusic.data.stats.ListeningRecorder
 import com.music.yzmusic.data.innertube.PlayerClient
@@ -165,31 +164,6 @@ class PlaybackService : MediaSessionService() {
     private var listenBrainzStartMs: Long = 0L
 
     private var listenBrainzDurationMs: Long? = null
-
-    /**
-     * The gateway connection publishing what's playing to Discord, or null when
-     * the feature is off or no account is connected. See [DiscordRPC].
-     */
-    private var discordRpc: DiscordRPC? = null
-
-    /**
-     * The in-flight presence push. Held so the next one can cancel it: the
-     * pushes hit the network — the artwork has to be mirrored onto Discord's CDN
-     * before the activity can name it — and a skipped-through queue would
-     * otherwise land its presences in whatever order the requests happened to
-     * finish in, leaving the profile on a track the listener passed seconds ago.
-     */
-    private var discordUpdateJob: Job? = null
-
-    /**
-     * Whether a presence has been published and not yet taken down.
-     *
-     * Tracked because [KizzyRPC.close] — which is what clears the card — opens a
-     * gateway connection first if one isn't already up. Clearing unconditionally
-     * would therefore dial Discord for the sole purpose of sending it nothing,
-     * every time playback paused without a presence ever having been set.
-     */
-    private var discordPresenceUp = false
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -345,16 +319,6 @@ class PlaybackService : MediaSessionService() {
                 }
                 submitListenBrainzPlayingNow(song, exoPlayer.currentPosition, durationMs)
             }
-
-            // Discord: a pause has to clear the presence, not just stop
-            // refreshing it. Discord's countdown runs on its own clock from the
-            // timestamps it was given, so a presence left up while paused goes
-            // on advancing through a song that has stopped — and finishes it.
-            if (isPlaying) {
-                pushDiscordPresence(exoPlayer)
-            } else {
-                clearDiscordPresence()
-            }
         }
 
         /**
@@ -370,24 +334,6 @@ class PlaybackService : MediaSessionService() {
          */
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             publishWidgetState(playing = playWhenReady)
-        }
-
-        /**
-         * A seek is the one change to a playing track that no other callback
-         * reports, and the only one Discord cannot work out for itself: its bar
-         * is drawn from two absolute instants, so moving the playhead without
-         * sending new ones leaves the profile counting down from where the
-         * listener no longer is.
-         */
-        override fun onPositionDiscontinuity(
-            oldPosition: Player.PositionInfo,
-            newPosition: Player.PositionInfo,
-            reason: Int,
-        ) {
-            val exoPlayer = player ?: return
-            if (reason == Player.DISCONTINUITY_REASON_SEEK && exoPlayer.isPlaying) {
-                pushDiscordPresence(exoPlayer)
-            }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -842,7 +788,6 @@ class PlaybackService : MediaSessionService() {
         applySettings(sparePlayer)
         observeSettings()
         observeScrobbling()
-        observeDiscord()
         watchSleepTimer()
         // Before the listener below is attached, so loading the queue doesn't
         // read as a track change and set the read-ahead going.
@@ -1324,15 +1269,10 @@ class PlaybackService : MediaSessionService() {
         listenBrainzStartMs = if (exoPlayer.isPlaying) System.currentTimeMillis() else 0L
         listenBrainzDurationMs = durationMs
         if (newSong != null && exoPlayer.isPlaying) {
-            submitListenBrainzPlayingNow(newSong, 0L, durationMs)
-        }
+                    submitListenBrainzPlayingNow(newSong, 0L, durationMs)
+                }
 
-        // Discord: the whole of "live updating" for a card whose bar Discord
-        // draws itself. Only a track change needs a new presence; the countdown
-        // in between is Discord's own arithmetic.
-        if (exoPlayer.isPlaying) pushDiscordPresence(exoPlayer)
-
-        // "Sleep after this song": the queue moving on by itself is the
+                // "Sleep after this song": the queue moving on by itself is the
         // moment the track the user meant has finished. REPEAT counts
         // too, or the timer would never fire with repeat-one on.
         if (ended && SleepTimer.afterTrack.value) {
@@ -3040,172 +2980,6 @@ class PlaybackService : MediaSessionService() {
         val delaySeconds: Int,
     )
 
-    // ---- Discord Rich Presence -------------------------------------------------
-
-    /**
-     * Keeps the gateway connection in step with the settings that decide whether
-     * there should be one, and re-pushes the presence when the settings that
-     * decide what it *says* change.
-     *
-     * Two collectors rather than one because the two do different work. The
-     * account and the master switch can only be honoured by building or tearing
-     * down a connection; everything else is a field in a payload that can be
-     * re-sent over the connection already open. Combining them would reconnect
-     * the socket every time the user typed a character into a button label.
-     */
-    private fun observeDiscord() {
-        scope.launch {
-            combine(
-                AppSettings.discordToken,
-                AppSettings.discordRpcEnabled,
-            ) { token, enabled -> token.takeIf { enabled && it.isNotBlank() } }
-                .distinctUntilChanged()
-                .collectLatest { token ->
-                    // Torn down before anything is built, so switching accounts
-                    // can't leave the old one's socket up publishing under a
-                    // profile the user has just disconnected.
-                    discordUpdateJob?.cancel()
-                    discordRpc?.let { rpc ->
-                        val wasUp = discordPresenceUp
-                        discordPresenceUp = false
-                        // On IO, not on this collector's main thread: the
-                        // teardown closes a socket, and closing one gracefully
-                        // — which is what flushes the presence-clear queued on
-                        // the line above — blocks until the frame is away.
-                        //
-                        // Bounded, and that is the point rather than a
-                        // precaution. This runs on the way to *replacing*
-                        // [discordRpc], so for as long as it takes the field is
-                        // null and the feature is off: a teardown that hung —
-                        // which one waiting on an unreachable socket did — read
-                        // to the user as a switch that had stopped working
-                        // altogether until the app was restarted.
-                        withContext(Dispatchers.IO + NonCancellable) {
-                            withTimeoutOrNull(DISCORD_TEARDOWN_TIMEOUT_MS) {
-                                if (wasUp) runCatching { rpc.close() }
-                            }
-                            runCatching { rpc.closeRPC() }
-                        }
-                    }
-                    discordRpc = null
-
-                    if (token == null) return@collectLatest
-                    discordRpc = DiscordRPC(this@PlaybackService, token)
-                    // A presence that only appeared at the next track change
-                    // would make turning the switch on look like it had done
-                    // nothing for the length of a song.
-                    player?.takeIf { it.isPlaying }?.let(::pushDiscordPresence)
-                }
-        }
-
-        // The card's own contents, plus the playback rate — which is not
-        // cosmetic here: the timestamps are wall-clock instants with the rate
-        // divided out, so a change to it invalidates a presence already up.
-        scope.launch {
-            // Explicit <Any, _> for the same reason as [observeScrobbling]:
-            // mixed element types, and the reified vararg combine() otherwise
-            // infers an intersection type. Compared as a list rather than a
-            // joined string so two different settings can't stringify alike.
-            combine<Any, List<Any>>(
-                AppSettings.discordUseDetails,
-                AppSettings.discordStatus,
-                AppSettings.discordActivityType,
-                AppSettings.discordActivityName,
-                AppSettings.discordButton1Text,
-                AppSettings.discordButton1Visible,
-                AppSettings.discordButton2Text,
-                AppSettings.discordButton2Visible,
-                AppSettings.playbackSpeed,
-            ) { it.toList() }
-                .distinctUntilChanged()
-                // Dropped so the collector's first emission — which arrives at
-                // startup, before anything is playing — isn't treated as a
-                // change the user made.
-                .drop(1)
-                .collect {
-                    player?.takeIf { p -> p.isPlaying }?.let(::pushDiscordPresence)
-                }
-        }
-
-        // A network coming back, which is the other half of surviving a spell in
-        // the background: the gateway heals itself, but its retry backoff climbs
-        // to a minute, and a listener who walked back into Wi-Fi shouldn't watch
-        // a blank profile for that long. Nudging it here collapses the wait.
-        //
-        // [AppSettings.meteredConnection] is null only while there is no active
-        // network, so null -> non-null is exactly "we are online again". A
-        // metered/unmetered flip is worth acting on too: the socket does not
-        // survive a transport handover, and the old one may not have noticed yet.
-        scope.launch {
-            AppSettings.meteredConnection
-                .drop(1)
-                .collect { metered ->
-                    if (metered == null) return@collect
-                    val rpc = discordRpc ?: return@collect
-                    withContext(Dispatchers.IO) { runCatching { rpc.wakeUp() } }
-                    // Re-pushed rather than left to the gateway's own replay,
-                    // because a handover can strand the socket in a state where
-                    // it believes it is still connected: the push is what makes
-                    // it prove otherwise.
-                    if (discordPresenceUp) {
-                        player?.takeIf { p -> p.isPlaying }?.let(::pushDiscordPresence)
-                    }
-                }
-        }
-    }
-
-    /**
-     * Publishes the track [exoPlayer] is on as the user's Discord presence.
-     *
-     * A no-op with no connection, which is the ordinary case — most people will
-     * never connect an account, and this is called from the middle of every
-     * track change.
-     */
-    private fun pushDiscordPresence(exoPlayer: ExoPlayer) {
-        val rpc = discordRpc ?: return
-        val song = exoPlayer.currentMediaItem?.toSong() ?: return
-        // Read on the main thread, before the push is handed to IO: by the time
-        // a coroutine gets to run, the queue may have moved on, and ExoPlayer's
-        // state is only legal to read from the thread it was built on.
-        val positionMs = exoPlayer.currentPosition.coerceAtLeast(0L)
-        val durationMs = exoPlayer.duration.takeIf { it > 0 } ?: 0L
-        val speed = exoPlayer.playbackParameters.speed
-
-        discordUpdateJob?.cancel()
-        discordPresenceUp = true
-        discordUpdateJob = scope.launch(Dispatchers.IO) {
-            rpc.updateSong(
-                song = song,
-                currentPlaybackTimeMillis = positionMs,
-                durationMillis = durationMs,
-                playbackSpeed = speed,
-                useDetails = AppSettings.discordUseDetails.value,
-                status = AppSettings.discordStatus.value,
-                button1Text = AppSettings.discordButton1Text.value,
-                button1Visible = AppSettings.discordButton1Visible.value,
-                button2Text = AppSettings.discordButton2Text.value,
-                button2Visible = AppSettings.discordButton2Visible.value,
-                activityType = AppSettings.discordActivityType.value,
-                activityName = AppSettings.discordActivityName.value,
-            ).onFailure {
-                TrackLog.d("YZ Music", "Discord presence failed: ${it.message}", about = song.videoId)
-            }
-        }
-    }
-
-    /**
-     * Takes the presence down but leaves the socket up, so resuming doesn't pay
-     * for a reconnect. Discord clears the card on an activity-less presence.
-     */
-    private fun clearDiscordPresence() {
-        val rpc = discordRpc ?: return
-        if (!discordPresenceUp) return
-        discordPresenceUp = false
-        discordUpdateJob?.cancel()
-        discordUpdateJob = scope.launch(Dispatchers.IO) {
-            runCatching { rpc.close() }
-        }
-    }
 
     /**
      * Submits a finished ListenBrainz listen, but only if the service is
@@ -3296,21 +3070,6 @@ class PlaybackService : MediaSessionService() {
         // Last chance to get the current track's minutes onto disk: the scope is
         // cancelled a few lines down and the sampler goes with it.
         ListeningRecorder.onStopped()
-        // Discord, on the same terms as the ListenBrainz submit above: the
-        // service scope is cancelled a few lines down, and a presence left up
-        // would advertise a track that stopped when the process did — until
-        // Discord noticed the socket had gone, which can take minutes.
-        discordRpc?.let { rpc ->
-            discordRpc = null
-            val wasUp = discordPresenceUp
-            discordPresenceUp = false
-            CoroutineScope(Dispatchers.IO).launch {
-                withTimeoutOrNull(DISCORD_TEARDOWN_TIMEOUT_MS) {
-                    if (wasUp) runCatching { rpc.close() }
-                }
-                runCatching { rpc.closeRPC() }
-            }
-        }
         scope.cancel()
         crossfade?.release()
         crossfade = null
@@ -3394,19 +3153,8 @@ class PlaybackService : MediaSessionService() {
         /** How often played-seconds are sampled off the player. */
         const val PROGRESS_SAMPLE_MS = 5_000L
 
-        /**
-         * How long a Discord teardown may spend clearing the presence before the
-         * socket is closed out from under it.
-         *
-         * Closing the gateway ends the session, which clears the card on
-         * Discord's side anyway — the explicit clear only makes it immediate. So
-         * this is a bound on politeness, not on correctness, and it is short
-         * because whatever is tearing down is waiting on it.
-         */
-        const val DISCORD_TEARDOWN_TIMEOUT_MS = 3_000L
-
-        /**
-         * Size of each range the player fetches. The same figure read-ahead
+                /**
+                 * Size of each range the player fetches. The same figure read-ahead
          * uses, and for the same reason — see [ChunkedDataSource].
          */
         const val STREAM_CHUNK_BYTES = 2L * 1024 * 1024

@@ -106,7 +106,6 @@
     <string name="whats_new">新版本说明</string>
     <string name="log_copied">日志已复制 · %1$d 行</string>
     <string name="sign_in_youtube_music">登录 YouTube Music</string>
-    <string name="sign_in_discord">登录 Discord</string>
     <string name="personalized_recommendations">获取个性化推荐</string>
     <string name="play_next">下一首播放</string>
     <string name="queue">播放队列</string>

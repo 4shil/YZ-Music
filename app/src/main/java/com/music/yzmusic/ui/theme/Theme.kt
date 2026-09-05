@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.theme
+package com.music.yzmusic.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -8,6 +8,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -16,13 +17,28 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.yzmusic.R
+import com.music.yzmusic.data.settings.AppSettings
 
-// Apple Music's signature red, used sparingly as the single accent.
-val AccentRed = Color(0xFFFA2D48)
+/** Factory default — Apple Music's signature red. */
+val DefaultAccentRed = Color(0xFFFA2D48)
 
-private val DarkColors = darkColorScheme(
-    primary = AccentRed,
+/**
+ * The current accent colour, live from [AppSettings.accentColor].
+ *
+ * Read this inside any Composable that needs the accent directly (e.g.
+ * [ReplayStories]). Everything else reads it via [MaterialTheme.colorScheme.primary],
+ * which [YZMusicTheme] wires up from here automatically.
+ */
+@Composable
+fun accentColor(): Color {
+    val argb by AppSettings.accentColor.collectAsStateWithLifecycle()
+    return Color(argb)
+}
+
+private fun darkColors(accent: Color) = darkColorScheme(
+    primary = accent,
     onPrimary = Color.White,
     background = Color.Black,
     onBackground = Color.White,
@@ -33,8 +49,8 @@ private val DarkColors = darkColorScheme(
     outline = Color(0xFF2C2C2E),
 )
 
-private val LightColors = lightColorScheme(
-    primary = AccentRed,
+private fun lightColors(accent: Color) = lightColorScheme(
+    primary = accent,
     onPrimary = Color.White,
     background = Color.White,
     onBackground = Color.Black,
@@ -95,8 +111,9 @@ fun YZMusicTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    val accent = accentColor()
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = if (darkTheme) darkColors(accent) else lightColors(accent),
         typography = YZMusicTypography,
         content = content,
     )

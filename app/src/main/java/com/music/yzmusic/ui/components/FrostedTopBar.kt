@@ -184,7 +184,7 @@ fun FrostedTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Image(
-                        painter = painterResource(R.drawable.ic_logo),
+                        painter = painterResource(R.drawable.ic_launcher_foreground),
                         contentDescription = null,
                         colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
                         modifier = Modifier.size(44.dp),

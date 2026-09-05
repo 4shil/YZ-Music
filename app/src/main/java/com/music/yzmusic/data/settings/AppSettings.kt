@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data.settings
+package com.music.yzmusic.data.settings
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -6,7 +6,6 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import com.music.yzmusic.BuildConfig
-import com.music.yzmusic.auth.AuthStore
 import com.music.yzmusic.data.lyrics.LyricsSource
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -79,9 +78,6 @@ object AppSettings {
 
     private lateinit var prefs: SharedPreferences
 
-    /** Only for the Discord token — everything else on here is plain prefs. */
-    private lateinit var authStore: AuthStore
-
     /**
      * Quality ceilings, one per kind of connection — the point of the split is
      * that Wi-Fi can stay on High while mobile data is capped. Both default to
@@ -152,6 +148,12 @@ object AppSettings {
     val skipSilence = MutableStateFlow(false)
 
     /**
+     * Seconds to seek forward or backward on double-tap in the player.
+     * Must be one of 5, 10, or 15 seconds. Default is 10.
+     */
+    val seekDurationSeconds = MutableStateFlow(10)
+
+    /**
      * Widens stereo output via [com.music.yzmusic.playback.SpatialAudioProcessor],
      * a stereo widening + cross-feed effect running inside ExoPlayer's own
      * pipeline. Not true object-based spatial audio — YouTube only ever hands
@@ -160,6 +162,15 @@ object AppSettings {
     val spatialAudio = MutableStateFlow(false)
     val playbackSpeed = MutableStateFlow(1.0f)
     val themeMode = MutableStateFlow(ThemeMode.DARK)
+
+    /**
+     * The app's single accent colour, as an ARGB Int (fully opaque).
+     *
+     * Defaults to Apple Music's signature red (0xFFFA2D48). Stored as an Int
+     * so it survives process restarts and backup/restore without any special
+     * serialisation — SharedPreferences already handles Int natively.
+     */
+    val accentColor = MutableStateFlow(DEFAULT_ACCENT_COLOR)
 
     /** Keep playing similar music once the queue runs out. */
     val autoplay = MutableStateFlow(true)
@@ -317,49 +328,6 @@ object AppSettings {
     val listenBrainzToken = MutableStateFlow("")
     val spotifySpdcToken = MutableStateFlow("")
 
-    // ── Discord Rich Presence ───────────────────────────────────────────
-
-    /**
-     * The connected Discord account's token, mirrored out of [AuthStore] so
-     * [PlaybackService][com.music.yzmusic.playback.PlaybackService] can pick
-     * up a login without polling for one. Empty means not connected.
-     *
-     * Only the mirror is here — the persisted copy is encrypted, because unlike
-     * a scrobbler key this one is the account itself.
-     */
-    val discordToken = MutableStateFlow("")
-
-    /**
-     * Who the token belongs to, cached at login. Kept so the settings screen
-     * can show the account without a round trip every time it opens, and can
-     * still show it offline.
-     */
-    val discordUsername = MutableStateFlow("")
-    val discordName = MutableStateFlow("")
-    val discordAvatar = MutableStateFlow("")
-
-    val discordRpcEnabled = MutableStateFlow(true)
-
-    /** Put the track title on the bold profile line, in place of the artist. */
-    val discordUseDetails = MutableStateFlow(false)
-
-    /** Reveals the presence-shape controls: status, activity type/name, buttons. */
-    val discordAdvancedMode = MutableStateFlow(false)
-
-    val discordStatus = MutableStateFlow("online")
-    val discordActivityType = MutableStateFlow("listening")
-
-    /** Overrides the "Listening to ___" line; empty means the app's own name. */
-    val discordActivityName = MutableStateFlow("")
-
-    val discordButton1Text = MutableStateFlow("")
-    val discordButton1Visible = MutableStateFlow(true)
-    val discordButton2Text = MutableStateFlow("")
-    val discordButton2Visible = MutableStateFlow(true)
-
-    /** The notice about what connecting an account actually does has been read. */
-    val discordInfoDismissed = MutableStateFlow(false)
-
     /** Published by PlaybackService so the UI can open the system equalizer. */
     val audioSessionId = MutableStateFlow(0)
 
@@ -414,7 +382,6 @@ object AppSettings {
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences("yzmusic_settings", Context.MODE_PRIVATE)
-        authStore = AuthStore(context)
         readAll()
         watchConnection(context)
     }
@@ -445,11 +412,16 @@ object AppSettings {
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
         smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
         skipSilence.value = prefs.getBoolean(KEY_SKIP_SILENCE, false)
+        seekDurationSeconds.value = when (val saved = prefs.getInt(KEY_SEEK_DURATION_SECONDS, 10)) {
+            5, 10, 15 -> saved
+            else -> 10
+        }
         spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
         playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
         themeMode.value = runCatching {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
         }.getOrDefault(ThemeMode.DARK)
+        accentColor.value = prefs.getInt(KEY_ACCENT_COLOR, DEFAULT_ACCENT_COLOR)
         autoplay.value = prefs.getBoolean(KEY_AUTOPLAY, true)
         showNerdStats.value = prefs.getBoolean(KEY_NERD_STATS, false)
         reduceAnimation.value = prefs.getBoolean(KEY_REDUCE_ANIMATION, false)
@@ -484,21 +456,6 @@ object AppSettings {
         spotifySpdcToken.value = prefs.getString(KEY_SPOTIFY_SPDC_TOKEN, "").orEmpty()
         replayGenres.value = prefs.getBoolean(KEY_REPLAY_GENRES, true)
         pinnedPlaylists.value = readPinnedPlaylists()
-        discordToken.value = authStore.discordToken.orEmpty()
-        discordUsername.value = prefs.getString(KEY_DISCORD_USERNAME, "").orEmpty()
-        discordName.value = prefs.getString(KEY_DISCORD_NAME, "").orEmpty()
-        discordAvatar.value = prefs.getString(KEY_DISCORD_AVATAR, "").orEmpty()
-        discordRpcEnabled.value = prefs.getBoolean(KEY_DISCORD_RPC_ENABLED, true)
-        discordUseDetails.value = prefs.getBoolean(KEY_DISCORD_USE_DETAILS, false)
-        discordAdvancedMode.value = prefs.getBoolean(KEY_DISCORD_ADVANCED_MODE, false)
-        discordStatus.value = prefs.getString(KEY_DISCORD_STATUS, "online").orEmpty()
-        discordActivityType.value = prefs.getString(KEY_DISCORD_ACTIVITY_TYPE, "listening").orEmpty()
-        discordActivityName.value = prefs.getString(KEY_DISCORD_ACTIVITY_NAME, "").orEmpty()
-        discordButton1Text.value = prefs.getString(KEY_DISCORD_BUTTON_1_TEXT, "").orEmpty()
-        discordButton1Visible.value = prefs.getBoolean(KEY_DISCORD_BUTTON_1_VISIBLE, true)
-        discordButton2Text.value = prefs.getString(KEY_DISCORD_BUTTON_2_TEXT, "").orEmpty()
-        discordButton2Visible.value = prefs.getBoolean(KEY_DISCORD_BUTTON_2_VISIBLE, true)
-        discordInfoDismissed.value = prefs.getBoolean(KEY_DISCORD_INFO_DISMISSED, false)
     }
 
     /**
@@ -637,6 +594,12 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_SKIP_SILENCE, value).apply()
     }
 
+    fun setSeekDurationSeconds(value: Int) {
+        val sanitized = if (value in listOf(5, 10, 15)) value else 10
+        seekDurationSeconds.value = sanitized
+        prefs.edit().putInt(KEY_SEEK_DURATION_SECONDS, sanitized).apply()
+    }
+
     fun setSpatialAudio(value: Boolean) {
         spatialAudio.value = value
         prefs.edit().putBoolean(KEY_SPATIAL_AUDIO, value).apply()
@@ -655,6 +618,11 @@ object AppSettings {
     fun setThemeMode(value: ThemeMode) {
         themeMode.value = value
         prefs.edit().putString(KEY_THEME, value.name).apply()
+    }
+
+    fun setAccentColor(value: Int) {
+        accentColor.value = value
+        prefs.edit().putInt(KEY_ACCENT_COLOR, value).apply()
     }
 
     fun setReduceAnimation(value: Boolean) {
@@ -849,78 +817,6 @@ object AppSettings {
         prefs.edit().putString(KEY_LISTENBRAINZ_TOKEN, value).apply()
     }
 
-    /** Writes through to the encrypted store; pass "" to disconnect. */
-    fun setDiscordToken(value: String) {
-        discordToken.value = value
-        authStore.discordToken = value.ifEmpty { null }
-    }
-
-    fun setDiscordAccount(username: String, name: String, avatar: String?) {
-        discordUsername.value = username
-        discordName.value = name
-        discordAvatar.value = avatar.orEmpty()
-        prefs.edit()
-            .putString(KEY_DISCORD_USERNAME, username)
-            .putString(KEY_DISCORD_NAME, name)
-            .putString(KEY_DISCORD_AVATAR, avatar.orEmpty())
-            .apply()
-    }
-
-    fun setDiscordRpcEnabled(value: Boolean) {
-        discordRpcEnabled.value = value
-        prefs.edit().putBoolean(KEY_DISCORD_RPC_ENABLED, value).apply()
-    }
-
-    fun setDiscordUseDetails(value: Boolean) {
-        discordUseDetails.value = value
-        prefs.edit().putBoolean(KEY_DISCORD_USE_DETAILS, value).apply()
-    }
-
-    fun setDiscordAdvancedMode(value: Boolean) {
-        discordAdvancedMode.value = value
-        prefs.edit().putBoolean(KEY_DISCORD_ADVANCED_MODE, value).apply()
-    }
-
-    fun setDiscordStatus(value: String) {
-        discordStatus.value = value
-        prefs.edit().putString(KEY_DISCORD_STATUS, value).apply()
-    }
-
-    fun setDiscordActivityType(value: String) {
-        discordActivityType.value = value
-        prefs.edit().putString(KEY_DISCORD_ACTIVITY_TYPE, value).apply()
-    }
-
-    fun setDiscordActivityName(value: String) {
-        discordActivityName.value = value
-        prefs.edit().putString(KEY_DISCORD_ACTIVITY_NAME, value).apply()
-    }
-
-    fun setDiscordButton1Text(value: String) {
-        discordButton1Text.value = value
-        prefs.edit().putString(KEY_DISCORD_BUTTON_1_TEXT, value).apply()
-    }
-
-    fun setDiscordButton1Visible(value: Boolean) {
-        discordButton1Visible.value = value
-        prefs.edit().putBoolean(KEY_DISCORD_BUTTON_1_VISIBLE, value).apply()
-    }
-
-    fun setDiscordButton2Text(value: String) {
-        discordButton2Text.value = value
-        prefs.edit().putString(KEY_DISCORD_BUTTON_2_TEXT, value).apply()
-    }
-
-    fun setDiscordButton2Visible(value: Boolean) {
-        discordButton2Visible.value = value
-        prefs.edit().putBoolean(KEY_DISCORD_BUTTON_2_VISIBLE, value).apply()
-    }
-
-    fun setDiscordInfoDismissed(value: Boolean) {
-        discordInfoDismissed.value = value
-        prefs.edit().putBoolean(KEY_DISCORD_INFO_DISMISSED, value).apply()
-    }
-
     fun setReplayGenres(value: Boolean) {
         replayGenres.value = value
         prefs.edit().putBoolean(KEY_REPLAY_GENRES, value).apply()
@@ -951,12 +847,6 @@ object AppSettings {
         return stored.split(",").filter { it.isNotBlank() }
     }
 
-    /** Forgets the account: token and cached profile. */
-    fun clearDiscordAccount() {
-        setDiscordToken("")
-        setDiscordAccount("", "", null)
-    }
-
     // ── Backup ──────────────────────────────────────────────────────────────
 
     /**
@@ -971,10 +861,9 @@ object AppSettings {
      * that has left the device in plain text. Signing back in after a restore is
      * a minute; a leaked session key is not recoverable at all.
      *
-     * The Discord token is not here for the same reason and one more: it never
-     * reaches this file. It lives in the encrypted store — see [AuthStore] — and
-     * so does the YouTube cookie, which means neither can be exported by
-     * accident.
+     * The YouTube cookie is not here for the same reason: it lives in the
+     * encrypted store — see [AuthStore] — which means it cannot be exported
+     * by accident.
      */
     fun exportPrefs(): Map<String, Any?> {
         if (!this::prefs.isInitialized) return emptyMap()
@@ -1043,6 +932,9 @@ object AppSettings {
     const val DEFAULT_CACHE_LIMIT_BYTES = 512L * 1024 * 1024
     const val MAX_CACHE_LIMIT_BYTES = 10L * 1024 * 1024 * 1024
 
+    /** Apple Music's signature red — the factory default for [accentColor]. */
+    const val DEFAULT_ACCENT_COLOR = 0xFFFA2D48.toInt()
+
     private const val KEY_QUALITY_LEGACY = "audio_quality"
     private const val KEY_QUALITY_WIFI = "audio_quality_wifi"
     private const val KEY_QUALITY_CELLULAR = "audio_quality_cellular"
@@ -1052,9 +944,11 @@ object AppSettings {
     private const val KEY_CROSSFADE = "crossfade_seconds"
     private const val KEY_SMART_FADE = "smart_fade_enabled"
     private const val KEY_SKIP_SILENCE = "skip_silence"
+    private const val KEY_SEEK_DURATION_SECONDS = "seek_duration_seconds"
     private const val KEY_SPATIAL_AUDIO = "spatial_audio"
     private const val KEY_SPEED = "playback_speed"
     private const val KEY_THEME = "theme_mode"
+    private const val KEY_ACCENT_COLOR = "accent_color"
     private const val KEY_AUTOPLAY = "autoplay"
     private const val KEY_NERD_STATS = "show_nerd_stats"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
@@ -1090,20 +984,6 @@ object AppSettings {
     private const val KEY_LISTENBRAINZ_TOKEN = "listenbrainz_token"
     private const val KEY_SPOTIFY_SPDC_TOKEN = "spotify_spdc_token"
 
-    private const val KEY_DISCORD_USERNAME = "discord_username"
-    private const val KEY_DISCORD_NAME = "discord_name"
-    private const val KEY_DISCORD_AVATAR = "discord_avatar"
-    private const val KEY_DISCORD_RPC_ENABLED = "discord_rpc_enabled"
-    private const val KEY_DISCORD_USE_DETAILS = "discord_use_details"
-    private const val KEY_DISCORD_ADVANCED_MODE = "discord_advanced_mode"
-    private const val KEY_DISCORD_STATUS = "discord_status"
-    private const val KEY_DISCORD_ACTIVITY_TYPE = "discord_activity_type"
-    private const val KEY_DISCORD_ACTIVITY_NAME = "discord_activity_name"
-    private const val KEY_DISCORD_BUTTON_1_TEXT = "discord_button_1_text"
-    private const val KEY_DISCORD_BUTTON_1_VISIBLE = "discord_button_1_visible"
-    private const val KEY_DISCORD_BUTTON_2_TEXT = "discord_button_2_text"
-    private const val KEY_DISCORD_BUTTON_2_VISIBLE = "discord_button_2_visible"
-    private const val KEY_DISCORD_INFO_DISMISSED = "discord_info_dismissed"
     private const val KEY_LAST_VERSION_CODE = "last_version_code"
 }
 

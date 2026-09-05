@@ -148,7 +148,10 @@ object YtMusicRepository {
                 .map { id -> async { runCatching { shelvesOf(id) }.getOrDefault(emptyList()) } }
                 .awaitAll()
             val seen = mutableSetOf<String>()
-            feeds.flatten().filter { seen.add(it.title.lowercase(Locale.ROOT)) }
+            feeds.flatten().filter { shelf ->
+                val key = shelf.title.lowercase(Locale.ROOT)
+                seen.add(key)
+            }
         }
     }
 
@@ -309,6 +312,7 @@ object YtMusicRepository {
          * continuation, same as [header].
          */
         val description: String? = null,
+        val sections: List<HomeShelf> = emptyList(),
     )
 
     /**
@@ -320,14 +324,15 @@ object YtMusicRepository {
      * first response. The rest arrives behind a page that is by then already
      * being read — see [moreSongs].
      */
-    suspend fun browseSongs(browseId: String): Result<SongPage> = call("browse:$browseId") {
-        val response = Innertube.browse(browseId)
-        val page = pageOf(response)
-        // Only a playlist has an owner in the sense that matters — see
-        // parsePlaylistOwned — and only its own first response can be asked.
-        if (!browseId.startsWith("VL")) page
-        else page.copy(owned = InnertubeParser.parsePlaylistOwned(response))
-    }
+    suspend fun browseSongs(browseId: String, params: String? = null): Result<SongPage> =
+        call("browse:$browseId${params?.let { ":$it" }.orEmpty()}") {
+            val response = Innertube.browse(browseId, params)
+            val page = pageOf(response)
+            // Only a playlist has an owner in the sense that matters — see
+            // parsePlaylistOwned — and only its own first response can be asked.
+            if (!browseId.startsWith("VL")) page
+            else page.copy(owned = InnertubeParser.parsePlaylistOwned(response))
+        }
 
     /** The page [SongPage.continuation] points at. */
     suspend fun moreSongs(token: String): Result<SongPage> = call("browse:more") {
@@ -351,12 +356,13 @@ object YtMusicRepository {
     private fun pageOf(response: JsonObject): SongPage {
         val library = InnertubeParser.parseLibraryState(response)
         val header = InnertubeParser.parseBrowseHeader(response)
+        val sections = InnertubeParser.parseHome(response)
         // A playlist page is scoped to its own shelf so its "Suggested
         // tracks" never read as songs the user added — see
         // parsePlaylistShelf. Anything else (album, library, history) has no
         // such shelf, and falls back to the layout-agnostic walk.
         InnertubeParser.parsePlaylistShelf(response)?.let { shelf ->
-            return SongPage(shelf.songs, shelf.continuation, shelf.suggested, library, header = header)
+            return SongPage(shelf.songs, shelf.continuation, shelf.suggested, library, header = header, sections = sections)
         }
         return SongPage(
             // One response can name the same track twice — an album page that
@@ -367,6 +373,7 @@ object YtMusicRepository {
             library = library,
             header = header,
             description = InnertubeParser.parseDescription(response),
+            sections = sections,
         )
     }
 

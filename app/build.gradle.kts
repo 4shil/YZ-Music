@@ -253,9 +253,6 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
-    // ---- Discord Rich Presence: the gateway is a WebSocket, so Ktor needs the plugin ----
-    implementation("io.ktor:ktor-client-websockets:3.0.3")
-
     // ---- Stream resolution: NewPipe solves YouTube's signature + `n` throttling ----
     // Pinned to v0.26.3, not the newer v0.26.4: v0.26.4's player-JS parser fails with
     // "Could not parse deobfuscation function" on the current player build, which blocks
@@ -288,6 +285,11 @@ dependencies {
     // files, which would put an offline conversion step between the model and
     // the app for a saving that does not matter in a self-distributed APK.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
+
+    // ---- Lyrics Translation: on-device ML Kit ----
+    implementation("com.google.mlkit:language-id:17.0.6")
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.replay
+package com.music.yzmusic.ui.replay
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -22,6 +22,7 @@ import coil3.toBitmap
 import com.music.yzmusic.R
 import com.music.yzmusic.data.model.CARD_ART_PX
 import com.music.yzmusic.data.model.artworkAt
+import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.data.stats.ReplaySummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -732,7 +733,7 @@ private const val CARD_ROWS = 5
 private const val COLUMN_GAP = 36f
 private const val ROW_HEIGHT = 116f
 private const val ART = 84f
-private const val ACCENT = 0xFFFA2D48.toInt()
+private val ACCENT: Int get() = AppSettings.accentColor.value
 
 private const val POSTER_ROWS = 5
 private const val POSTER_ALBUMS = 3
