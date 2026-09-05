@@ -163,69 +163,6 @@ fun LastfmLoginAlert(
 }
 
 /**
- * Manual token entry, for when the in-app login can't run — a WebView an OEM
- * has broken, or a token lifted from a desktop client.
- *
- * [error] carries back what the verification attempt said, because a token that
- * was mistyped or has expired is indistinguishable from one that works until
- * Discord is asked about it.
- */
-@OptIn(ExperimentalHazeMaterialsApi::class)
-@Composable
-fun DiscordTokenAlert(
-    hazeState: HazeState,
-    tokenInput: String,
-    onTokenInputChange: (String) -> Unit,
-    error: String?,
-    loading: Boolean,
-    onSave: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertScaffold(hazeState = hazeState, onDismiss = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 19.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = "Discord Token",
-                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = error
-                    ?: "Paste your Discord account token. It stays on this device, " +
-                    "encrypted, and is only ever sent to Discord.",
-                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
-                color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-            )
-            AlertTextField(
-                value = tokenInput,
-                onValueChange = onTokenInputChange,
-                placeholder = "Token",
-                enabled = !loading,
-                isPassword = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { if (tokenInput.isNotBlank()) onSave() }),
-            )
-        }
-        AlertRule()
-        AlertAction(
-            label = if (loading) "Checking..." else "Save",
-            emphasised = true,
-            onClick = onSave,
-            enabled = !loading && tokenInput.isNotBlank(),
-        )
-        AlertRule()
-        AlertAction(label = "Cancel", emphasised = false, onClick = onDismiss, enabled = !loading)
-    }
-}
-
-/**
  * One free-text presence field — an activity name, a button label.
  *
  * [message] is where the caller explains the field, including which `{...}`

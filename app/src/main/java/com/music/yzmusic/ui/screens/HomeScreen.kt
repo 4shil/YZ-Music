@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.screens
+package com.music.yzmusic.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -34,6 +34,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
@@ -54,6 +58,7 @@ import com.music.yzmusic.data.model.CARD_ART_PX
 import com.music.yzmusic.data.model.HEADER_ART_PX
 import com.music.yzmusic.data.model.HomeShelf
 import com.music.yzmusic.data.model.ShelfItem
+import com.music.yzmusic.data.model.ShelfType
 import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.artworkAt
 import com.music.yzmusic.ui.components.HERO_CARD_RATIO
@@ -93,6 +98,7 @@ fun HomeScreen(
     // Explore doesn't page — only Home has a continuation worth following.
     onLoadMore: (() -> Unit)? = null,
     loadingMore: Boolean = false,
+    onShowAll: ((HomeShelf) -> Unit)? = null,
 ) {
     PullToRefresh(
         refreshing = refreshing,
@@ -124,7 +130,7 @@ fun HomeScreen(
                     MessageState(state.message, actionLabel = "Retry", onAction = onRetry)
                 }
                 is UiState.Success -> {
-                    itemsIndexedShelves(state.data, onItemClick, onItemLongPress)
+                    itemsIndexedShelves(state.data, onItemClick, onItemLongPress, onShowAll)
                     if (loadingMore) feedMoreSkeleton()
                 }
             }
@@ -132,19 +138,22 @@ fun HomeScreen(
     }
 
     if (onLoadMore != null && state is UiState.Success) {
-        // Fires again each time the tail end of the list comes back into
-        // view — appending shelves doesn't reset it, only leaving the
-        // bottom and scrolling back down does, which is exactly when
-        // another page is worth asking for.
-        val nearEnd by remember {
-            derivedStateOf {
+        val currentOnLoadMore by rememberUpdatedState(onLoadMore)
+        val currentLoadingMore by rememberUpdatedState(loadingMore)
+        LaunchedEffect(listState) {
+            snapshotFlow {
                 val layout = listState.layoutInfo
-                val last = layout.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
-                layout.totalItemsCount > 0 && last >= layout.totalItemsCount - 3
+                val total = layout.totalItemsCount
+                val last = layout.visibleItemsInfo.lastOrNull()?.index ?: -1
+                val nearEnd = total > 0 && last >= total - 3
+                Triple(nearEnd, total, currentLoadingMore)
             }
-        }
-        LaunchedEffect(nearEnd) {
-            if (nearEnd) onLoadMore()
+            .distinctUntilChanged()
+            .collect { (nearEnd, _, isLoading) ->
+                if (nearEnd && !isLoading) {
+                    currentOnLoadMore()
+                }
+            }
         }
     }
 }
@@ -157,13 +166,32 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     shelves: List<HomeShelf>,
     onItemClick: (ShelfItem) -> Unit,
     onItemLongPress: ((ShelfItem) -> Unit)?,
+    onShowAll: ((HomeShelf) -> Unit)? = null,
 ) {
     shelves.forEachIndexed { index, shelf ->
         item(key = shelf.title + index) {
-            if (index == 0) {
-                HeroShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress)
-            } else {
-                Shelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress)
+            val showAllAction = if (shelf.moreBrowseId != null && onShowAll != null) {
+                { onShowAll(shelf) }
+            } else null
+            when {
+                index == 0 && shelf.type == ShelfType.DEFAULT -> {
+                    HeroShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress, onShowAll = showAllAction)
+                }
+                shelf.type == ShelfType.HERO -> {
+                    HeroShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress, onShowAll = showAllAction)
+                }
+                shelf.type == ShelfType.MOOD_GENRE -> {
+                    MoodGenreShelf(shelf = shelf, onItemClick = onItemClick, onShowAll = showAllAction)
+                }
+                shelf.type == ShelfType.RANKED -> {
+                    RankedShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress, onShowAll = showAllAction)
+                }
+                shelf.type == ShelfType.VIDEO -> {
+                    VideoShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress, onShowAll = showAllAction)
+                }
+                else -> {
+                    Shelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress, onShowAll = showAllAction)
+                }
             }
         }
     }
@@ -220,9 +248,10 @@ private fun HeroShelf(
     shelf: HomeShelf,
     onItemClick: (ShelfItem) -> Unit,
     onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    onShowAll: (() -> Unit)? = null,
 ) {
     Column(Modifier.padding(bottom = 26.dp)) {
-        SectionHeader(shelf.title, shelf.subtitle)
+        SectionHeader(shelf.title, shelf.subtitle, onShowAll = onShowAll)
         // Measured rather than taken as a share of the parent, because the card
         // has a ceiling as well as a fraction — see [heroCardWidth]. A fixed
         // width is also the only one of the two the aspect ratio below can turn
@@ -314,10 +343,11 @@ internal fun Shelf(
     shelf: HomeShelf,
     onItemClick: (ShelfItem) -> Unit,
     onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    onShowAll: (() -> Unit)? = null,
     leadingCard: (@Composable () -> Unit)? = null,
 ) {
     Column(Modifier.padding(bottom = 26.dp)) {
-        SectionHeader(shelf.title, shelf.subtitle)
+        SectionHeader(shelf.title, shelf.subtitle, onShowAll = onShowAll)
         LazyRow(
             contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -480,6 +510,261 @@ internal fun ShelfCard(
                 modifier = Modifier.weight(1f, fill = false),
             )
         }
+        Text(
+            text = item.subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun MoodGenreShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onShowAll: (() -> Unit)? = null,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle, onShowAll = onShowAll)
+        val pairs = remember(shelf.items) { shelf.items.chunked(2) }
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(pairs) { pair ->
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    pair.forEach { item ->
+                        MoodGenreTile(
+                            item = item,
+                            onClick = { onItemClick(item) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoodGenreTile(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val stripeColor = item.stripeColor?.let { Color(it.toInt()) }
+    Box(
+        modifier = modifier
+            .width(170.dp)
+            .height(50.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .thumbnailBorder(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick),
+    ) {
+        if (stripeColor != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                stripeColor.copy(alpha = 0.28f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxSize()
+                    .background(stripeColor),
+            )
+        }
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(horizontal = 14.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RankedShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    onShowAll: (() -> Unit)? = null,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle, onShowAll = onShowAll)
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            items(shelf.items) { item ->
+                RankedShelfCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    onLongPress = onItemLongPress?.let { { it(item) } },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RankedShelfCard(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
+) {
+    Column(
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .thumbnailBorder(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            AsyncImage(
+                model = item.thumbnailUrl.artworkAt(CARD_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (!item.customIndex.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.72f))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        text = "#${item.customIndex}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = item.subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun VideoShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    onShowAll: (() -> Unit)? = null,
+) {
+    Column(Modifier.padding(bottom = 26.dp)) {
+        SectionHeader(shelf.title, shelf.subtitle, onShowAll = onShowAll)
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            items(shelf.items) { item ->
+                VideoShelfCard(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    onLongPress = onItemLongPress?.let { { it(item) } },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun VideoShelfCard(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier.width(220.dp),
+) {
+    Column(
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1.778f)
+                .clip(RoundedCornerShape(12.dp))
+                .thumbnailBorder(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            AsyncImage(
+                model = item.thumbnailUrl.artworkAt(HEADER_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .padding(8.dp)
+                    .align(Alignment.BottomEnd)
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.65f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = YZMusicIcons.Play,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         Text(
             text = item.subtitle,
             style = MaterialTheme.typography.bodyMedium,

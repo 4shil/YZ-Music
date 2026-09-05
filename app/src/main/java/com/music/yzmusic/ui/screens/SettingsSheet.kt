@@ -161,6 +161,7 @@ fun SettingsScreen(
     val crossfade by AppSettings.crossfadeSeconds.collectAsStateWithLifecycle()
     val smartFade by AppSettings.smartFadeEnabled.collectAsStateWithLifecycle()
     val skipSilence by AppSettings.skipSilence.collectAsStateWithLifecycle()
+    val seekDuration by AppSettings.seekDurationSeconds.collectAsStateWithLifecycle()
     val spatialAudio by AppSettings.spatialAudio.collectAsStateWithLifecycle()
     val nerdStats by AppSettings.showNerdStats.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
@@ -429,6 +430,42 @@ fun SettingsScreen(
                 onClick = { AppSettings.setSkipSilence(!skipSilence) },
             )
             RowDivider()
+            val seekOptions = listOf(5, 10, 15)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.double_tap_seek),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White,
+                        )
+                        Text(
+                            text = stringResource(R.string.double_tap_seek_subtitle),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.6f),
+                        )
+                    }
+                    SegmentedControl(
+                        options = seekOptions.map { "${it}s" },
+                        selectedIndex = seekOptions.indexOf(seekDuration).coerceAtLeast(0),
+                        onSelect = { AppSettings.setSeekDurationSeconds(seekOptions[it]) },
+                        modifier = Modifier.width(160.dp),
+                    )
+                }
+            }
+            RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.SurroundSound,
                 title = stringResource(R.string.spatial_audio),
@@ -496,6 +533,8 @@ fun SettingsScreen(
                 onSelect = { AppSettings.setThemeMode(ThemeMode.entries[it]) },
                 modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
             )
+            RowDivider()
+            AccentColorRow()
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.MotionPhotosOff,
@@ -826,10 +865,6 @@ fun SettingsScreen(
                 append("  ")
                 withLink(LinkAnnotation.Url("https://github.com/4shil", linkStyles)) {
                     append("Developer")
-                }
-                append("  ")
-                withLink(LinkAnnotation.Url("https://discord.gg/pDdKfrdHY6", linkStyles)) {
-                    append("Discord")
                 }
                 append("\n~YouTube Music Backend")
             },
@@ -1649,6 +1684,73 @@ private fun SegmentedControl(
                     color = labelColor,
                     maxLines = 1,
                 )
+            }
+        }
+    }
+}
+
+// ── Accent colour ────────────────────────────────────────────────────────────
+
+/**
+ * A settings row showing a palette of nine accent swatches.
+ *
+ * The first swatch is the app's own default red; the rest span the visible
+ * spectrum so there is always something close to whatever the user wants.
+ * The currently active colour gets a ✓ overlay; tapping any other swatch
+ * writes it to [AppSettings] and the whole theme repaints on the next frame
+ * through the flow wired into [YZMusicTheme].
+ */
+@Composable
+private fun AccentColorRow() {
+    val currentArgb by AppSettings.accentColor.collectAsStateWithLifecycle()
+
+    // Nine opinionated swatches — one per column of visual space in the row.
+    val swatches = remember {
+        listOf(
+            0xFFFA2D48.toInt(), // Default: Apple Music red
+            0xFFFF6B35.toInt(), // Orange
+            0xFFFFCC00.toInt(), // Yellow
+            0xFF34C759.toInt(), // Green
+            0xFF00C7BE.toInt(), // Teal
+            0xFF007AFF.toInt(), // Blue
+            0xFF5856D6.toInt(), // Indigo
+            0xFFAF52DE.toInt(), // Purple
+            0xFFFF2D55.toInt(), // Pink
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = ROW_INSET, end = ROW_INSET, top = 6.dp, bottom = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Label on the left, matching the icon-less SegmentedControl rows above.
+        Text(
+            text = "Accent color",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.weight(1f),
+        )
+        swatches.forEach { argb ->
+            val isSelected = argb == currentArgb
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color(argb))
+                    .clickable { AppSettings.setAccentColor(argb) },
+            ) {
+                if (isSelected) {
+                    Icon(
+                        imageVector = Icons.Rounded.Check,
+                        contentDescription = "Selected",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         }
     }

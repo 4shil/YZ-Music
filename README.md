@@ -42,9 +42,8 @@
 - **Home Screen Widgets**: Now-playing widgets with interactive media controls and dynamic artwork updates.
 
 ### Connectivity & Accounts
-- **Google Account Authentication**: Optional session cookie integration for personal playlists, subscriptions, and recommendations.
+- **Google Account Authentication**: Optional session cookie integration for personal playlists, recommendations, and library sync.
 - **Scrobbling**: Native scrobbling to Last.fm and ListenBrainz.
-- **Discord Rich Presence**: Live playback status with album sleeve thumbnails and interactive action links.
 - **Local Backup & Restore**: Full JSON backup and migration for playlists, playback history, and user settings.
 
 ---

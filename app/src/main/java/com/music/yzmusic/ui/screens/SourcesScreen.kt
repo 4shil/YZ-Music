@@ -69,7 +69,7 @@ fun SourcesScreen(
     /**
      * Asks the activity to put the custom-module alert up. Raised rather than
      * shown here so its scrim covers the tab bar and the mini player, the same
-     * way every other alert in the app is hosted — see [DiscordDialogHost].
+     * way every other alert in the app is hosted.
      */
     onEditCustomModule: () -> Unit,
     modifier: Modifier = Modifier,

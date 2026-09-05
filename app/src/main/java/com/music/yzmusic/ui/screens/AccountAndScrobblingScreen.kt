@@ -20,11 +20,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.music.yzmusic.R
 import com.music.yzmusic.data.model.Account
 import com.music.yzmusic.data.settings.AppSettings
 import kotlin.math.roundToInt
@@ -37,7 +34,6 @@ fun AccountAndScrobblingScreen(
     onSignOut: () -> Unit,
     onOpenListenBrainzLogin: () -> Unit,
     onOpenLastfmLogin: () -> Unit,
-    onOpenDiscord: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -51,9 +47,6 @@ fun AccountAndScrobblingScreen(
     val scrobbleDelaySeconds by AppSettings.scrobbleDelaySeconds.collectAsStateWithLifecycle()
     val listenBrainzEnabled by AppSettings.listenBrainzEnabled.collectAsStateWithLifecycle()
     val listenBrainzToken by AppSettings.listenBrainzToken.collectAsStateWithLifecycle()
-    val discordToken by AppSettings.discordToken.collectAsStateWithLifecycle()
-    val discordUsername by AppSettings.discordUsername.collectAsStateWithLifecycle()
-    val discordRpcEnabled by AppSettings.discordRpcEnabled.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
@@ -74,24 +67,6 @@ fun AccountAndScrobblingScreen(
             SettingsGroup {
                 DestructiveRow(label = "Sign out", onClick = onSignOut)
             }
-        }
-
-        SettingsGroup(
-            header = "Rich presence",
-            footer = "Show what you're playing on your Discord profile, updating as " +
-                "the track does.",
-        ) {
-            SettingsRow(
-                icon = ImageVector.vectorResource(R.drawable.ic_discord),
-                title = "Discord",
-                subtitle = when {
-                    discordToken.isEmpty() -> "Tap to connect"
-                    !discordRpcEnabled -> "Connected, presence off"
-                    discordUsername.isNotEmpty() -> "Sharing as @$discordUsername"
-                    else -> "Sharing your listens"
-                },
-                onClick = onOpenDiscord,
-            )
         }
 
         if (AppSettings.scrobblingAvailable) {

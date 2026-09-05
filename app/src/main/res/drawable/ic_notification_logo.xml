@@ -3,7 +3,7 @@
 
   Notification small icons are drawn as a silhouette: the system throws away
   every colour and keeps only the alpha channel, so the fill/stroke has to be
-  opaque white. The group scales the 280x280 mark down to the 22x22 content
+  opaque white. The group scales the waveform mark to the 19x19 content
   box Android expects inside a 24x24 canvas.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -12,16 +12,10 @@
     android:viewportWidth="24"
     android:viewportHeight="24">
   <group
-      android:scaleX="0.07857"
-      android:scaleY="0.07857"
-      android:translateX="-4.971"
-      android:translateY="-4.971">
-    <!-- Outer Ring -->
-    <path
-        android:pathData="M 216, 216 m -133.5, 0 a 133.5,133.5 0 1,0 267,0 a 133.5,133.5 0 1,0 -267,0"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="13" />
-
+      android:scaleX="0.11585"
+      android:scaleY="0.11585"
+      android:translateX="-13.024"
+      android:translateY="-13.024">
     <!-- Waveform Bars -->
     <path
         android:pathData="M 148,201 L 148,231"

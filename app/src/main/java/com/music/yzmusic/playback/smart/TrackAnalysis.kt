@@ -91,6 +91,10 @@ data class TrackAnalysis(
     val vocalActivityMask: List<Double> = emptyList(),
     /** Whole-track vocal likelihood, distinct from the per-sample [vocalActivityMask]. */
     val vocalProbability: Double = 0.0,
+    /** Inferred musical sections (intro, verse, chorus, drop, etc.). */
+    val sections: List<MusicalSection> = emptyList(),
+    /** Overall confidence in detected arrangement structure (0.0 .. 1.0). */
+    val structuralConfidence: Double = 0.0,
 ) {
     /**
      * Whether this analysis actually describes a track, as opposed to standing

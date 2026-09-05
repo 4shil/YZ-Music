@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.replay
+package com.music.yzmusic.ui.replay
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -74,7 +74,7 @@ import com.music.yzmusic.data.stats.ReplaySummary
 import com.music.yzmusic.ui.player.MeshGradientBackground
 import com.music.yzmusic.ui.player.MeshPalette
 import com.music.yzmusic.ui.player.rememberArtworkColors
-import com.music.yzmusic.ui.theme.AccentRed
+import com.music.yzmusic.ui.theme.accentColor
 import kotlinx.coroutines.launch
 
 /**
@@ -615,7 +615,7 @@ private fun ColumnScope.Leaderboard(
             Modifier.fillMaxWidth().padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RankBadge(row.rank, AccentRed)
+            RankBadge(row.rank, accentColor())
             Cover(row.artworkUrl, row.title, 36.dp, shape, ROW_ART_PX)
             Spacer(Modifier.width(12.dp))
             Text(
@@ -663,7 +663,7 @@ private fun ColumnScope.Genres(summary: ReplaySummary, headline: List<HeadlineRu
             Modifier.fillMaxWidth().padding(vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RankBadge(row.rank, AccentRed)
+            RankBadge(row.rank, accentColor())
             Text(
                 text = row.title,
                 style = MaterialTheme.typography.titleMedium,

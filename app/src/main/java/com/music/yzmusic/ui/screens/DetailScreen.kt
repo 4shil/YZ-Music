@@ -77,6 +77,9 @@ import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import com.music.yzmusic.data.canvas.CanvasArtwork
 import com.music.yzmusic.data.canvas.CanvasRepository
 import com.music.yzmusic.data.model.BrowseType
@@ -85,6 +88,7 @@ import com.music.yzmusic.data.model.CARD_ART_PX
 import com.music.yzmusic.data.model.HEADER_ART_PX
 import com.music.yzmusic.data.model.ROW_ART_PX
 import com.music.yzmusic.data.model.ShelfItem
+import com.music.yzmusic.data.model.ShelfType
 import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.artworkAt
@@ -286,24 +290,27 @@ fun DetailScreen(
         // same number everywhere: on a tablet the page is the column left over
         // once the player has its pane, and a height derived from the whole
         // window there is a sleeve half again as tall as it is wide.
-        val artHeight = maxWidth / if (isArtist) ARTIST_PHOTO_RATIO else SLEEVE_RATIO
+        val isCategoryPage = page.thumbnailUrl == null && page.sections.isNotEmpty()
+        val artHeight = if (isCategoryPage) 0.dp else maxWidth / if (isArtist) ARTIST_PHOTO_RATIO else SLEEVE_RATIO
 
-        PageBackground(
-            page = page,
-            palette = palette,
-            canvas = canvas,
-            artHeight = artHeight,
-            listState = listState,
-            hazeState = pageHaze,
-            modifier = Modifier.matchParentSize(),
-        )
+        if (!isCategoryPage) {
+            PageBackground(
+                page = page,
+                palette = palette,
+                canvas = canvas,
+                artHeight = artHeight,
+                listState = listState,
+                hazeState = pageHaze,
+                modifier = Modifier.matchParentSize(),
+            )
 
-        MergeBand(
-            palette = palette,
-            artHeight = artHeight,
-            listState = listState,
-            hazeState = pageHaze,
-        )
+            MergeBand(
+                palette = palette,
+                artHeight = artHeight,
+                listState = listState,
+                hazeState = pageHaze,
+            )
+        }
 
         LazyColumn(
             state = listState,
@@ -313,7 +320,12 @@ fun DetailScreen(
             contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
         ) {
             item(key = "header") {
-                if (isArtist) {
+                if (isCategoryPage) {
+                    CategoryHeader(
+                        title = page.title,
+                        palette = palette,
+                    )
+                } else if (isArtist) {
                     ArtistHeader(page = page, palette = palette, artHeight = artHeight)
                 } else {
                     ReleaseHeader(
@@ -488,21 +500,41 @@ fun DetailScreen(
                 }
             }
 
-            // Albums / Singles & EPs carousels (artist pages).
+            // Albums / Singles & EPs / Category carousels.
             items(page.sections) { shelf ->
-                Column(Modifier.padding(top = 22.dp)) {
-                    SectionHeading(shelf.title, palette)
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        items(shelf.items) { item ->
-                            SectionCard(
-                                item = item,
-                                palette = palette,
-                                onClick = { onSectionItemClick(item) },
-                                onLongPress = onSectionItemLongPress?.let { { it(item) } },
-                            )
+                val isMoodGenreShelf = shelf.type == ShelfType.MOOD_GENRE ||
+                    shelf.items.any { it.stripeColor != null || it.browseId?.startsWith("FEmusic_moods_and_genres") == true }
+
+                Column(Modifier.padding(top = if (isCategoryPage && shelf == page.sections.firstOrNull()) 8.dp else 22.dp)) {
+                    if (shelf.title.isNotBlank()) {
+                        SectionHeading(shelf.title, palette)
+                    }
+                    if (isMoodGenreShelf) {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(shelf.items) { item ->
+                                MoodGenreCard(
+                                    item = item,
+                                    palette = palette,
+                                    onClick = { onSectionItemClick(item) },
+                                )
+                            }
+                        }
+                    } else {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            items(shelf.items) { item ->
+                                SectionCard(
+                                    item = item,
+                                    palette = palette,
+                                    onClick = { onSectionItemClick(item) },
+                                    onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                )
+                            }
                         }
                     }
                 }
@@ -1441,6 +1473,78 @@ private fun SectionCard(
             color = palette.onBackgroundVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun CategoryHeader(
+    title: String,
+    palette: ArtworkPalette,
+) {
+    val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = topInset + 64.dp, start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineLarge.copy(
+                fontWeight = FontWeight.Bold,
+            ),
+            color = palette.onBackground,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun MoodGenreCard(
+    item: ShelfItem,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val stripeColor = item.stripeColor?.let { Color(it.toInt()) }
+    Box(
+        modifier = modifier
+            .width(170.dp)
+            .height(52.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(palette.elevated)
+            .clickable(onClick = onClick),
+    ) {
+        if (stripeColor != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                stripeColor.copy(alpha = 0.28f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxSize()
+                    .background(stripeColor),
+            )
+        }
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(horizontal = 14.dp),
         )
     }
 }

@@ -110,7 +110,6 @@
     <string name="whats_new">What’s new</string>
     <string name="log_copied">Log copied · %1$d lines</string>
     <string name="sign_in_youtube_music">Sign in to YouTube Music</string>
-    <string name="sign_in_discord">Sign in to Discord</string>
     <string name="personalized_recommendations">Get personalized recommendations for you</string>
     <string name="play_next">Play next</string>
     <string name="queue">Queue</string>
@@ -220,4 +219,19 @@
     <string name="miscellaneous_footer">When enabled, closing the app from the recent apps screen will also stop music playback.</string>
     <string name="dont_repeat_songs_subtitle">AutoPlay won’t suggest a song already played or suggested this session</string>
     <string name="download_quality_subtitle">%1$s per track, whatever the connection</string>
+
+    <!-- Lyrics Translation -->
+    <string name="lyrics_translate">Translate lyrics</string>
+    <string name="lyrics_show_original">Show original lyrics</string>
+    <string name="lyrics_translation_preparing">Detecting lyric language…</string>
+    <string name="lyrics_translation_downloading">Downloading %1$s translation…</string>
+    <string name="lyrics_translation_translating">Translating to %1$s…</string>
+    <string name="lyrics_translated_to">Translated to %1$s</string>
+    <string name="lyrics_already_in_language">Lyrics are already in %1$s</string>
+    <string name="lyrics_translation_unavailable">Translation unavailable</string>
+    <string name="lyrics_translation_metered_blocked">Model download requires Wi-Fi</string>
+
+    <!-- Double-Tap Seek -->
+    <string name="double_tap_seek">Double-tap to seek</string>
+    <string name="double_tap_seek_subtitle">Double-tap left or right to skip seconds</string>
 </resources>

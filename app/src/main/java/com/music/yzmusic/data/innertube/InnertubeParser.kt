@@ -9,6 +9,7 @@ import com.music.yzmusic.data.model.LibraryState
 import com.music.yzmusic.data.model.LikeStatus
 import com.music.yzmusic.data.model.SearchResult
 import com.music.yzmusic.data.model.ShelfItem
+import com.music.yzmusic.data.model.ShelfType
 import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.data.model.SongMenu
 import com.music.yzmusic.data.model.UserPlaylist
@@ -151,6 +152,7 @@ object InnertubeParser {
         return sections.mapNotNull { section ->
             section.o("musicCarouselShelfRenderer")?.let(::carouselShelf)
                 ?: section.o("musicShelfRenderer")?.let(::plainShelf)
+                ?: section.o("gridRenderer")?.let(::gridShelf)
         }
     }
 
@@ -172,6 +174,8 @@ object InnertubeParser {
                         ?.let(::carouselShelf)?.let(out::add)
                     (node["musicShelfRenderer"] as? JsonObject)
                         ?.let(::plainShelf)?.let(out::add)
+                    (node["gridRenderer"] as? JsonObject)
+                        ?.let(::gridShelf)?.let(out::add)
                     node.values.forEach(::walk)
                 }
                 is JsonArray -> node.forEach(::walk)
@@ -182,37 +186,100 @@ object InnertubeParser {
         return out
     }
 
+    private fun gridShelf(grid: JsonObject): HomeShelf? {
+        val header = grid.o("header").o("gridHeaderRenderer")
+            ?: grid.o("header").o("musicCarouselShelfBasicHeaderRenderer")
+        val title = header.o("title").runs()
+        val items = grid.a("items").orEmpty().mapNotNull { item ->
+            parseNavigationButton(item.o("musicNavigationButtonRenderer"))
+                ?: parseTwoRowItem(item.o("musicTwoRowItemRenderer"))
+                ?: parseArtistRow(item.o("musicResponsiveListItemRenderer"))
+                ?: parseMultiRowItem(item.o("musicMultiRowListItemRenderer"))
+                ?: parseTrendingRow(item.o("musicResponsiveListItemRenderer"))
+                ?: parseResponsiveListItem(item.o("musicResponsiveListItemRenderer"))?.let { song ->
+                    ShelfItem(song.title, song.artist, song.thumbnailUrl, song.videoId, null, isVideo = song.isVideo)
+                }
+        }
+        if (items.isEmpty()) return null
+        val shelfType = when {
+            items.any { it.stripeColor != null || it.browseId?.startsWith("FEmusic_") == true } -> ShelfType.MOOD_GENRE
+            items.any { it.customIndex != null } -> ShelfType.RANKED
+            items.any { it.isVideo } && items.none { it.stripeColor != null } -> ShelfType.VIDEO
+            else -> ShelfType.DEFAULT
+        }
+        return HomeShelf(title, items, type = shelfType)
+    }
+
     private fun carouselShelf(carousel: JsonObject): HomeShelf? {
         val header = carousel.o("header").o("musicCarouselShelfBasicHeaderRenderer")
         val title = header.o("title").runs()
+        // Video charts shelf contains YouTube video compilation playlists, not audio/videos
+        if (title.equals("Video charts", ignoreCase = true)) return null
         val strapline = header.o("strapline").runs()
-        // Whole shelves like "Video charts" carry nothing but video
-        // compilations — each card would fail its own video check on the
-        // way to a dead-end page, so the shelf is dropped outright.
-        if (VIDEO_WORD.containsMatchIn(title)) return null
+        val moreEndpoint = header.o("moreContentButton").o("buttonRenderer").o("navigationEndpoint").o("browseEndpoint")
+            ?: header.o("title").a("runs")?.firstOrNull()?.o("navigationEndpoint")?.o("browseEndpoint")
+        val moreBrowseId = moreEndpoint?.s("browseId")
+        val moreParams = moreEndpoint?.s("params")
+
         val items = carousel.a("contents").orEmpty().mapNotNull { item ->
             parseTwoRowItem(item.o("musicTwoRowItemRenderer"))
-                ?: parseResponsiveListItem(item.o("musicResponsiveListItemRenderer"))
-                    ?.takeUnless { it.isVideo }
-                    ?.let { song ->
-                        ShelfItem(song.title, song.artist, song.thumbnailUrl, song.videoId, null)
-                    }
-                // A chart row with nothing to play — "Top artists" lists the
-                // artist alone, no track — falls through parseResponsiveListItem
-                // (it demands a videoId) and used to drop the whole shelf.
                 ?: parseArtistRow(item.o("musicResponsiveListItemRenderer"))
+                ?: parseTrendingRow(item.o("musicResponsiveListItemRenderer"))
+                ?: parseResponsiveListItem(item.o("musicResponsiveListItemRenderer"))
+                    ?.let { song ->
+                        ShelfItem(song.title, song.artist, song.thumbnailUrl, song.videoId, null, isVideo = song.isVideo)
+                    }
+                ?: parseNavigationButton(item.o("musicNavigationButtonRenderer"))
+                ?: parseMultiRowItem(item.o("musicMultiRowListItemRenderer"))
         }
-        return if (items.isEmpty()) null else HomeShelf(title.ifBlank { "For you" }, items, strapline)
+        if (items.isEmpty()) return null
+        val shelfType = when {
+            items.any { it.stripeColor != null || it.browseId?.contains("moods_and_genres") == true } -> ShelfType.MOOD_GENRE
+            items.any { it.customIndex != null } || title.contains("Trending", ignoreCase = true) || title.contains("Top", ignoreCase = true) -> ShelfType.RANKED
+            title.contains("video", ignoreCase = true) || items.all { it.isVideo && it.videoId != null } -> ShelfType.VIDEO
+            else -> ShelfType.DEFAULT
+        }
+        return HomeShelf(
+            title = title.ifBlank { "For you" },
+            items = items,
+            subtitle = strapline,
+            type = shelfType,
+            moreBrowseId = moreBrowseId,
+            moreParams = moreParams,
+        )
     }
 
     private fun plainShelf(shelf: JsonObject): HomeShelf? {
         val title = shelf.o("title").runs()
-        if (VIDEO_WORD.containsMatchIn(title)) return null
-        val items = shelf.a("contents").orEmpty().mapNotNull {
-            parseResponsiveListItem(it.o("musicResponsiveListItemRenderer"))
-        }.filterNot { it.isVideo }
-            .map { ShelfItem(it.title, it.artist, it.thumbnailUrl, it.videoId, null) }
-        return if (items.isEmpty()) null else HomeShelf(title.ifBlank { "For you" }, items)
+        val strapline = shelf.o("strapline").runs()
+        val moreEndpoint = shelf.o("bottomEndpoint").o("browseEndpoint")
+            ?: shelf.o("title").a("runs")?.firstOrNull()?.o("navigationEndpoint")?.o("browseEndpoint")
+        val moreBrowseId = moreEndpoint?.s("browseId")
+        val moreParams = moreEndpoint?.s("params")
+
+        val items = shelf.a("contents").orEmpty().mapNotNull { row ->
+            val resp = row.o("musicResponsiveListItemRenderer")
+            parseArtistRow(resp)
+                ?: parseTrendingRow(resp)
+                ?: parseResponsiveListItem(resp)?.let { song ->
+                    ShelfItem(song.title, song.artist, song.thumbnailUrl, song.videoId, null, isVideo = song.isVideo)
+                }
+                ?: parseTwoRowItem(row.o("musicTwoRowItemRenderer"))
+        }
+        if (items.isEmpty()) return null
+        val shelfType = when {
+            items.any { it.customIndex != null } || title.contains("chart", ignoreCase = true) || title.contains("top", ignoreCase = true) -> ShelfType.RANKED
+            items.all { it.isVideo && it.videoId != null } -> ShelfType.VIDEO
+            else -> ShelfType.DEFAULT
+        }
+        return HomeShelf(
+            title = title.ifBlank { "For you" },
+            items = items,
+            subtitle = strapline,
+            type = shelfType,
+            moreBrowseId = moreBrowseId,
+            moreParams = moreParams,
+        )
     }
 
     /**
@@ -345,7 +412,10 @@ object InnertubeParser {
             }
         }
         walk(root)
-        return out.values.toList()
+        val songs = out.values.toList()
+        return if (!pageCredit.albumId.isNullOrBlank()) {
+            songs.mapIndexed { index, song -> song.copy(trackNumber = index + 1) }
+        } else songs
     }
 
     /** A playlist page's own tracks, the ones YouTube suggests adding, and the token for the rest. */
@@ -521,8 +591,8 @@ object InnertubeParser {
         val endpoint = renderer.o("navigationEndpoint").o("browseEndpoint")
         val pageType = endpoint.o("browseEndpointContextSupportedConfigs")
             .o("browseEndpointContextMusicConfig").s("pageType").orEmpty()
-        if ("ARTIST" !in pageType) return null
         val browseId = endpoint.s("browseId") ?: return null
+        if ("ARTIST" !in pageType && !browseId.startsWith("UC")) return null
 
         val columns = renderer.a("flexColumns").orEmpty()
         val title = columns.getOrNull(0)
@@ -533,12 +603,109 @@ object InnertubeParser {
 
         val thumbnails = renderer.o("thumbnail").o("musicThumbnailRenderer")
             .o("thumbnail").a("thumbnails")
+        val indexText = renderer.o("customIndexColumn")
+            .o("musicCustomIndexColumnRenderer").o("text").runs().takeIf { it.isNotBlank() }
         return ShelfItem(
             title = title,
             subtitle = subtitle,
             thumbnailUrl = thumbnails.best(),
             videoId = null,
             browseId = browseId,
+            customIndex = indexText,
+        )
+    }
+
+    private fun parseTrendingRow(renderer: JsonObject?): ShelfItem? {
+        if (renderer == null) return null
+        val indexText = renderer.o("customIndexColumn")
+            .o("musicCustomIndexColumnRenderer").o("text").runs().takeIf { it.isNotBlank() }
+        if (indexText == null) return null
+
+        val videoId = renderer.o("playlistItemData").s("videoId")
+            ?: renderer.o("overlay")
+                .o("musicItemThumbnailOverlayRenderer").o("content")
+                .o("musicPlayButtonRenderer").o("playNavigationEndpoint")
+                .o("watchEndpoint").s("videoId")
+            ?: renderer.o("navigationEndpoint").o("watchEndpoint").s("videoId")
+            ?: renderer.o("onTap").o("watchEndpoint").s("videoId")
+            ?: return null
+
+        val columns = renderer.a("flexColumns").orEmpty()
+        val title = columns.getOrNull(0)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        if (title.isBlank()) return null
+        val subtitle = columns.getOrNull(1)
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").runs()
+        val thumbnails = renderer.o("thumbnail").o("musicThumbnailRenderer")
+            .o("thumbnail").a("thumbnails")
+        val musicVideoType = renderer.o("navigationEndpoint").o("watchEndpoint").s("musicVideoType")
+            ?: renderer.o("overlay").o("musicItemThumbnailOverlayRenderer")
+                .o("content").o("musicPlayButtonRenderer").o("playNavigationEndpoint")
+                .o("watchEndpoint").s("musicVideoType")
+        val isVideo = musicVideoType != "MUSIC_VIDEO_TYPE_ATV"
+
+        return ShelfItem(
+            title = title,
+            subtitle = subtitle,
+            thumbnailUrl = thumbnails.best(),
+            videoId = videoId,
+            browseId = null,
+            customIndex = indexText,
+            isVideo = isVideo,
+        )
+    }
+
+    private fun parseNavigationButton(renderer: JsonObject?): ShelfItem? {
+        if (renderer == null) return null
+        val title = renderer.o("buttonText").runs()
+        if (title.isBlank()) return null
+        val endpoint = renderer.o("clickCommand").o("browseEndpoint")
+        val browseId = endpoint.s("browseId") ?: return null
+        val params = endpoint.s("params")
+        val color = renderer.o("solid")?.get("leftStripeColor")?.let {
+            (it as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+        }
+        return ShelfItem(
+            title = title,
+            subtitle = "",
+            thumbnailUrl = null,
+            videoId = null,
+            browseId = browseId,
+            params = params,
+            stripeColor = color,
+        )
+    }
+
+    private fun parseMultiRowItem(renderer: JsonObject?): ShelfItem? {
+        if (renderer == null) return null
+        val title = renderer.o("title").runs()
+        if (title.isBlank()) return null
+        val showName = renderer.o("secondTitle").runs()
+        val subtitle = renderer.o("subtitle").runs()
+        val fullSub = listOf(showName, subtitle).filter { it.isNotBlank() }.joinToString(" • ")
+        val videoId = renderer.o("onTap").o("watchEndpoint").s("videoId")
+            ?: renderer.o("overlay").o("musicItemThumbnailOverlayRenderer")
+                .o("content").o("musicPlayButtonRenderer")
+                .o("playNavigationEndpoint").o("watchEndpoint").s("videoId")
+            ?: renderer.o("navigationEndpoint").o("watchEndpoint").s("videoId")
+            ?: renderer.o("title").a("runs")?.firstOrNull()
+                ?.o("navigationEndpoint")?.o("watchEndpoint")?.s("videoId")
+            ?: renderer.o("title").a("runs")?.firstOrNull()
+                ?.o("navigationEndpoint")?.o("browseEndpoint")?.s("browseId")
+                ?.takeIf { it.startsWith("MPED") }?.removePrefix("MPED")
+        val browseId = renderer.o("title").a("runs")?.firstOrNull()
+            .o("navigationEndpoint").o("browseEndpoint").s("browseId")
+            ?: renderer.o("secondTitle").a("runs")?.firstOrNull()
+                .o("navigationEndpoint").o("browseEndpoint").s("browseId")
+        val thumbnails = renderer.o("thumbnail").o("musicThumbnailRenderer")
+            .o("thumbnail").a("thumbnails")
+        return ShelfItem(
+            title = title,
+            subtitle = fullSub,
+            thumbnailUrl = thumbnails.best(),
+            videoId = videoId,
+            browseId = browseId?.takeUnless { it.startsWith("MPED") },
+            isVideo = true,
         )
     }
 
@@ -957,7 +1124,8 @@ object InnertubeParser {
         val title = renderer.o("title").runs()
         if (title.isBlank()) return null
         val endpoint = renderer.o("navigationEndpoint")
-        val browseId = endpoint.o("browseEndpoint").s("browseId")
+        val browseEndpoint = endpoint.o("browseEndpoint")
+        val browseId = browseEndpoint.s("browseId")
         // History/"Listen again" cards for tracks YouTube never catalogued
         // as a proper Song carry no watchEndpoint at all — just a browseId
         // to a "non-music audio track page" prefixed MPED<videoId>. That's
@@ -965,30 +1133,36 @@ object InnertubeParser {
         val videoId = endpoint.o("watchEndpoint").s("videoId")
             ?: browseId?.takeIf { it.startsWith("MPED") }?.removePrefix("MPED")
         val resolvedBrowseId = browseId?.takeUnless { it.startsWith("MPED") }
+        val params = browseEndpoint.s("params")
         val thumbnails = renderer.o("thumbnailRenderer").o("musicThumbnailRenderer")
             .o("thumbnail").a("thumbnails")
         val subtitle = renderer.o("subtitle").runs()
-        // A card with no browse target is a playable track, not an album,
-        // playlist or artist; widescreen art on one of those means it's a
-        // music-video upload rather than the catalogue track — drop it, same
-        // as the equivalent check in parseResponsiveListItem.
-        if (resolvedBrowseId == null && videoId != null && thumbnails.isNotSquare()) return null
+        val musicVideoType = endpoint.o("watchEndpoint").s("musicVideoType")
+        val isVideo = musicVideoType == "MUSIC_VIDEO_TYPE_OMV" ||
+            musicVideoType == "MUSIC_VIDEO_TYPE_UGC" ||
+            thumbnails.isNotSquare()
+
         // An album/playlist billed as a video chart/compilation — "N videos"
         // in the subtitle, or "video" in the card's own title (e.g. "Daily
-        // Top Music Videos") — is the same dead-end as in parseBrowseItem.
-        // A plain track card is exempt: a song can legitimately be titled
-        // "Video Games" without being a music-video upload.
+        // Top Music Videos") — is a dead-end compilation for audio playback.
+        // A plain track card or music video with videoId is exempt.
         if (resolvedBrowseId != null &&
             (VIDEO_WORD.containsMatchIn(title) || VIDEO_WORD.containsMatchIn(subtitle))
         ) {
             return null
         }
+
+        // Only drop if there is neither a playable track nor a navigable browse destination
+        if (videoId == null && resolvedBrowseId == null) return null
+
         return ShelfItem(
             title = title,
             subtitle = subtitle,
             thumbnailUrl = thumbnails.best(),
             videoId = videoId,
             browseId = resolvedBrowseId,
+            params = params,
+            isVideo = isVideo,
         )
     }
 

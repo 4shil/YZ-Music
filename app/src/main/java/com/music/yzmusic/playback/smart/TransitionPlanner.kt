@@ -867,6 +867,7 @@ fun planTransition(
     minFadeSeconds: Double = 1.0,
     mode: CrossfadeMode = CrossfadeMode.STANDARD,
     albumSequential: Boolean = false,
+    preservation: AutomixPreservation = AutomixPreservation.BALANCED,
 ): TransitionPlan {
     val length = max(duration.orZero(), trackDurationSeconds(currentTrack))
     val playbackTime = max(0.0, currentTime.orZero())
@@ -887,7 +888,12 @@ fun planTransition(
     } else {
         length
     }
-    val mixOutAnchor = resolveMixOutAnchor(analysis, contentEnd = finalMixAnchor, duration = length)
+    val unresolvedMixOut = resolveMixOutAnchor(analysis, contentEnd = finalMixAnchor, duration = length)
+    val preservedMixOut = preserveMixOut(analysis, unresolvedMixOut.time, preservation)
+    val mixOutAnchor = unresolvedMixOut.copy(
+        time = preservedMixOut,
+        discardedMusicSeconds = max(0.0, finalMixAnchor - preservedMixOut),
+    )
     val hasInteriorMixOut = mixOutAnchor.time < finalMixAnchor - 1
 
     if (albumSequential && sameAlbum(currentTrack, nextTrack) && !hasInteriorMixOut) {

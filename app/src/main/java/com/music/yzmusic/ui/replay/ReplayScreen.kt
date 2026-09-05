@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.replay
+package com.music.yzmusic.ui.replay
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -57,7 +57,7 @@ import com.music.yzmusic.ui.components.PAGE_GUTTER
 import com.music.yzmusic.ui.icons.YZMusicIcons
 import com.music.yzmusic.ui.player.MeshGradientBackground
 import com.music.yzmusic.ui.player.rememberArtworkColors
-import com.music.yzmusic.ui.theme.AccentRed
+import com.music.yzmusic.ui.theme.accentColor
 
 /**
  * The Replay page: four cards, four charts and a way to share the lot.
@@ -411,7 +411,7 @@ private fun ReplayChartRow(row: ReplayRow, circular: Boolean, onClick: () -> Uni
             .padding(horizontal = PAGE_GUTTER + 10.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RankBadge(row.rank, AccentRed)
+        RankBadge(row.rank, accentColor())
         if (row.artworkUrl != null) {
             AsyncImage(
                 model = row.artworkUrl.artworkAt(ROW_ART_PX),
