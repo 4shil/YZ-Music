@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data.innertube
+package com.music.yzmusic.data.innertube
 
 import com.music.yzmusic.data.model.Account
 import com.music.yzmusic.data.model.ArtistPage
@@ -190,6 +190,12 @@ object InnertubeParser {
         val header = grid.o("header").o("gridHeaderRenderer")
             ?: grid.o("header").o("musicCarouselShelfBasicHeaderRenderer")
         val title = header.o("title").runs()
+        val strapline = header.o("strapline").runs()
+        val moreEndpoint = header.o("moreContentButton").o("buttonRenderer").o("navigationEndpoint").o("browseEndpoint")
+            ?: header.o("title").a("runs")?.firstOrNull()?.o("navigationEndpoint")?.o("browseEndpoint")
+        val moreBrowseId = moreEndpoint?.s("browseId")
+        val moreParams = moreEndpoint?.s("params")
+
         val items = grid.a("items").orEmpty().mapNotNull { item ->
             parseNavigationButton(item.o("musicNavigationButtonRenderer"))
                 ?: parseTwoRowItem(item.o("musicTwoRowItemRenderer"))
@@ -207,14 +213,20 @@ object InnertubeParser {
             items.any { it.isVideo } && items.none { it.stripeColor != null } -> ShelfType.VIDEO
             else -> ShelfType.DEFAULT
         }
-        return HomeShelf(title, items, type = shelfType)
+        return HomeShelf(
+            title = title,
+            items = items,
+            subtitle = strapline,
+            type = shelfType,
+            moreBrowseId = moreBrowseId,
+            moreParams = moreParams,
+            strapline = strapline.takeIf { it.isNotBlank() },
+        )
     }
 
     private fun carouselShelf(carousel: JsonObject): HomeShelf? {
         val header = carousel.o("header").o("musicCarouselShelfBasicHeaderRenderer")
         val title = header.o("title").runs()
-        // Video charts shelf contains YouTube video compilation playlists, not audio/videos
-        if (title.equals("Video charts", ignoreCase = true)) return null
         val strapline = header.o("strapline").runs()
         val moreEndpoint = header.o("moreContentButton").o("buttonRenderer").o("navigationEndpoint").o("browseEndpoint")
             ?: header.o("title").a("runs")?.firstOrNull()?.o("navigationEndpoint")?.o("browseEndpoint")
@@ -234,7 +246,7 @@ object InnertubeParser {
         }
         if (items.isEmpty()) return null
         val shelfType = when {
-            items.any { it.stripeColor != null || it.browseId?.contains("moods_and_genres") == true } -> ShelfType.MOOD_GENRE
+            items.any { it.stripeColor != null || it.browseId?.startsWith("FEmusic_") == true || it.browseId?.contains("moods_and_genres") == true } -> ShelfType.MOOD_GENRE
             items.any { it.customIndex != null } || title.contains("Trending", ignoreCase = true) || title.contains("Top", ignoreCase = true) -> ShelfType.RANKED
             title.contains("video", ignoreCase = true) || items.all { it.isVideo && it.videoId != null } -> ShelfType.VIDEO
             else -> ShelfType.DEFAULT
@@ -246,6 +258,7 @@ object InnertubeParser {
             type = shelfType,
             moreBrowseId = moreBrowseId,
             moreParams = moreParams,
+            strapline = strapline.takeIf { it.isNotBlank() },
         )
     }
 
@@ -265,9 +278,12 @@ object InnertubeParser {
                     ShelfItem(song.title, song.artist, song.thumbnailUrl, song.videoId, null, isVideo = song.isVideo)
                 }
                 ?: parseTwoRowItem(row.o("musicTwoRowItemRenderer"))
+                ?: parseNavigationButton(row.o("musicNavigationButtonRenderer"))
+                ?: parseMultiRowItem(row.o("musicMultiRowListItemRenderer"))
         }
         if (items.isEmpty()) return null
         val shelfType = when {
+            items.any { it.stripeColor != null || it.browseId?.startsWith("FEmusic_") == true } -> ShelfType.MOOD_GENRE
             items.any { it.customIndex != null } || title.contains("chart", ignoreCase = true) || title.contains("top", ignoreCase = true) -> ShelfType.RANKED
             items.all { it.isVideo && it.videoId != null } -> ShelfType.VIDEO
             else -> ShelfType.DEFAULT
@@ -279,6 +295,7 @@ object InnertubeParser {
             type = shelfType,
             moreBrowseId = moreBrowseId,
             moreParams = moreParams,
+            strapline = strapline.takeIf { it.isNotBlank() },
         )
     }
 
@@ -404,6 +421,33 @@ object InnertubeParser {
                     node["musicResponsiveListItemRenderer"]?.let { renderer ->
                         parseResponsiveListItem(renderer as? JsonObject, pageCredit)
                             ?.let { out[it.videoId] = it }
+                    }
+                    node["musicMultiRowListItemRenderer"]?.let { renderer ->
+                        (renderer as? JsonObject)?.let { multi ->
+                            val videoId = multi.o("onTap").o("watchEndpoint").s("videoId")
+                                ?: multi.o("overlay").o("musicItemThumbnailOverlayRenderer")
+                                    .o("content").o("musicPlayButtonRenderer")
+                                    .o("playNavigationEndpoint").o("watchEndpoint").s("videoId")
+                                ?: multi.o("navigationEndpoint").o("watchEndpoint").s("videoId")
+                                ?: multi.o("title").a("runs")?.firstOrNull()
+                                    ?.o("navigationEndpoint")?.o("watchEndpoint")?.s("videoId")
+                            if (videoId != null) {
+                                val title = multi.o("title").runs()
+                                val artist = multi.o("secondTitle").runs().ifBlank { pageCredit.artistName ?: "Unknown artist" }
+                                val thumbnails = multi.o("thumbnail").o("musicThumbnailRenderer")
+                                    .o("thumbnail").a("thumbnails")
+                                val subtitle = multi.o("subtitle").runs()
+                                val duration = subtitle.split(" • ").lastOrNull()?.takeIf { it.matches(DURATION) }
+                                out[videoId] = Song(
+                                    videoId = videoId,
+                                    title = title,
+                                    artist = artist,
+                                    thumbnailUrl = thumbnails.best(),
+                                    durationText = duration,
+                                    isVideo = true,
+                                )
+                            }
+                        }
                     }
                     node.values.forEach(::walk)
                 }
@@ -1134,13 +1178,25 @@ object InnertubeParser {
             ?: browseId?.takeIf { it.startsWith("MPED") }?.removePrefix("MPED")
         val resolvedBrowseId = browseId?.takeUnless { it.startsWith("MPED") }
         val params = browseEndpoint.s("params")
-        val thumbnails = renderer.o("thumbnailRenderer").o("musicThumbnailRenderer")
-            .o("thumbnail").a("thumbnails")
+        val thumbnailRenderer = renderer.o("thumbnailRenderer").o("musicThumbnailRenderer")
+        val thumbnails = thumbnailRenderer.o("thumbnail").a("thumbnails")
         val subtitle = renderer.o("subtitle").runs()
         val musicVideoType = endpoint.o("watchEndpoint").s("musicVideoType")
+        val is16x9 = renderer.s("aspectRatio") == "MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_RECTANGLE_16_9" ||
+            thumbnailRenderer.s("aspectRatio") == "MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_RECTANGLE_16_9" ||
+            thumbnailRenderer.s("thumbnailCrop") == "MUSIC_THUMBNAIL_CROP_16_9" ||
+            thumbnails.isNotSquare()
         val isVideo = musicVideoType == "MUSIC_VIDEO_TYPE_OMV" ||
             musicVideoType == "MUSIC_VIDEO_TYPE_UGC" ||
-            thumbnails.isNotSquare()
+            is16x9
+
+        val badge = renderer.a("subtitleBadges").orEmpty().firstNotNullOfOrNull { b ->
+            b.o("musicInlineBadgeRenderer").o("accessibilityData").o("accessibilityData").s("label")
+                ?: b.o("musicInlineBadgeRenderer").s("iconType")
+        } ?: renderer.a("badges").orEmpty().firstNotNullOfOrNull { b ->
+            b.o("musicInlineBadgeRenderer").o("accessibilityData").o("accessibilityData").s("label")
+                ?: b.o("musicInlineBadgeRenderer").s("iconType")
+        }
 
         // An album/playlist billed as a video chart/compilation — "N videos"
         // in the subtitle, or "video" in the card's own title (e.g. "Daily
@@ -1163,6 +1219,7 @@ object InnertubeParser {
             browseId = resolvedBrowseId,
             params = params,
             isVideo = isVideo,
+            badge = badge,
         )
     }
 

@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.screens
+package com.music.yzmusic.ui.screens
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreHoriz
@@ -41,6 +42,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
+import com.music.yzmusic.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -281,6 +284,7 @@ fun DetailScreen(
     }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
+        val availableWidth = maxWidth
         // The artwork is drawn behind the list rather than in it, so both need
         // to agree on its height without being able to ask each other. The
         // width is the page's, so the ratio decides it and both can work it out
@@ -290,7 +294,10 @@ fun DetailScreen(
         // same number everywhere: on a tablet the page is the column left over
         // once the player has its pane, and a height derived from the whole
         // window there is a sleeve half again as tall as it is wide.
-        val isCategoryPage = page.thumbnailUrl == null && page.sections.isNotEmpty()
+        val isCategoryPage = page.type == BrowseType.CATEGORY ||
+            page.type == BrowseType.CHARTS ||
+            page.type == BrowseType.NEW_RELEASES_GRID ||
+            (page.thumbnailUrl == null && page.sections.isNotEmpty())
         val artHeight = if (isCategoryPage) 0.dp else maxWidth / if (isArtist) ARTIST_PHOTO_RATIO else SLEEVE_RATIO
 
         if (!isCategoryPage) {
@@ -500,40 +507,194 @@ fun DetailScreen(
                 }
             }
 
-            // Albums / Singles & EPs / Category carousels.
+            // Albums / Singles & EPs / Category carousels / Charts.
             items(page.sections) { shelf ->
                 val isMoodGenreShelf = shelf.type == ShelfType.MOOD_GENRE ||
                     shelf.items.any { it.stripeColor != null || it.browseId?.startsWith("FEmusic_moods_and_genres") == true }
 
+                val isGridShelf = page.type == BrowseType.NEW_RELEASES_GRID ||
+                    (isCategoryPage && page.sections.size == 1 && shelf.items.size > 8)
+
+                val isVideoShelf = shelf.type == ShelfType.CHART_VIDEOS ||
+                    shelf.items.all { it.isVideo } ||
+                    (shelf.title.contains("Video", ignoreCase = true) && shelf.items.any { it.isVideo || it.customIndex != null })
+
+                val isArtistShelf = shelf.type == ShelfType.CHART_ARTISTS ||
+                    (shelf.title.contains("Artist", ignoreCase = true) && shelf.items.any { it.customIndex != null })
+
+                val isSongShelf = shelf.type == ShelfType.CHART_SONGS ||
+                    (shelf.title.contains("Song", ignoreCase = true) && shelf.items.any { it.customIndex != null })
+
+                val showAllAction = if (shelf.moreBrowseId != null) {
+                    {
+                        onSectionItemClick(
+                            ShelfItem(
+                                browseId = shelf.moreBrowseId,
+                                title = shelf.title,
+                                subtitle = shelf.subtitle,
+                                params = shelf.moreParams,
+                            ),
+                        )
+                    }
+                } else null
+
                 Column(Modifier.padding(top = if (isCategoryPage && shelf == page.sections.firstOrNull()) 8.dp else 22.dp)) {
                     if (shelf.title.isNotBlank()) {
-                        SectionHeading(shelf.title, palette)
+                        SectionHeading(
+                            title = shelf.title,
+                            palette = palette,
+                            subtitle = shelf.subtitle,
+                            onShowAll = showAllAction,
+                        )
                     }
-                    if (isMoodGenreShelf) {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            items(shelf.items) { item ->
-                                MoodGenreCard(
-                                    item = item,
-                                    palette = palette,
-                                    onClick = { onSectionItemClick(item) },
-                                )
+                    when {
+                        isMoodGenreShelf -> {
+                            val gridColumns = maxOf(2, (availableWidth / 160.dp).toInt())
+                            val chunkedItems = remember(shelf.items, gridColumns) { shelf.items.chunked(gridColumns) }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = PAGE_GUTTER),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                chunkedItems.forEach { rowItems ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        rowItems.forEach { item ->
+                                            MoodGenreCard(
+                                                item = item,
+                                                palette = palette,
+                                                onClick = { onSectionItemClick(item) },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
+                                        if (rowItems.size < gridColumns) {
+                                            repeat(gridColumns - rowItems.size) {
+                                                Spacer(Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-                    } else {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            items(shelf.items) { item ->
-                                SectionCard(
-                                    item = item,
-                                    palette = palette,
-                                    onClick = { onSectionItemClick(item) },
-                                    onLongPress = onSectionItemLongPress?.let { { it(item) } },
-                                )
+                        isGridShelf -> {
+                            val gridColumns = maxOf(2, (availableWidth / 160.dp).toInt())
+                            val chunkedItems = remember(shelf.items, gridColumns) { shelf.items.chunked(gridColumns) }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = PAGE_GUTTER),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                chunkedItems.forEach { rowItems ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                    ) {
+                                        rowItems.forEach { item ->
+                                            SectionCard(
+                                                item = item,
+                                                palette = palette,
+                                                onClick = { onSectionItemClick(item) },
+                                                onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
+                                        if (rowItems.size < gridColumns) {
+                                            repeat(gridColumns - rowItems.size) {
+                                                Spacer(Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        isVideoShelf -> {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                items(shelf.items) { item ->
+                                    DetailVideoCard(
+                                        item = item,
+                                        palette = palette,
+                                        onClick = { onSectionItemClick(item) },
+                                        onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                    )
+                                }
+                            }
+                        }
+                        isArtistShelf -> {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                items(shelf.items) { item ->
+                                    DetailArtistCard(
+                                        item = item,
+                                        palette = palette,
+                                        onClick = { onSectionItemClick(item) },
+                                        onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                    )
+                                }
+                            }
+                        }
+                        isSongShelf -> {
+                            val shelfSongs = remember(shelf.items) {
+                                shelf.items.filter { it.videoId != null }.map { item ->
+                                    Song(
+                                        videoId = item.videoId!!,
+                                        title = item.title,
+                                        artist = item.subtitle,
+                                        thumbnailUrl = item.thumbnailUrl,
+                                        isVideo = item.isVideo,
+                                    )
+                                }
+                            }
+                            val columns = remember(shelf.items) { shelf.items.chunked(4) }
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                items(columns) { columnItems ->
+                                    Column(
+                                        modifier = Modifier.width(310.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        columnItems.forEach { item ->
+                                            DetailRankedSongRowItem(
+                                                item = item,
+                                                palette = palette,
+                                                onClick = {
+                                                    val songIndex = shelfSongs.indexOfFirst { it.videoId == item.videoId }
+                                                    if (songIndex >= 0) {
+                                                        onSongClick(shelfSongs, songIndex)
+                                                    } else {
+                                                        onSectionItemClick(item)
+                                                    }
+                                                },
+                                                onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else -> {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                items(shelf.items) { item ->
+                                    SectionCard(
+                                        item = item,
+                                        palette = palette,
+                                        onClick = { onSectionItemClick(item) },
+                                        onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                    )
+                                }
                             }
                         }
                     }
@@ -1289,15 +1450,63 @@ private fun AboutSection(title: String, text: String, palette: ArtworkPalette) {
 }
 
 @Composable
-private fun SectionHeading(title: String, palette: ArtworkPalette) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.headlineMedium,
-        color = palette.onBackground,
-        modifier = Modifier.padding(
-            start = PAGE_GUTTER, end = PAGE_GUTTER, top = 10.dp, bottom = 8.dp,
-        ),
-    )
+private fun SectionHeading(
+    title: String,
+    palette: ArtworkPalette,
+    subtitle: String = "",
+    onShowAll: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = PAGE_GUTTER, end = PAGE_GUTTER, top = 10.dp, bottom = 8.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = palette.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.onBackgroundVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (onShowAll != null) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onShowAll)
+                    .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.show_all),
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(2.dp))
+                Icon(
+                    imageVector = Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
 }
 
 /** Compact row used inside the artist song grid; no swipe, to keep the
@@ -1443,22 +1652,44 @@ private fun SectionCard(
     palette: ArtworkPalette,
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
 ) {
     Column(
-        modifier = Modifier
-            .width(SHELF_CARD_WIDTH)
+        modifier = modifier
             .combinedClickable(onClick = onClick, onLongClick = onLongPress),
     ) {
-        AsyncImage(
-            model = item.thumbnailUrl.artworkAt(CARD_ART_PX),
-            contentDescription = null,
+        Box(
             modifier = Modifier
-                .width(SHELF_CARD_WIDTH)
+                .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(10.dp))
                 .thumbnailBorder(RoundedCornerShape(10.dp))
                 .background(palette.elevated),
-        )
+        ) {
+            AsyncImage(
+                model = item.thumbnailUrl.artworkAt(CARD_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (!item.customIndex.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Black.copy(alpha = 0.72f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = "#${item.customIndex}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = Color.White,
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(8.dp))
         Text(
             text = item.title,
@@ -1510,7 +1741,6 @@ private fun MoodGenreCard(
     val stripeColor = item.stripeColor?.let { Color(it.toInt()) }
     Box(
         modifier = modifier
-            .width(170.dp)
             .height(52.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(palette.elevated)
@@ -1549,6 +1779,230 @@ private fun MoodGenreCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DetailVideoCard(
+    item: ShelfItem,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier.width(250.dp),
+) {
+    Column(
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(12.dp))
+                .thumbnailBorder(RoundedCornerShape(12.dp))
+                .background(palette.elevated),
+        ) {
+            AsyncImage(
+                model = item.thumbnailUrl.artworkAt(HEADER_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
+                        ),
+                    ),
+            )
+            if (!item.customIndex.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.75f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = "#${item.customIndex}",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = Color.White,
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .padding(8.dp)
+                    .align(Alignment.BottomEnd)
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.65f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = YZMusicIcons.Play,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.SemiBold,
+            ),
+            color = palette.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = item.subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.onBackgroundVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DetailArtistCard(
+    item: ShelfItem,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier.width(128.dp),
+) {
+    Column(
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(118.dp)
+                .clip(CircleShape)
+                .thumbnailBorder(CircleShape)
+                .background(palette.elevated),
+        ) {
+            AsyncImage(
+                model = item.thumbnailUrl.artworkAt(CARD_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (!item.customIndex.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
+                        .clip(CircleShape)
+                        .background(palette.accent)
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = "#${item.customIndex}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = Color.White,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.SemiBold,
+            ),
+            color = palette.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+        if (item.subtitle.isNotBlank()) {
+            Text(
+                text = item.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.onBackgroundVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DetailRankedSongRowItem(
+    item: ShelfItem,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(vertical = 4.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val rankText = item.customIndex ?: ""
+        if (rankText.isNotBlank()) {
+            Text(
+                text = rankText,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = palette.onBackground,
+                modifier = Modifier.width(28.dp),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.width(8.dp))
+        }
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .thumbnailBorder(RoundedCornerShape(6.dp))
+                .background(palette.elevated),
+        ) {
+            AsyncImage(
+                model = item.thumbnailUrl.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = palette.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = item.subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.onBackgroundVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 /**
  * Splits the one subtitle a browse row hands over — "Album • Travis Scott •
  * 2023", or sometimes just "Travis Scott" — into the credit line and the
@@ -1581,6 +2035,9 @@ private val BrowseType.label: String?
         BrowseType.ALBUM -> "Album"
         BrowseType.PLAYLIST -> "Playlist"
         BrowseType.ARTIST -> "Artist"
+        BrowseType.CHARTS -> "Charts"
+        BrowseType.CATEGORY -> "Category"
+        BrowseType.NEW_RELEASES_GRID -> "New Releases"
         BrowseType.OTHER -> null
     }
 

@@ -1601,7 +1601,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             description = page.description
                             sections = page.sections
                             if (page.songs.isEmpty() && page.sections.isEmpty()) {
-                                UiState.Error(NO_TRACKS)
+                                val emptyMsg = if (resolved == BrowseType.CATEGORY || resolved == BrowseType.CHARTS) {
+                                    "No content available in this section"
+                                } else {
+                                    NO_TRACKS
+                                }
+                                UiState.Error(emptyMsg)
                             } else {
                                 more = page.continuation
                                 suggested = page.suggested.withArtwork(thumbnailUrl)
@@ -1712,7 +1717,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val index = stack.indexOfFirst { it.browseId == browseId }
                 if (index < 0) return@launch
                 val current = stack[index]
-                val existing = (current.songs as? UiState.Success)?.data ?: return@launch
+                val existing = (current.songs as? UiState.Success)?.data.orEmpty()
                 val known = existing.mapTo(HashSet()) { it.videoId }
                 val added = fetched.songs
                     .filter { known.add(it.videoId) }
@@ -1725,12 +1730,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val addedSuggested = fetched.suggested
                     .filter { it.videoId !in known && knownSuggested.add(it.videoId) }
                     .withArtwork(artworkFallback)
+                val addedSections = fetched.sections
                 // A page with nothing new on it means the feed has looped back
                 // rather than run dry with a token still attached.
-                if (added.isEmpty() && addedSuggested.isEmpty()) return@launch
+                if (added.isEmpty() && addedSuggested.isEmpty() && addedSections.isEmpty()) return@launch
                 _detailStack.value = stack.toMutableList().also {
                     it[index] = current.copy(
                         songs = UiState.Success(existing + added),
+                        sections = if (addedSections.isNotEmpty()) current.sections + addedSections else current.sections,
                         suggestedSongs = current.suggestedSongs + addedSuggested,
                     )
                 }
@@ -1765,6 +1772,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         browseId.startsWith("UC") -> BrowseType.ARTIST
         browseId.startsWith("MPREb") -> BrowseType.ALBUM
         browseId.startsWith("VL") || browseId.startsWith("PL") -> BrowseType.PLAYLIST
+        browseId == "FEmusic_charts" -> BrowseType.CHARTS
+        browseId == "FEmusic_moods_and_genres" || browseId == "FEmusic_moods_and_genres_category" -> BrowseType.CATEGORY
+        browseId == "FEmusic_new_releases" || browseId == "FEmusic_new_releases_albums" -> BrowseType.NEW_RELEASES_GRID
         else -> fallback
     }
 

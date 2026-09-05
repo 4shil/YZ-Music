@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.components
+package com.music.yzmusic.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -311,5 +311,8 @@ private val BrowseType.noun: String
         BrowseType.ALBUM -> "album"
         BrowseType.PLAYLIST -> "playlist"
         BrowseType.ARTIST -> "artist"
+        BrowseType.CHARTS -> "charts"
+        BrowseType.CATEGORY -> "category"
+        BrowseType.NEW_RELEASES_GRID -> "releases"
         BrowseType.OTHER -> ""
     }

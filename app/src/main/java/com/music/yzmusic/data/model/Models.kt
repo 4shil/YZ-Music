@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data.model
+package com.music.yzmusic.data.model
 
 /** A playable YouTube Music track. */
 data class Song(
@@ -123,7 +123,7 @@ const val HEADER_ART_PX = 720
  */
 const val NOTIFICATION_ART_PX = 544
 
-enum class BrowseType { ALBUM, ARTIST, PLAYLIST, OTHER }
+enum class BrowseType { ALBUM, ARTIST, PLAYLIST, CHARTS, CATEGORY, NEW_RELEASES_GRID, OTHER }
 
 /** A non-track search result: album, artist or playlist. */
 data class BrowseItem(
@@ -147,19 +147,30 @@ enum class SearchFilter(val label: String, val params: String?) {
     PLAYLISTS("Playlists", "EgWKAQIoAWoKEAkQChAFEAMQBA=="),
 }
 
-enum class ShelfType { DEFAULT, HERO, MOOD_GENRE, RANKED, VIDEO }
+enum class ShelfType {
+    DEFAULT,
+    HERO,
+    MOOD_GENRE,
+    RANKED,
+    VIDEO,
+    CHART_SONGS,
+    CHART_ARTISTS,
+    CHART_VIDEOS,
+    NAV_CHIPS,
+}
 
 /** A card in a home-feed carousel: either a track (videoId) or an album/playlist (browseId). */
 data class ShelfItem(
     val title: String,
-    val subtitle: String,
-    val thumbnailUrl: String?,
-    val videoId: String?,
-    val browseId: String?,
+    val subtitle: String = "",
+    val thumbnailUrl: String? = null,
+    val videoId: String? = null,
+    val browseId: String? = null,
     val params: String? = null,
     val stripeColor: Long? = null,
     val customIndex: String? = null,
     val isVideo: Boolean = false,
+    val badge: String? = null,
 )
 
 /** The signed-in Google account, as YouTube Music reports it. */
@@ -177,6 +188,7 @@ data class HomeShelf(
     val type: ShelfType = ShelfType.DEFAULT,
     val moreBrowseId: String? = null,
     val moreParams: String? = null,
+    val strapline: String? = null,
 )
 
 /** A page of the Home feed, plus the token for the next one — null once exhausted. */

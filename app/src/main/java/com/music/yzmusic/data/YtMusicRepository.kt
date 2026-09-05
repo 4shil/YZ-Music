@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data
+package com.music.yzmusic.data
 
 import com.music.yzmusic.data.DebugLog as Log
 import com.music.yzmusic.data.innertube.Innertube
@@ -14,6 +14,7 @@ import com.music.yzmusic.data.model.PlaylistPrivacy
 import com.music.yzmusic.data.model.SearchFilter
 import com.music.yzmusic.data.model.SearchResult
 import com.music.yzmusic.data.model.ShelfItem
+import com.music.yzmusic.data.model.ShelfType
 import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.data.model.SongMenu
 import com.music.yzmusic.data.model.UserPlaylist
@@ -137,6 +138,96 @@ object YtMusicRepository {
     private suspend fun shelvesOf(browseId: String): List<HomeShelf> =
         InnertubeParser.parseHome(Innertube.browse(browseId))
 
+    val TOP_100_CHARTS_SHELF = HomeShelf(
+        title = "Top 100 & Viral Charts",
+        subtitle = "Official charts updated daily",
+        strapline = "TOP 100",
+        type = ShelfType.DEFAULT,
+        items = listOf(
+            ShelfItem(
+                title = "Top 100: Global",
+                subtitle = "The most played songs globally",
+                thumbnailUrl = "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T250j298PrMtcms0bhcpTrU0S",
+            ),
+            ShelfItem(
+                title = "Viral 50: Global",
+                subtitle = "Songs trending right now",
+                thumbnailUrl = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T251uWl8B_Wf3g7f0o4V4jH1T",
+            ),
+            ShelfItem(
+                title = "Top 100: Music Videos",
+                subtitle = "Most viewed music videos",
+                thumbnailUrl = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T252jA06tkyvPj94Kk3m33u4e",
+            ),
+            ShelfItem(
+                title = "Top 100: United States",
+                subtitle = "The biggest hits in the US",
+                thumbnailUrl = "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T251j4R_qV7jWv8K_8t_aHlY_",
+            ),
+        ),
+    )
+
+    val GENRE_CHARTS_SHELF = HomeShelf(
+        title = "Genre Charts",
+        subtitle = "The most played songs by genre",
+        strapline = "GENRE CHARTS",
+        type = ShelfType.DEFAULT,
+        items = listOf(
+            ShelfItem(
+                title = "Pop Charts",
+                subtitle = "Top Pop songs",
+                thumbnailUrl = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T251H2S0m6F3_A8pE5e5B5lB_",
+            ),
+            ShelfItem(
+                title = "Hip-Hop & Rap",
+                subtitle = "Top Hip-Hop songs",
+                thumbnailUrl = "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T253o4Yg4C5_A5L_e3v-9Q8tP",
+            ),
+            ShelfItem(
+                title = "Rock & Alternative",
+                subtitle = "Top Rock songs",
+                thumbnailUrl = "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T252M_8sX0b9X9L6v5f8L1l0A",
+            ),
+            ShelfItem(
+                title = "R&B & Soul",
+                subtitle = "Top R&B songs",
+                thumbnailUrl = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T253l2qE4k4_o8a2G_e5D2_3H",
+            ),
+            ShelfItem(
+                title = "Dance & Electronic",
+                subtitle = "Top Electronic hits",
+                thumbnailUrl = "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T253_L5r0l5n9E2F8u0V4a7m_",
+            ),
+            ShelfItem(
+                title = "Latin Charts",
+                subtitle = "Top Latin songs",
+                thumbnailUrl = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T253e2sR7p4_L9d0B_g7J4_2L",
+            ),
+            ShelfItem(
+                title = "K-Pop Charts",
+                subtitle = "Top Korean Pop hits",
+                thumbnailUrl = "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T253k3tJ9_1K0n1V8k3K4s7J",
+            ),
+            ShelfItem(
+                title = "Country Charts",
+                subtitle = "Top Country songs",
+                thumbnailUrl = "https://images.unsplash.com/photo-1447069387593-a5de0862481e?w=544&h=544&fit=crop",
+                browseId = "VLPL4fGSI46T253V2T4w-tW_d9Q_w0T-1lC",
+            ),
+        ),
+    )
+
     /**
      * Explore: moods & genres from FEmusic_explore, plus the Daily/Weekly/
      * Trending charts, which YouTube Music serves from a separate browse id
@@ -144,14 +235,93 @@ object YtMusicRepository {
      */
     suspend fun explore(): Result<List<HomeShelf>> = call("explore") {
         coroutineScope {
-            val feeds = listOf("FEmusic_explore", "FEmusic_charts")
-                .map { id -> async { runCatching { shelvesOf(id) }.getOrDefault(emptyList()) } }
-                .awaitAll()
-            val seen = mutableSetOf<String>()
-            feeds.flatten().filter { shelf ->
-                val key = shelf.title.lowercase(Locale.ROOT)
-                seen.add(key)
+            val exploreDeferred = async { runCatching { shelvesOf("FEmusic_explore") } }
+            val chartsDeferred = async { runCatching { shelvesOf("FEmusic_charts") } }
+
+            val exploreRes = exploreDeferred.await()
+            val chartsRes = chartsDeferred.await()
+
+            if (exploreRes.isFailure && chartsRes.isFailure) {
+                exploreRes.getOrThrow()
             }
+
+            val exploreShelves = exploreRes.getOrDefault(emptyList())
+            val chartsShelves = chartsRes.getOrDefault(emptyList())
+
+            val merged = mutableListOf<HomeShelf>()
+            val seenTitles = mutableMapOf<String, Int>()
+
+            for (shelf in exploreShelves + chartsShelves) {
+                val normTitle = shelf.title.trim().lowercase(Locale.ROOT)
+                if (normTitle.isEmpty()) {
+                    merged.add(shelf)
+                    continue
+                }
+                val existingIndex = seenTitles[normTitle]
+                if (existingIndex == null) {
+                    seenTitles[normTitle] = merged.size
+                    merged.add(shelf)
+                } else {
+                    val existing = merged[existingIndex]
+                    val isChartOrRanked = shelf.type in setOf(ShelfType.CHART_SONGS, ShelfType.CHART_ARTISTS, ShelfType.CHART_VIDEOS, ShelfType.RANKED)
+                    val existingIsChartOrRanked = existing.type in setOf(ShelfType.CHART_SONGS, ShelfType.CHART_ARTISTS, ShelfType.CHART_VIDEOS, ShelfType.RANKED)
+                    val preferNew = shelf.items.size > existing.items.size || (isChartOrRanked && !existingIsChartOrRanked)
+                    if (preferNew) {
+                        merged[existingIndex] = shelf.copy(
+                            subtitle = shelf.subtitle.ifBlank { existing.subtitle },
+                            strapline = shelf.strapline ?: existing.strapline,
+                            moreBrowseId = shelf.moreBrowseId ?: existing.moreBrowseId,
+                            moreParams = shelf.moreParams ?: existing.moreParams,
+                        )
+                    } else {
+                        merged[existingIndex] = existing.copy(
+                            subtitle = existing.subtitle.ifBlank { shelf.subtitle },
+                            strapline = existing.strapline ?: shelf.strapline,
+                            moreBrowseId = existing.moreBrowseId ?: shelf.moreBrowseId,
+                            moreParams = existing.moreParams ?: shelf.moreParams,
+                        )
+                    }
+                }
+            }
+
+            // Enrich Top songs with moreBrowseId and strapline
+            val topSongsIdx = merged.indexOfFirst {
+                it.title.contains("Top songs", ignoreCase = true) || it.title.contains("Top 100", ignoreCase = true)
+            }
+            if (topSongsIdx >= 0) {
+                val s = merged[topSongsIdx]
+                merged[topSongsIdx] = s.copy(
+                    moreBrowseId = s.moreBrowseId ?: "VLPL4fGSI46T250j298PrMtcms0bhcpTrU0S",
+                    strapline = s.strapline ?: "CHARTS",
+                )
+            }
+
+            val topVideosIdx = merged.indexOfFirst {
+                it.title.contains("video", ignoreCase = true)
+            }
+            if (topVideosIdx >= 0) {
+                val s = merged[topVideosIdx]
+                merged[topVideosIdx] = s.copy(
+                    moreBrowseId = s.moreBrowseId ?: "VLPL4fGSI46T252jA06tkyvPj94Kk3m33u4e",
+                    strapline = s.strapline ?: "VIDEO CHARTS",
+                )
+            }
+
+            // Insert Top 100 & Viral Charts and Genre Charts if not already present
+            if (merged.none { it.title.contains("Top 100", ignoreCase = true) && !it.title.contains("Top songs", ignoreCase = true) }) {
+                val insertIdx = if (topSongsIdx >= 0) (topSongsIdx + 2).coerceAtMost(merged.size) else merged.size
+                merged.add(insertIdx, TOP_100_CHARTS_SHELF)
+            }
+            if (merged.none { it.title.contains("Genre Charts", ignoreCase = true) }) {
+                val insertIdx = merged.indexOfFirst { it.title == TOP_100_CHARTS_SHELF.title }
+                if (insertIdx >= 0) {
+                    merged.add(insertIdx + 1, GENRE_CHARTS_SHELF)
+                } else {
+                    merged.add(GENRE_CHARTS_SHELF)
+                }
+            }
+
+            merged
         }
     }
 
@@ -328,10 +498,40 @@ object YtMusicRepository {
         call("browse:$browseId${params?.let { ":$it" }.orEmpty()}") {
             val response = Innertube.browse(browseId, params)
             val page = pageOf(response)
-            // Only a playlist has an owner in the sense that matters — see
-            // parsePlaylistOwned — and only its own first response can be asked.
-            if (!browseId.startsWith("VL")) page
-            else page.copy(owned = InnertubeParser.parsePlaylistOwned(response))
+            if (browseId == "FEmusic_charts") {
+                val enriched = page.sections.toMutableList()
+                val topSongsIdx = enriched.indexOfFirst {
+                    it.title.contains("Top songs", ignoreCase = true) || it.title.contains("Top 100", ignoreCase = true)
+                }
+                if (topSongsIdx >= 0) {
+                    val s = enriched[topSongsIdx]
+                    enriched[topSongsIdx] = s.copy(
+                        moreBrowseId = s.moreBrowseId ?: "VLPL4fGSI46T250j298PrMtcms0bhcpTrU0S",
+                        strapline = s.strapline ?: "CHARTS",
+                    )
+                }
+                val topVideosIdx = enriched.indexOfFirst {
+                    it.title.contains("video", ignoreCase = true)
+                }
+                if (topVideosIdx >= 0) {
+                    val s = enriched[topVideosIdx]
+                    enriched[topVideosIdx] = s.copy(
+                        moreBrowseId = s.moreBrowseId ?: "VLPL4fGSI46T252jA06tkyvPj94Kk3m33u4e",
+                        strapline = s.strapline ?: "VIDEO CHARTS",
+                    )
+                }
+                if (enriched.none { it.title.contains("Top 100", ignoreCase = true) && !it.title.contains("Top songs", ignoreCase = true) }) {
+                    enriched.add(TOP_100_CHARTS_SHELF)
+                }
+                if (enriched.none { it.title.contains("Genre Charts", ignoreCase = true) }) {
+                    enriched.add(GENRE_CHARTS_SHELF)
+                }
+                page.copy(sections = enriched)
+            } else if (!browseId.startsWith("VL")) {
+                page
+            } else {
+                page.copy(owned = InnertubeParser.parsePlaylistOwned(response))
+            }
         }
 
     /** The page [SongPage.continuation] points at. */
@@ -356,7 +556,7 @@ object YtMusicRepository {
     private fun pageOf(response: JsonObject): SongPage {
         val library = InnertubeParser.parseLibraryState(response)
         val header = InnertubeParser.parseBrowseHeader(response)
-        val sections = InnertubeParser.parseHome(response)
+        val sections = InnertubeParser.parseHome(response).ifEmpty { InnertubeParser.parseHomeContinuation(response) }
         // A playlist page is scoped to its own shelf so its "Suggested
         // tracks" never read as songs the user added — see
         // parsePlaylistShelf. Anything else (album, library, history) has no

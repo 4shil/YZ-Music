@@ -1061,6 +1061,199 @@ class NowPlayingNavigationTest {
         assertEquals(QueueSwipeDownAction.NONE, actionOnRelease)
         assertFalse(tracker.gestureHandled)
     }
+
+    // =======================================================
+    // SECTION 14 — FINAL QUEUE SCROLL TEST SUITE (TESTS 1–8)
+    // =======================================================
+
+    @Test
+    fun `Section 14 - Test 1 - Queue scrolled to item 20 - slow downward drag does not trigger scroll-to-top or close`() {
+        val tracker = QueueSwipeDownTracker(
+            thresholdPx = 100f,
+            scrollToTopThresholdPx = 250f,
+            flickVelocityPx = 450f,
+            minFlickDistancePx = 40f,
+            minScrollToTopFlickDistancePx = 160f,
+            touchSlopPx = 20f,
+        )
+
+        // Queue is around item 20 (isAtTop = false)
+        tracker.onGestureStart(isAtTop = false)
+
+        // User drags slowly downward: movement accumulates but stays below scrollToTop threshold
+        val action1 = tracker.onPosition(0f, 60f)
+        assertEquals(QueueSwipeDownAction.NONE, action1)
+        assertFalse(tracker.gestureHandled)
+
+        val action2 = tracker.onPosition(0f, 120f)
+        assertEquals(QueueSwipeDownAction.NONE, action2)
+        assertFalse(tracker.gestureHandled)
+
+        // User releases without high flick velocity (< 450f)
+        val actionRelease = tracker.onRelease(200f)
+        assertEquals(QueueSwipeDownAction.NONE, actionRelease)
+        assertFalse(tracker.gestureHandled)
+    }
+
+    @Test
+    fun `Section 14 - Test 2 - Queue scrolled down - normal upward drag produces no gesture actions`() {
+        val tracker = QueueSwipeDownTracker(
+            thresholdPx = 100f,
+            scrollToTopThresholdPx = 250f,
+            flickVelocityPx = 450f,
+            touchSlopPx = 20f,
+        )
+
+        tracker.onGestureStart(isAtTop = false)
+
+        // Drag UP normally (negative deltaY)
+        assertEquals(QueueSwipeDownAction.NONE, tracker.onPosition(0f, -80f))
+        assertEquals(QueueSwipeDownAction.NONE, tracker.onPosition(0f, -200f))
+        assertEquals(QueueSwipeDownAction.NONE, tracker.onRelease(-600f))
+        assertFalse(tracker.gestureHandled)
+    }
+
+    @Test
+    fun `Section 14 - Test 3 - Queue scrolled down - repeated normal scrolling UP and DOWN produces no gesture actions`() {
+        val tracker = QueueSwipeDownTracker(
+            thresholdPx = 100f,
+            scrollToTopThresholdPx = 250f,
+            flickVelocityPx = 450f,
+            minScrollToTopFlickDistancePx = 160f,
+            touchSlopPx = 20f,
+        )
+
+        // Drag UP
+        tracker.onGestureStart(isAtTop = false)
+        assertEquals(QueueSwipeDownAction.NONE, tracker.onPosition(0f, -100f))
+        tracker.onGestureEnd()
+
+        // Drag DOWN (small browsing drag)
+        tracker.onGestureStart(isAtTop = false)
+        assertEquals(QueueSwipeDownAction.NONE, tracker.onPosition(0f, 80f))
+        tracker.onGestureEnd()
+
+        // Drag UP again
+        tracker.onGestureStart(isAtTop = false)
+        assertEquals(QueueSwipeDownAction.NONE, tracker.onPosition(0f, -90f))
+        tracker.onGestureEnd()
+
+        // Drag DOWN again
+        tracker.onGestureStart(isAtTop = false)
+        assertEquals(QueueSwipeDownAction.NONE, tracker.onPosition(0f, 75f))
+        tracker.onGestureEnd()
+
+        assertFalse(tracker.gestureHandled)
+    }
+
+    @Test
+    fun `Section 14 - Test 4 - Queue scrolled down - normal downward fling with small displacement produces native fling without gesture action`() {
+        val tracker = QueueSwipeDownTracker(
+            thresholdPx = 100f,
+            scrollToTopThresholdPx = 250f,
+            flickVelocityPx = 450f,
+            minScrollToTopFlickDistancePx = 160f,
+            touchSlopPx = 20f,
+        )
+
+        tracker.onGestureStart(isAtTop = false)
+
+        // Normal list fling: short downward displacement (50px < minScrollToTopFlickDistancePx 160px)
+        tracker.onPosition(0f, 50f)
+
+        // User releases with high velocity: fling should NOT be hijacked into SCROLL_TO_TOP
+        val releaseAction = tracker.onRelease(800f)
+        assertEquals(QueueSwipeDownAction.NONE, releaseAction)
+        assertFalse(tracker.gestureHandled)
+    }
+
+    @Test
+    fun `Section 14 - Test 5 - Queue scrolled down - deliberate special DOWN gesture triggers SCROLL_TO_TOP and remains in Queue`() {
+        val tracker = QueueSwipeDownTracker(
+            thresholdPx = 100f,
+            scrollToTopThresholdPx = 250f,
+            flickVelocityPx = 450f,
+            minScrollToTopFlickDistancePx = 160f,
+            touchSlopPx = 20f,
+        )
+        val controller = NowPlayingNavigationController()
+        controller.openQueue()
+
+        tracker.onGestureStart(isAtTop = false)
+
+        // Deliberate long downward swipe crossing 250px
+        val action = tracker.onPosition(0f, 260f)
+        assertEquals(QueueSwipeDownAction.SCROLL_TO_TOP, action)
+        assertTrue(tracker.gestureHandled)
+
+        // Controller updates: remains in Queue (EXPANDED), does NOT close
+        val finalState = controller.onQueueDownwardGesture(isAtTop = false)
+        assertEquals(PanelSheetState.EXPANDED, finalState)
+        assertEquals(NowPlayingMode.QUEUE, controller.mode)
+    }
+
+    @Test
+    fun `Section 14 - Test 6 - Special scroll-to-top must not automatically close Queue in single gesture`() {
+        val tracker = QueueSwipeDownTracker(
+            thresholdPx = 100f,
+            scrollToTopThresholdPx = 250f,
+            flickVelocityPx = 450f,
+            touchSlopPx = 20f,
+        )
+        val controller = NowPlayingNavigationController()
+        controller.openQueue()
+
+        tracker.onGestureStart(isAtTop = false)
+        val action = tracker.onPosition(0f, 260f)
+        assertEquals(QueueSwipeDownAction.SCROLL_TO_TOP, action)
+
+        // User continues downward movement in same gesture
+        val actionContinue = tracker.onPosition(0f, 350f)
+        assertEquals(QueueSwipeDownAction.NONE, actionContinue)
+
+        // Gesture ends: Queue remains EXPANDED
+        tracker.onGestureEnd()
+        assertEquals(PanelSheetState.EXPANDED, controller.sheetState)
+        assertEquals(NowPlayingMode.QUEUE, controller.mode)
+    }
+
+    @Test
+    fun `Section 14 - Test 7 - Queue at top - deliberate DOWN gesture closes Queue to reveal existing Full Player`() {
+        val tracker = QueueSwipeDownTracker(
+            thresholdPx = 100f,
+            scrollToTopThresholdPx = 250f,
+            flickVelocityPx = 450f,
+            touchSlopPx = 20f,
+        )
+        val controller = NowPlayingNavigationController()
+        controller.openQueue()
+
+        // Queue is at top
+        tracker.onGestureStart(isAtTop = true)
+
+        val action = tracker.onPosition(0f, 110f)
+        assertEquals(QueueSwipeDownAction.CLOSE_QUEUE, action)
+
+        val state = controller.onQueueDownwardGesture(isAtTop = true)
+        assertEquals(PanelSheetState.COLLAPSED, state)
+        assertEquals(NowPlayingMode.FULL_PLAYER, controller.mode)
+    }
+
+    @Test
+    fun `Section 14 - Test 8 - Player preservation after Queue closes - returns to existing Full Player without state restart`() {
+        val controller = NowPlayingNavigationController()
+        controller.openQueue()
+        assertEquals(NowPlayingMode.QUEUE, controller.mode)
+        assertEquals(PanelSheetState.EXPANDED, controller.sheetState)
+
+        // Close Queue to Full Player
+        controller.closeToFullPlayer()
+        assertEquals(PanelSheetState.COLLAPSED, controller.sheetState)
+        assertEquals(NowPlayingMode.FULL_PLAYER, controller.mode)
+
+        // State remains in normal FULL_PLAYER without Peek or reinitialization
+        assertEquals(0f, controller.targetProgress, 0.001f)
+    }
 }
 
 

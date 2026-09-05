@@ -852,7 +852,7 @@ fun SettingsScreen(
 
         Text(
             text = buildAnnotatedString {
-                append("bitchord $version  ")
+                append("YZ-Music $version  ")
                 val linkStyles = TextLinkStyles(
                     style = SpanStyle(
                         color = MaterialTheme.colorScheme.primary,

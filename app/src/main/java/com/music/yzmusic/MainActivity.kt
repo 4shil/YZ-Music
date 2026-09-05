@@ -106,6 +106,7 @@ import com.music.yzmusic.data.scrobbling.LastFM
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.data.settings.ThemeMode
 import com.music.yzmusic.ui.screens.AccountAndScrobblingScreen
+import com.music.yzmusic.ui.screens.ExploreScreen
 import com.music.yzmusic.ui.screens.HistoryScreen
 import com.music.yzmusic.ui.screens.SettingsScreen
 import com.music.yzmusic.ui.screens.SourcesScreen
@@ -801,17 +802,30 @@ private fun YZMusicApp(
      * isn't a guess — so holding an artist card does nothing, as it did before.
      */
     val onBrowseLongPress: (ShelfItem) -> Unit = { item ->
-        val id = item.browseId
-        val type = id?.let { viewModel.browseTypeOf(it) }
-        if (id != null && type != BrowseType.ARTIST) {
-            browseActions = BrowseTarget(
-                browseId = id,
-                title = item.title,
-                subtitle = item.subtitle,
-                thumbnailUrl = item.thumbnailUrl,
-                type = type ?: BrowseType.OTHER,
-                downloadId = downloadIdFor(id),
+        when {
+            item.videoId != null -> openSongMenu(
+                Song(
+                    videoId = item.videoId,
+                    title = item.title,
+                    artist = InnertubeParser.artistFromSubtitle(item.subtitle).ifBlank { item.subtitle },
+                    thumbnailUrl = item.thumbnailUrl,
+                    isVideo = item.isVideo,
+                ),
             )
+            item.browseId != null -> {
+                val id = item.browseId
+                val type = viewModel.browseTypeOf(id)
+                if (type != BrowseType.ARTIST) {
+                    browseActions = BrowseTarget(
+                        browseId = id,
+                        title = item.title,
+                        subtitle = item.subtitle,
+                        thumbnailUrl = item.thumbnailUrl,
+                        type = type,
+                        downloadId = downloadIdFor(id),
+                    )
+                }
+            }
         }
     }
 
@@ -923,6 +937,7 @@ private fun YZMusicApp(
                 title = item.title,
                 subtitle = item.subtitle,
                 thumbnailUrl = item.thumbnailUrl,
+                params = item.params,
             )
         }
     }
@@ -1183,8 +1198,12 @@ private fun YZMusicApp(
             onDownload = { downloadSong(song) },
             onJumpTo = { controller?.seekToDefaultPosition(it) },
             onRemoveFromQueue = { controller?.removeMediaItem(it) },
-            onMoveInQueue = { from, to -> controller?.moveMediaItem(from, to) },
-            // The enriched copy, not player.song — otherwise the menu
+            onMoveInQueue = { from, to ->
+                val c = controller
+                if (c != null && from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount && from != to) {
+                    c.moveMediaItem(from, to)
+                }
+            },
             // hides the album and artist rows even once their browse
             // ids have been resolved.
             onOpenMenu = {
@@ -1631,21 +1650,15 @@ private fun YZMusicApp(
                             onLoadMore = viewModel::loadMoreHome,
                             loadingMore = homeLoadingMore,
                         )
-                        TAB_EXPLORE -> HomeScreen(
+                        TAB_EXPLORE -> ExploreScreen(
                             state = exploreState,
                             listState = exploreListState,
-                            title = "Explore",
                             onItemClick = { item ->
                                 when {
                                     item.videoId != null -> playRadio(
                                         Song(
                                             videoId = item.videoId,
                                             title = item.title,
-                                            // The card's own subtitle is billed
-                                            // as "Song • Chelsea Wolfe"; only
-                                            // the credit belongs in the field
-                                            // the player, mini player and
-                                            // everything downstream read.
                                             artist = InnertubeParser.artistFromSubtitle(item.subtitle),
                                             thumbnailUrl = item.thumbnailUrl,
                                             isVideo = item.isVideo,
