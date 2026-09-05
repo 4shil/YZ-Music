@@ -149,7 +149,7 @@ object AppSettings {
 
     /**
      * Seconds to seek forward or backward on double-tap in the player.
-     * Must be one of 5, 10, or 15 seconds. Default is 10.
+     * Must be one of 5, 10, or 25 seconds. Default is 10.
      */
     val seekDurationSeconds = MutableStateFlow(10)
 
@@ -413,7 +413,7 @@ object AppSettings {
         smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
         skipSilence.value = prefs.getBoolean(KEY_SKIP_SILENCE, false)
         seekDurationSeconds.value = when (val saved = prefs.getInt(KEY_SEEK_DURATION_SECONDS, 10)) {
-            5, 10, 15 -> saved
+            5, 10, 25 -> saved
             else -> 10
         }
         spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
@@ -595,9 +595,11 @@ object AppSettings {
     }
 
     fun setSeekDurationSeconds(value: Int) {
-        val sanitized = if (value in listOf(5, 10, 15)) value else 10
+        val sanitized = if (value in listOf(5, 10, 25)) value else 10
         seekDurationSeconds.value = sanitized
-        prefs.edit().putInt(KEY_SEEK_DURATION_SECONDS, sanitized).apply()
+        if (::prefs.isInitialized) {
+            prefs.edit().putInt(KEY_SEEK_DURATION_SECONDS, sanitized).apply()
+        }
     }
 
     fun setSpatialAudio(value: Boolean) {
