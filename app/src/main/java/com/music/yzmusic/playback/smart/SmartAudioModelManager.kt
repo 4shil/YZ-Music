@@ -29,18 +29,24 @@ object SmartAudioModelManager {
 
     enum class ModelType(
         val fileName: String,
+        val displayName: String,
+        val description: String,
         val sha256: String,
         val expectedBytes: Long,
         val downloadUrl: String,
     ) {
         BEAT(
             fileName = "beat_this_int8.onnx",
+            displayName = "Neural Beat Tracker",
+            description = "Downbeat, tempo phase & bar alignment",
             sha256 = "9dc29f1fcd713d18f48a2755109fce01429ba6d1639607af8ae5c7449b47070f",
             expectedBytes = 4_533_252L,
             downloadUrl = "https://github.com/4shil/YZ-Music/releases/download/v1.04.03/beat_this_int8.onnx",
         ),
         VOCAL(
             fileName = "vocals_umxhq_int8.onnx",
+            displayName = "Neural Vocal Separator",
+            description = "Voice activity detection & clash prevention",
             sha256 = "a2be987b55a29bc149d3a6ae99b08175d81f85ee292a8ea21f96c3a473bc94cb",
             expectedBytes = 9_054_206L,
             downloadUrl = "https://github.com/4shil/YZ-Music/releases/download/v1.04.03/vocals_umxhq_int8.onnx",
@@ -177,6 +183,60 @@ object SmartAudioModelManager {
         }
     }
 
+    data class ModelVerificationInfo(
+        val model: ModelType,
+        val exists: Boolean,
+        val actualBytes: Long,
+        val isValidChecksum: Boolean,
+    )
+
+    /**
+     * Inspects on-disk status and verifies SHA-256 digests for all models.
+     */
+    suspend fun verifyModels(context: Context): List<ModelVerificationInfo> = withContext(Dispatchers.IO) {
+        ModelType.values().map { model ->
+            val file = File(context.filesDir, model.fileName)
+            val exists = file.exists()
+            val actualBytes = if (exists) file.length() else 0L
+            val valid = exists && actualBytes == model.expectedBytes && verifyChecksum(file, model.sha256)
+            ModelVerificationInfo(
+                model = model,
+                exists = exists,
+                actualBytes = actualBytes,
+                isValidChecksum = valid,
+            )
+        }
+    }
+
+    /**
+     * Safely deletes downloaded neural models from app-private storage.
+     * Automix will automatically fall back to the native C++ DSP analyzer.
+     */
+    fun deleteModels(context: Context): Boolean {
+        if (isDownloading) return false
+        var allDeleted = true
+        for (model in ModelType.values()) {
+            val file = File(context.filesDir, model.fileName)
+            if (file.exists()) {
+                if (!file.delete()) {
+                    allDeleted = false
+                }
+            }
+            val tmp = File(context.filesDir, "${model.fileName}.tmp")
+            if (tmp.exists()) tmp.delete()
+        }
+        _downloadState.value = DownloadState.NotDownloaded
+        return allDeleted
+    }
+
+    /**
+     * Cleans existing files and starts a fresh download and verification.
+     */
+    suspend fun repairModels(context: Context): Result<Unit> {
+        deleteModels(context)
+        return downloadModels(context)
+    }
+
     private fun verifyChecksum(file: File, expectedSha256: String): Boolean {
         return runCatching {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -192,3 +252,4 @@ object SmartAudioModelManager {
         }.getOrDefault(false)
     }
 }
+

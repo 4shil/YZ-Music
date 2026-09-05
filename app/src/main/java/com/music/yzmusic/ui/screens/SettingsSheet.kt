@@ -58,23 +58,31 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Mic
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import java.io.File
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -204,6 +212,7 @@ fun SettingsScreen(
 
     var picking by remember { mutableStateOf<QualityTarget?>(null) }
     var pickingDownloadQuality by remember { mutableStateOf(false) }
+    var showNeuralAudioSheet by remember { mutableStateOf(false) }
     // What the last export or import did, shown on the row that did it rather
     // than as a toast: a backup is the one action here whose outcome nobody can
     // check by looking at the app afterwards. Held per direction, or an import's
@@ -377,40 +386,112 @@ fun SettingsScreen(
                 LaunchedEffect(Unit) {
                     SmartAudioModelManager.checkStatus(ctx)
                 }
-                val (modelSubtitle, modelActionText) = when (val s = modelState) {
-                    is SmartAudioModelManager.DownloadState.Ready ->
-                        "Neural beat & vocal models active" to null
-                    is SmartAudioModelManager.DownloadState.Downloading ->
-                        "Downloading neural models: ${s.progressPercent}%" to null
-                    is SmartAudioModelManager.DownloadState.Error ->
-                        "Download failed · Tap to retry" to "Retry"
-                    is SmartAudioModelManager.DownloadState.NotDownloaded ->
-                        "Native DSP active · Neural models optional (13 MB)" to "Download"
+                when (val s = modelState) {
+                    is SmartAudioModelManager.DownloadState.Ready -> {
+                        SettingsRow(
+                            icon = Icons.Rounded.AutoAwesome,
+                            title = "Neural Audio Refinement",
+                            subtitle = "AI beat & vocal analysis active",
+                            trailing = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                    ) {
+                                        Text(
+                                            text = "Active",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                    Chevron()
+                                }
+                            },
+                            onClick = { showNeuralAudioSheet = true },
+                        )
+                    }
+                    is SmartAudioModelManager.DownloadState.Downloading -> {
+                        val currentMb = String.format(java.util.Locale.US, "%.1f", s.currentBytes / 1_000_000.0)
+                        val totalMb = String.format(java.util.Locale.US, "%.1f", s.totalBytes / 1_000_000.0)
+                        SettingsRow(
+                            icon = Icons.Rounded.Download,
+                            title = "Neural Audio Refinement",
+                            subtitle = "Downloading neural models · ${s.progressPercent}% ($currentMb / $totalMb MB)",
+                            trailing = {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    CircularProgressIndicator(
+                                        progress = { s.progressPercent / 100f },
+                                        modifier = Modifier.size(22.dp),
+                                        strokeWidth = 2.5.dp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = null,
+                        )
+                    }
+                    is SmartAudioModelManager.DownloadState.Error -> {
+                        SettingsRow(
+                            icon = Icons.Rounded.Download,
+                            title = "Neural Audio Refinement",
+                            subtitle = "Download failed · Tap to retry",
+                            trailing = {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
+                                    modifier = Modifier.clickable {
+                                        scope.launch { SmartAudioModelManager.downloadModels(ctx) }
+                                    },
+                                ) {
+                                    Text(
+                                        text = "Retry",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    )
+                                }
+                            },
+                            onClick = {
+                                scope.launch { SmartAudioModelManager.downloadModels(ctx) }
+                            },
+                        )
+                    }
+                    is SmartAudioModelManager.DownloadState.NotDownloaded -> {
+                        SettingsRow(
+                            icon = Icons.Rounded.Download,
+                            title = "Neural Audio Refinement",
+                            subtitle = "AI beat & vocal analysis for smoother Automix · ~13.5 MB",
+                            trailing = {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                    modifier = Modifier.clickable {
+                                        scope.launch { SmartAudioModelManager.downloadModels(ctx) }
+                                    },
+                                ) {
+                                    Text(
+                                        text = "Download",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    )
+                                }
+                            },
+                            onClick = {
+                                scope.launch { SmartAudioModelManager.downloadModels(ctx) }
+                            },
+                        )
+                    }
                 }
-                SettingsRow(
-                    icon = Icons.Rounded.Download,
-                    title = "Neural Audio Refinement",
-                    subtitle = modelSubtitle,
-                    trailing = modelActionText?.let { action ->
-                        {
-                            Text(
-                                text = action,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    },
-                    onClick = {
-                        if (modelState is SmartAudioModelManager.DownloadState.NotDownloaded ||
-                            modelState is SmartAudioModelManager.DownloadState.Error
-                        ) {
-                            scope.launch {
-                                SmartAudioModelManager.downloadModels(ctx)
-                            }
-                        }
-                    },
-                )
             }
             RowDivider()
             SettingsRow(
@@ -914,6 +995,12 @@ fun SettingsScreen(
         }
     }
 
+    if (showNeuralAudioSheet) {
+        NeuralAudioSheet(
+            onDismissRequest = { showNeuralAudioSheet = false },
+        )
+    }
+
     // Asked before the picker opens rather than after a file is chosen: the
     // thing being confirmed is that this device's own history is about to be
     // thrown away, and that is true whichever file gets picked.
@@ -1326,6 +1413,335 @@ private fun DownloadQualitySheet(
                     )
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NeuralAudioSheet(
+    onDismissRequest: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var verificationResults by remember { mutableStateOf<List<SmartAudioModelManager.ModelVerificationInfo>?>(null) }
+    var isVerifying by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        containerColor = MaterialTheme.colorScheme.background,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp)
+                .padding(bottom = 28.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.padding(bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text(
+                        text = "Neural Audio Refinement",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "On-device AI for smoother Automix transitions",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+            Spacer(Modifier.height(16.dp))
+
+            // Capabilities card
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Capabilities",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    )
+
+                    FeatureCheckItem(
+                        title = "Neural Beat & Downbeat Tracking",
+                        description = "Predicts exact bar grids and tempo phase alignment for beat-matched transitions (Beat This! int8 ONNX).",
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    FeatureCheckItem(
+                        title = "Neural Vocal Activity Detection",
+                        description = "Detects active singing to prevent vocal clashing during song crossfades (Open-Unmix HQ int8 ONNX).",
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    FeatureCheckItem(
+                        title = "Seamless Native DSP Fallback",
+                        description = "If neural models are removed, Automix continues using native C++ audio analysis.",
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // Installed Models list
+            Text(
+                text = "Installed Models",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+
+            SmartAudioModelManager.ModelType.values().forEach { model ->
+                val file = File(context.filesDir, model.fileName)
+                val isInstalled = file.exists() && file.length() > 0
+                val sizeText = if (isInstalled) {
+                    val mb = String.format(java.util.Locale.US, "%.1f MB", file.length() / 1_000_000.0)
+                    "Installed · $mb"
+                } else {
+                    val mb = String.format(java.util.Locale.US, "%.1f MB", model.expectedBytes / 1_000_000.0)
+                    "Not installed · ~$mb"
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = if (model == SmartAudioModelManager.ModelType.BEAT) {
+                                Icons.Rounded.GraphicEq
+                            } else {
+                                Icons.Rounded.Mic
+                            },
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = model.displayName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                            )
+                            Text(
+                                text = model.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = sizeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isInstalled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        if (isInstalled) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = "Installed",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Diagnostic verification feedback
+            verificationResults?.let { results ->
+                Spacer(Modifier.height(14.dp))
+                val allValid = results.all { it.isValidChecksum }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (allValid) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    } else {
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = null,
+                            tint = if (allValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = if (allValid) {
+                                "All neural models verified (SHA-256 digests valid)"
+                            } else {
+                                "Integrity check failed · Tap Repair to restore"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (allValid) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+            Spacer(Modifier.height(16.dp))
+
+            // Management Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Verify Integrity button
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            isVerifying = true
+                            verificationResults = SmartAudioModelManager.verifyModels(context)
+                            isVerifying = false
+                        }
+                    },
+                    enabled = !isVerifying,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    if (isVerifying) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text("Verify")
+                    }
+                }
+
+                // Re-download / Repair button
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            onDismissRequest()
+                            SmartAudioModelManager.repairModels(context)
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Repair")
+                }
+
+                // Delete button
+                TextButton(
+                    onClick = { showDeleteConfirmDialog = true },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = "Delete",
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("Delete Neural Models?") },
+            text = {
+                Text(
+                    "This will remove the downloaded neural models (~13.5 MB) from storage.\n\n" +
+                    "Automix will remain active and seamlessly fall back to the native C++ DSP analyzer. " +
+                    "You can re-download these models at any time.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        SmartAudioModelManager.deleteModels(context)
+                        showDeleteConfirmDialog = false
+                        onDismissRequest()
+                    },
+                ) {
+                    Text(
+                        text = "Delete",
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun FeatureCheckItem(
+    title: String,
+    description: String,
+) {
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(
+            imageVector = Icons.Rounded.Check,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
