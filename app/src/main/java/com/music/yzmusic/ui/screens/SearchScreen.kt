@@ -1,5 +1,15 @@
-﻿package com.music.yzmusic.ui.screens
+package com.music.yzmusic.ui.screens
 
+import android.Manifest
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import com.music.yzmusic.ui.components.bouncingOverscroll
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,16 +41,25 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NorthWest
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,11 +98,16 @@ fun SearchScreen(
     filter: SearchFilter,
     onFilterChange: (SearchFilter) -> Unit,
     results: UiState<List<SearchResult>>?,
+    loadingMore: Boolean = false,
+    onLoadMore: () -> Unit = {},
     listState: LazyListState,
+    scrollResetTrigger: Int = 0,
     focusTrigger: Int = 0,
     onSongClick: (List<Song>, Int) -> Unit,
     onSongLongPress: (Song) -> Unit,
     onSongSwipe: (Song) -> Unit,
+    onTopResultPlay: (Song) -> Unit,
+    onTopResultPlaylist: (Song) -> Unit,
     onBrowseClick: (BrowseItem) -> Unit,
     /**
      * Holding an album or playlist hit rather than tapping it — the same menu
@@ -97,21 +122,39 @@ fun SearchScreen(
     onHistoryClick: (String) -> Unit,
     onHistoryRemove: (String) -> Unit,
     onHistoryClear: () -> Unit,
+    isLoadingMore: Boolean = loadingMore,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues,
 ) {
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val isCurrentlyLoadingMore = loadingMore || isLoadingMore
+
     // Re-tapping the search tab from the nav bar increments focusTrigger;
     // respond by focusing the field and opening the keyboard.
     LaunchedEffect(focusTrigger) {
         if (focusTrigger > 0) focusRequester.requestFocus()
+    }
+    // Search keeps one list state while its contents change. Reset it for each
+    // new request so choosing a recent search cannot inherit the history's
+    // previous scroll position (or a previous result page's position).
+    LaunchedEffect(scrollResetTrigger) {
+        if (scrollResetTrigger > 0) listState.scrollToItem(0)
     }
     // A non-empty suggestion list means the field is mid-edit — see
     // MainViewModel.suggestions. Nothing below it is worth showing while it is
     // up: the results are for whatever was searched before this edit began,
     // and so are the filter tabs above them.
     val suggesting = suggestions.isNotEmpty()
+    LaunchedEffect(listState, results, isCurrentlyLoadingMore) {
+        if (results !is UiState.Success) return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) to layout.totalItemsCount
+        }.collect { (lastVisible, total) ->
+            if (!isCurrentlyLoadingMore && total > 0 && lastVisible >= total - 4) onLoadMore()
+        }
+    }
     Column(modifier = modifier.fillMaxSize()) {
         // Search field and filter tabs stay fixed at the top, outside the
         // scrolling list, so they're always reachable rather than scrolling
@@ -134,7 +177,10 @@ fun SearchScreen(
 
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .bouncingOverscroll(),
             contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
         ) {
             when {
@@ -156,39 +202,165 @@ fun SearchScreen(
                 results is UiState.Loading -> songListSkeleton(circular = filter == SearchFilter.ARTISTS)
                 results is UiState.Error -> item { MessageState(results.message) }
                 results is UiState.Success -> {
-                    // Tapping a track plays the tracks around it, not the browse rows.
                     val tracks = results.data
-                        .filterIsInstance<SearchResult.Track>()
-                        .map { it.song }
-                    itemsIndexed(results.data) { index, row ->
-                        when (row) {
-                            is SearchResult.Track -> SongRow(
-                                song = row.song,
-                                onClick = {
-                                    onSongClick(tracks, tracks.indexOf(row.song).coerceAtLeast(0))
-                                },
-                                onLongPress = { onSongLongPress(row.song) },
-                                onSwipeToQueue = { onSongSwipe(row.song) },
-                            )
-                            is SearchResult.Browse -> BrowseRow(
-                                item = row.item,
-                                onClick = { onBrowseClick(row.item) },
-                                onLongPress = onBrowseLongPress?.let { { it(row.item) } },
-                            )
-                        }
-                        if (index < results.data.lastIndex) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
-                                thickness = 0.5.dp,
-                                color = MaterialTheme.colorScheme.outline,
+                        .mapNotNull { row -> when (row) {
+                            is SearchResult.TopTrack -> row.song
+                            is SearchResult.Track -> row.song
+                            is SearchResult.Browse -> null
+                        } }
+                    val topResult = results.data.filterIsInstance<SearchResult.TopTrack>().firstOrNull()
+                    if (filter == SearchFilter.ALL && topResult != null) {
+                        item(key = "search:top-result:${topResult.song.videoId}") {
+                            TopResultCard(
+                                song = topResult.song,
+                                onPlay = { onTopResultPlay(topResult.song) },
+                                onPlaylist = { onTopResultPlaylist(topResult.song) },
+                                onLongPress = { onSongLongPress(topResult.song) },
                             )
                         }
                     }
+                    searchSections(results.data, filter).forEach { section ->
+                        section.title?.let { title ->
+                            item(key = "search-section:$title") {
+                                Text(
+                                    text = title,
+                                    modifier = Modifier.padding(
+                                        start = PAGE_GUTTER,
+                                        end = PAGE_GUTTER,
+                                        top = 16.dp,
+                                        bottom = 6.dp,
+                                    ),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                        itemsIndexed(section.rows) { index, row ->
+                            when (row) {
+                                is SearchResult.TopTrack -> Unit
+                                is SearchResult.Track -> SongRow(
+                                    song = row.song,
+                                    onClick = {
+                                        onSongClick(tracks, tracks.indexOf(row.song).coerceAtLeast(0))
+                                    },
+                                    onLongPress = { onSongLongPress(row.song) },
+                                    onSwipeToQueue = { onSongSwipe(row.song) },
+                                )
+                                is SearchResult.Browse -> BrowseRow(
+                                    item = row.item,
+                                    onClick = { onBrowseClick(row.item) },
+                                    onLongPress = onBrowseLongPress?.let { { it(row.item) } },
+                                )
+                            }
+                            if (index < section.rows.lastIndex) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                                    thickness = 0.5.dp,
+                                    color = MaterialTheme.colorScheme.outline,
+                                )
+                            }
+                        }
+                    }
+                    if (isCurrentlyLoadingMore) songListSkeleton(
+                        count = 3,
+                        keyPrefix = "skeleton:search:more",
+                        circular = filter == SearchFilter.ARTISTS,
+                    )
                 }
             }
         }
     }
 }
+
+private data class SearchSection(val title: String?, val rows: List<SearchResult>)
+
+/** The unfiltered page is useful only when its mixed result types are readable at a glance. */
+private fun searchSections(rows: List<SearchResult>, filter: SearchFilter): List<SearchSection> {
+    if (filter != SearchFilter.ALL) return listOf(SearchSection(null, rows))
+    return listOf(
+        SearchSection("Songs", rows.filterIsInstance<SearchResult.Track>()),
+        SearchSection("Artists", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.ARTIST }),
+        SearchSection("Albums", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.ALBUM }),
+        SearchSection("Playlists", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.PLAYLIST }),
+        SearchSection("More", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.OTHER }),
+    ).filter { it.rows.isNotEmpty() }
+}
+
+/** The All response carries its highest-confidence music hit as a promoted card. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TopResultCard(
+    song: Song,
+    onPlay: () -> Unit,
+    onPlaylist: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = PAGE_GUTTER, end = PAGE_GUTTER, top = 18.dp, bottom = 8.dp)
+            .combinedClickable(onClick = onPlay, onLongClick = onLongPress),
+    ) {
+        Text(
+            text = "Top result",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(
+                model = song.thumbnailUrl?.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)),
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onLongPress, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    Icons.Rounded.MoreVert,
+                    contentDescription = stringResource(R.string.more),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(
+                onClick = onPlay,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+            ) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.play))
+            }
+            OutlinedButton(
+                onClick = onPlaylist,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.playlist_action))
+            }
+        }
+    }
+}
+
 
 /**
  * What YouTube would complete the half-typed query to, in place of the results
@@ -455,7 +627,37 @@ private fun SearchField(
     focusRequester: FocusRequester = remember { FocusRequester() },
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+
+    val voiceSearchLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (spokenText != null) {
+                onQueryChange(spokenText)
+                onSubmit()
+                focusManager.clearFocus()
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { isGranted ->
+        if (isGranted) {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            }
+            try {
+                voiceSearchLauncher.launch(intent)
+            } catch (_: ActivityNotFoundException) {
+                // Ignore if no speech recognition app is installed
+            }
+        }
+    }
+
     // Both ways of saying "search this" do the same two things, so they're
     // written once here rather than twice.
     val submit = {
@@ -528,6 +730,34 @@ private fun SearchField(
                 Icon(
                     Icons.Rounded.Close,
                     contentDescription = stringResource(R.string.clear_search),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            }
+                            try {
+                                voiceSearchLauncher.launch(intent)
+                            } catch (_: ActivityNotFoundException) {
+                                // Ignore if no speech recognition app is installed
+                            }
+                        } else {
+                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Mic,
+                    contentDescription = stringResource(R.string.voice_search),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )

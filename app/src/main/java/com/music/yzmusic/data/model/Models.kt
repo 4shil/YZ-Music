@@ -53,7 +53,19 @@ data class Song(
      * the track played as a 128kbps MP3.
      */
     val sourceQuality: String? = null,
+    val isExplicit: Boolean? = null,
+    val radioName: String? = null,
+    val isVideoOrigin: Boolean = isVideo,
+    val downloadFormat: String? = null,
+    val localDateAddedSeconds: Long? = null,
+    val localDateModifiedSeconds: Long? = null,
 )
+
+/** Whether this track matches another by title and artist. */
+fun Song.isSameTrackAs(other: Song?): Boolean {
+    other ?: return false
+    return title == other.title && artist == other.artist
+}
 
 /**
  * Artwork at a given pixel size.
@@ -136,12 +148,17 @@ data class BrowseItem(
 
 /** Search rows are heterogeneous once filters other than "Songs" are used. */
 sealed interface SearchResult {
+    /** The promoted card returned only at the head of an unfiltered search. */
+    data class TopTrack(val song: Song) : SearchResult
     data class Track(val song: Song) : SearchResult
     data class Browse(val item: BrowseItem) : SearchResult
 }
 
 enum class SearchFilter(val label: String, val params: String?) {
+    /** YouTube Music's mixed search page: songs, artists, albums and playlists. */
+    ALL("All", null),
     SONGS("Songs", "EgWKAQIIAWoKEAkQChAFEAMQBA=="),
+    VIDEOS("Videos", "EgWKAQIQAWoKEAkQChAFEAMQBA=="),
     ALBUMS("Albums", "EgWKAQIYAWoKEAkQChAFEAMQBA=="),
     ARTISTS("Artists", "EgWKAQIgAWoKEAkQChAFEAMQBA=="),
     PLAYLISTS("Playlists", "EgWKAQIoAWoKEAkQChAFEAMQBA=="),
@@ -179,6 +196,36 @@ data class Account(
     val email: String,
     val thumbnailUrl: String?,
 )
+
+/**
+ * One identity the signed-in session can act as: the Google account's own
+ * channel, plus any brand channel it owns.
+ *
+ * A brand channel is a separate YouTube identity attached to the same login,
+ * and YouTube Music treats it as a separate listener — its own library, likes,
+ * history and recommendations. Nothing in the cookie says which one is meant,
+ * so a client that never asks gets whichever one the web player happens to
+ * default to, which is why a listener whose music lives on a brand channel
+ * signs in and is shown a stranger's account.
+ *
+ * @param pageId `X-Goog-PageId`. Null for the account's own channel, which is
+ *   not a delegated page and must not be given one.
+ * @param dataSyncId `context.user.onBehalfOfUser`, taken from the switcher's
+ *   `datasyncIdToken` — never guessed, since Google answers one it cannot tie
+ *   to the session with 401.
+ */
+data class AccountChannel(
+    val name: String,
+    val subtitle: String,
+    val thumbnailUrl: String?,
+    val pageId: String?,
+    val dataSyncId: String?,
+    /** Whether YouTube's own switcher marks this as the session's active one. */
+    val activeOnWeb: Boolean,
+) {
+    /** Identity of the selection, stable across refetches of the list. */
+    val key: String get() = pageId ?: dataSyncId ?: name
+}
 
 data class HomeShelf(
     val title: String,

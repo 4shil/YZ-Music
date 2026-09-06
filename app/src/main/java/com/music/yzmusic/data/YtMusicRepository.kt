@@ -4,6 +4,7 @@ import com.music.yzmusic.data.DebugLog as Log
 import com.music.yzmusic.data.innertube.Innertube
 import com.music.yzmusic.data.innertube.InnertubeParser
 import com.music.yzmusic.data.model.Account
+import com.music.yzmusic.data.model.AccountChannel
 import com.music.yzmusic.data.model.ArtistPage
 import com.music.yzmusic.data.model.HomeFeed
 import com.music.yzmusic.data.model.HomeShelf
@@ -20,6 +21,7 @@ import com.music.yzmusic.data.model.SongMenu
 import com.music.yzmusic.data.model.UserPlaylist
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.data.sources.TrackMatcher
+import com.music.yzmusic.playback.LastPlayed
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -128,6 +130,88 @@ object YtMusicRepository {
      * whereas this is the page you open when twenty is not enough.
      */
     suspend fun history(): Result<List<Song>> = call("history") { fetchHistory() }
+
+    /**
+     * Account listening history or local playback queue, for the Recents feed.
+     */
+    suspend fun recents(): Result<List<Song>> = call("recents") {
+        if (Innertube.cookie != null) {
+            val history = runCatching { fetchHistory() }.getOrDefault(emptyList())
+            if (history.isNotEmpty()) return@call history
+        }
+        val localSongs = LastPlayed.load()?.songs?.map {
+            Song(videoId = it.videoId, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl)
+        } ?: emptyList()
+        localSongs
+    }
+
+    /**
+     * Recommended discovery tracks for Quick Picks, strictly excluding listening history and recents.
+     */
+    suspend fun quickPicks(excludeSongIds: Set<String> = emptySet()): Result<List<Song>> = call("quickPicks") {
+        val homeRaw = runCatching { Innertube.browse("FEmusic_home") }.getOrNull()
+        val shelves = if (homeRaw != null) InnertubeParser.parseHome(homeRaw) else emptyList()
+
+        // 1. Direct "Quick picks" or "Mix" or "Recommendations" shelf
+        val qpShelf = shelves.firstOrNull {
+            it.title.contains("quick", ignoreCase = true) ||
+                it.title.contains("pick", ignoreCase = true) ||
+                it.title.contains("mix", ignoreCase = true) ||
+                it.title.contains("recommend", ignoreCase = true)
+        }
+        val qpSongs = qpShelf?.items?.mapNotNull { item ->
+            item.videoId?.takeUnless { it in excludeSongIds }?.let { vid ->
+                Song(videoId = vid, title = item.title, artist = item.subtitle, thumbnailUrl = item.thumbnailUrl)
+            }
+        }.orEmpty()
+        if (qpSongs.isNotEmpty()) return@call qpSongs
+
+        // 2. All shelves on Home (excluding shelves mentioning recent/history, and skipping top shelf if multiple exist)
+        val candidateShelves = if (shelves.size > 1) {
+            shelves.drop(1).filterNot {
+                it.title.contains("recent", ignoreCase = true) ||
+                    it.title.contains("history", ignoreCase = true) ||
+                    it.title.contains("listen again", ignoreCase = true)
+            }
+        } else shelves
+
+        val homeShelfSongs = candidateShelves.flatMap { shelf ->
+            shelf.items.mapNotNull { item ->
+                item.videoId?.takeUnless { it in excludeSongIds }?.let { vid ->
+                    Song(videoId = vid, title = item.title, artist = item.subtitle, thumbnailUrl = item.thumbnailUrl)
+                }
+            }
+        }.distinctBy { it.videoId }
+
+        if (homeShelfSongs.isNotEmpty()) return@call homeShelfSongs
+
+        // 3. Any shelf items on Home that have videoId
+        val allHomeTrackSongs = shelves.flatMap { shelf ->
+            shelf.items.mapNotNull { item ->
+                item.videoId?.let { vid ->
+                    Song(videoId = vid, title = item.title, artist = item.subtitle, thumbnailUrl = item.thumbnailUrl)
+                }
+            }
+        }.distinctBy { it.videoId }
+
+        val uniqueAllHome = allHomeTrackSongs.filterNot { it.videoId in excludeSongIds }
+        if (uniqueAllHome.isNotEmpty()) return@call uniqueAllHome
+
+        // 4. Explore / New releases
+        val explore = runCatching { shelvesOf("FEmusic_new_releases") }.getOrDefault(emptyList())
+        val exploreSongs = explore.flatMap { shelf ->
+            shelf.items.mapNotNull { item ->
+                item.videoId?.takeUnless { it in excludeSongIds }?.let { vid ->
+                    Song(videoId = vid, title = item.title, artist = item.subtitle, thumbnailUrl = item.thumbnailUrl)
+                }
+            }
+        }.distinctBy { it.videoId }
+
+        if (exploreSongs.isNotEmpty()) return@call exploreSongs
+
+        // 5. Fallback if everything was filtered out
+        allHomeTrackSongs.ifEmpty { exploreSongs }
+    }
 
     private const val HISTORY = "FEmusic_history"
     private const val RECENT_TITLE = "Recently played"
@@ -325,10 +409,48 @@ object YtMusicRepository {
         }
     }
 
-    suspend fun search(query: String, filter: SearchFilter): Result<List<SearchResult>> =
+    data class SearchPage(
+        val rows: List<SearchResult>,
+        val continuation: String?,
+    )
+
+    /**
+     * Fetches only the first search page. Publishing it immediately keeps the
+     * search responsive; the UI asks [searchContinuation] for later pages as
+     * the listener reaches the end of the list.
+     */
+    suspend fun searchPage(query: String, filter: SearchFilter): Result<SearchPage> =
         call("search:${filter.name}") {
-            InnertubeParser.parseSearch(Innertube.search(query, filter.params))
+            InnertubeParser.parseSearchPage(
+                Innertube.search(query, filter.params),
+                includeVideos = filter == SearchFilter.VIDEOS,
+            ).let { page ->
+                SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
+            }
         }
+
+    /** Fetches the next page of a search only when the result list needs it. */
+    suspend fun searchContinuation(token: String, filter: SearchFilter = SearchFilter.ALL): Result<SearchPage> = call("search:continuation") {
+        InnertubeParser.parseSearchPage(
+            Innertube.searchContinuation(token),
+            includeVideos = filter == SearchFilter.VIDEOS,
+        ).let { page ->
+            SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
+        }
+    }
+
+    /**
+     * Compatibility helper for callers that need candidates but not a scrolling
+     * result screen. Those callers need the first, most relevant page only.
+     */
+    suspend fun search(query: String, filter: SearchFilter): Result<List<SearchResult>> =
+        searchPage(query, filter).map { it.rows }
+
+    fun SearchResult.identityKey(): String = when (this) {
+        is SearchResult.TopTrack -> "v:${song.videoId}"
+        is SearchResult.Track -> "v:${song.videoId}"
+        is SearchResult.Browse -> "b:${item.browseId}"
+    }
 
     /**
      * What YouTube Music would suggest completing [input] to, for the search
@@ -389,6 +511,26 @@ object YtMusicRepository {
     }
 
     /**
+     * The channels this login can act as — its own, plus any brand channels.
+     *
+     * Two endpoints are asked in turn because either can come back with an
+     * envelope holding no `accountItem` at all, and the two do not fail
+     * together: `accounts_list` is the first-party route and the switcher is
+     * what youtube.com's own avatar menu uses. An empty list from the first is
+     * not an answer, it is a shape this parser didn't recognise, so it is
+     * treated the same as a failure and the other route is tried.
+     */
+    suspend fun accountChannels(): Result<List<AccountChannel>> = call("channels") {
+        val viaInnertube = runCatching {
+            InnertubeParser.parseAccountChannels(Innertube.accountsList())
+        }.onFailure { Log.w(TAG, "accounts_list unavailable: ${it.message}") }
+            .getOrNull()
+            .orEmpty()
+        if (viaInnertube.isNotEmpty()) return@call viaInnertube
+        InnertubeParser.parseAccountChannels(Innertube.accountSwitcher())
+    }
+
+    /**
      * The whole library in one shot — requires a signed-in session.
      *
      * YouTube Music has no single "my library" feed: Liked Music is the `LM`
@@ -404,10 +546,7 @@ object YtMusicRepository {
             val shelves = LIBRARY_FEEDS
                 .map { (title, browseId) ->
                     async {
-                        val items = runCatching {
-                            InnertubeParser.parseLibraryItems(Innertube.browse(browseId))
-                        }.getOrDefault(emptyList())
-                        HomeShelf(title, items)
+                        HomeShelf(title, runCatching { libraryItemsPaged(browseId) }.getOrDefault(emptyList()))
                     }
                 }
                 .awaitAll()
@@ -621,6 +760,32 @@ object YtMusicRepository {
         return out.values.toList()
     }
 
+    /**
+     * Every saved library card behind a feed browse id, following continuations.
+     *
+     * The library shelves are capped by YouTube's first page just like search:
+     * playlists, albums and artists often stop at about twenty-five rows unless
+     * their feed continuation is followed. These are background library loads,
+     * so collecting the full bounded set before publishing is preferable to a
+     * shelf that looks complete and silently is not.
+     */
+    private suspend fun libraryItemsPaged(browseId: String): List<ShelfItem> {
+        val out = LinkedHashMap<String, ShelfItem>()
+        var response = Innertube.browse(browseId)
+        var page = 1
+        while (true) {
+            val parsed = InnertubeParser.parseLibraryItemPage(response)
+            parsed.items.forEach { item ->
+                val key = item.browseId ?: item.videoId ?: "${item.title}\n${item.subtitle}"
+                out.putIfAbsent(key, item)
+            }
+            val token = parsed.continuation ?: break
+            if (page++ >= MAX_PAGES) break
+            response = runCatching { Innertube.browseContinuation(token) }.getOrNull() ?: break
+        }
+        return out.values.toList()
+    }
+
     const val MAX_PAGES = 10
 
     /**
@@ -687,12 +852,12 @@ object YtMusicRepository {
         call("library:$playlistId") { Innertube.ratePlaylist(playlistId, saved) }
 
     /**
-     * The playlists a track can be added to. Not paged: an account with more
-     * than one page of playlists is rare, and the picker is a list to scroll
-     * rather than a feed to follow.
+     * The playlists a track can be added to. Paged because accounts with long
+     * playlist collections otherwise lose everything past YouTube's first
+     * library-feed response.
      */
     suspend fun userPlaylists(): Result<List<UserPlaylist>> = call("playlists") {
-        InnertubeParser.parseUserPlaylists(Innertube.browse(LIBRARY_PLAYLISTS))
+        InnertubeParser.parseUserPlaylists(libraryItemsPaged(LIBRARY_PLAYLISTS))
     }
 
     /** Creates a playlist, optionally seeded with [videoIds]; returns its id. */
@@ -744,7 +909,17 @@ object YtMusicRepository {
 
     private suspend fun <T> call(label: String, block: suspend () -> T): Result<T> =
         withContext(Dispatchers.IO) {
-            runCatching { block() }
+            runCatching { block() }.recoverCatching { failure ->
+                // Context cookies can rotate while a process is alive. Refresh
+                // once and retry; never loop or silently sign the listener out.
+                val rejected = failure.message?.contains("401") == true ||
+                    failure.message?.contains("403") == true ||
+                    failure.message?.contains("rejected", true) == true
+                if (!rejected || Innertube.cookie == null) throw failure
+                Log.w(TAG, "$label rejected; refreshing active session context once")
+                Innertube.refreshSessionScope()
+                block()
+            }
                 // runCatching catches Throwable, cancellation included, which
                 // would turn "the user typed another letter" into a failed
                 // Result and put the abandoned request's error on screen.

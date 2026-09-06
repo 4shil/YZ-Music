@@ -2,6 +2,8 @@ package com.music.yzmusic.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.media.audiofx.AudioEffect
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
@@ -24,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import com.music.yzmusic.ui.components.bouncingOverscroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
@@ -31,6 +34,8 @@ import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BlurOff
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Brightness4
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -40,6 +45,7 @@ import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.History
@@ -127,6 +133,7 @@ import com.music.yzmusic.R
 import com.music.yzmusic.data.sources.SourceKind
 import com.music.yzmusic.data.sources.SourceRegistry
 import com.music.yzmusic.data.settings.AudioQuality
+import com.music.yzmusic.data.settings.AutomixPerformanceMode
 import com.music.yzmusic.data.settings.DownloadQuality
 import com.music.yzmusic.data.settings.ThemeMode
 import com.music.yzmusic.data.stats.Backup
@@ -135,6 +142,22 @@ import com.music.yzmusic.ui.player.fullBleedArtworkAvailable
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import java.util.Locale
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.LibraryMusic
+import com.music.yzmusic.data.LocalMediaRepository
+import com.music.yzmusic.data.settings.LibraryViewType
+import com.music.yzmusic.data.settings.LocalMusicSort
+import com.music.yzmusic.data.settings.OutputPcmMode
+import com.music.yzmusic.data.sources.DeviceCodecs
+import com.music.yzmusic.playback.AudioOutputStatus
+import com.music.yzmusic.ui.components.isGlassSupported
+import com.music.yzmusic.ui.icons.YZMusicIcons
+import com.music.yzmusic.ui.performance.resolvePerformanceRefreshRate
+import com.music.yzmusic.ui.performance.supportedPerformanceRefreshRates
 
 /**
  * Grouped settings, in the shape phones have taught people to expect: inset
@@ -168,33 +191,60 @@ fun SettingsScreen(
     val metered by AppSettings.meteredConnection.collectAsStateWithLifecycle()
     val crossfade by AppSettings.crossfadeSeconds.collectAsStateWithLifecycle()
     val smartFade by AppSettings.smartFadeEnabled.collectAsStateWithLifecycle()
+    val automixPerformance by AppSettings.automixPerformance.collectAsStateWithLifecycle()
     val skipSilence by AppSettings.skipSilence.collectAsStateWithLifecycle()
     val seekDuration by AppSettings.seekDurationSeconds.collectAsStateWithLifecycle()
     val spatialAudio by AppSettings.spatialAudio.collectAsStateWithLifecycle()
+    val allowDolbyAtmos by AppSettings.allowDolbyAtmos.collectAsStateWithLifecycle()
+    val dolbyAtmosSupported = DeviceCodecs.playsDolbyAtmos
+    val outputPcmMode by AppSettings.outputPcmMode.collectAsStateWithLifecycle()
+    val preferUsbDac by AppSettings.preferUsbDac.collectAsStateWithLifecycle()
+    val outputStatus by AudioOutputStatus.current.collectAsStateWithLifecycle()
     val nerdStats by AppSettings.showNerdStats.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val liquidGlass by AppSettings.liquidGlass.collectAsStateWithLifecycle()
+    val liquidGlassSupported = isGlassSupported()
+    val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
+    val performanceRefreshRate by AppSettings.performanceRefreshRate.collectAsStateWithLifecycle()
+    val currentDisplay = LocalView.current.display
+    val supportedRefreshRates = remember(currentDisplay) {
+        currentDisplay.supportedPerformanceRefreshRates()
+    }
+    val selectedPerformanceRefreshRate = remember(currentDisplay, performanceRefreshRate) {
+        currentDisplay.resolvePerformanceRefreshRate(performanceRefreshRate)
+    }
+
+    LaunchedEffect(selectedPerformanceRefreshRate, performanceRefreshRate) {
+        if (selectedPerformanceRefreshRate != performanceRefreshRate) {
+            AppSettings.setPerformanceRefreshRate(selectedPerformanceRefreshRate)
+        }
+    }
+
     val animatedCanvas by AppSettings.animatedCanvas.collectAsStateWithLifecycle()
     val canvasOverCellular by AppSettings.canvasOverCellular.collectAsStateWithLifecycle()
     val fullBleedArtwork by AppSettings.fullBleedArtwork.collectAsStateWithLifecycle()
     val syncedLyrics by AppSettings.syncedLyrics.collectAsStateWithLifecycle()
     val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
+    val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
+    val lyricsBlur by AppSettings.lyricsBlur.collectAsStateWithLifecycle()
+    val showLyricsLogs by AppSettings.showLyricsLogs.collectAsStateWithLifecycle()
     val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
     val downloadQuality by AppSettings.downloadQuality.collectAsStateWithLifecycle()
     val wifiOnlyDownloads by AppSettings.wifiOnlyDownloads.collectAsStateWithLifecycle()
+    val exportDownloads by AppSettings.exportDownloads.collectAsStateWithLifecycle()
     val sourceConfigs by SourceRegistry.configs.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
     val dontRepeatSuggestions by AppSettings.dontRepeatSuggestions.collectAsStateWithLifecycle()
     val convertVideoToAudio by AppSettings.convertVideoToAudio.collectAsStateWithLifecycle()
-
-    // Whether the module index URL is baked into this build.
-    val losslessConfigured = BuildConfig.MODULE_INDEX_URL.trim().isNotEmpty()
-    // Whether the module source is currently enabled (toggle state).
-    val moduleEnabled = sourceConfigs.any { it.kind == SourceKind.MODULE && it.enabled && it.isComplete }
+    val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
+    val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
+    val libraryViewType by AppSettings.libraryViewType.collectAsStateWithLifecycle()
+    val localMusicSort by AppSettings.localMusicSort.collectAsStateWithLifecycle()
 
     // Scrobbling states
     val lastfmEnabled by AppSettings.lastfmEnabled.collectAsStateWithLifecycle()
@@ -212,23 +262,33 @@ fun SettingsScreen(
 
     var picking by remember { mutableStateOf<QualityTarget?>(null) }
     var pickingDownloadQuality by remember { mutableStateOf(false) }
+    var pickingAutomixPerformance by remember { mutableStateOf(false) }
+    var pickingLocalMusicSort by remember { mutableStateOf(false) }
     var showNeuralAudioSheet by remember { mutableStateOf(false) }
-    // What the last export or import did, shown on the row that did it rather
-    // than as a toast: a backup is the one action here whose outcome nobody can
-    // check by looking at the app afterwards. Held per direction, or an import's
-    // result reports itself under the word "Export".
+    var showPerformanceWarning by remember { mutableStateOf(false) }
+    var showPerformanceConfirmation by remember { mutableStateOf(false) }
     var exportStatus by remember { mutableStateOf<String?>(null) }
     var importStatus by remember { mutableStateOf<String?>(null) }
     var confirmImport by remember { mutableStateOf(false) }
     val backupScope = rememberCoroutineScope()
 
-    /**
-     * Both halves go through the system document picker rather than a path of
-     * this app's own choosing. That is what puts the file somewhere the user can
-     * actually find it — Drive, Files, a folder they already back up — and it
-     * means neither direction needs a storage permission, since the grant
-     * arrives with the document they picked.
-     */
+    val batterySettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        showPerformanceConfirmation = true
+    }
+    val localMusicFolderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { folder ->
+        if (folder == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                folder,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        AppSettings.setLocalMusicFolderUri(folder.toString())
+    }
     val exportPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { target ->
@@ -266,6 +326,7 @@ fun SettingsScreen(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .bouncingOverscroll()
             .verticalScroll(rememberScrollState())
             .padding(contentPadding),
     ) {
@@ -281,18 +342,12 @@ fun SettingsScreen(
                 icon = Icons.Rounded.Person,
                 title = stringResource(R.string.account_integrations),
                 subtitle = account?.email?.takeIf { it.isNotBlank() }
-                    ?: if (signedIn) "Signed in" else "Not signed in",
+                    ?: if (signedIn) stringResource(R.string.signed_in) else stringResource(R.string.not_signed_in),
                 onClick = onAccountScrobbling,
             )
         }
 
-        // The row that used to sit at the top of this group was called
-        // "Lossless / HQ Audio" and toggled `SourceRegistry.setModuleEnabled` —
-        // it switched the *module source* on and off, not lossless. Sources
-        // above lists that as the module's own row now. Lossless itself is no
-        // longer a setting at all — see
-        // [SourceResolver.requestForNow][com.music.yzmusic.data.sources.SourceResolver.requestForNow].
-        SettingsGroup(header = "Audio quality") {
+        SettingsGroup(header = stringResource(R.string.audio_quality)) {
             SettingsRow(
                 icon = Icons.Rounded.Extension,
                 title = "Sources",
@@ -315,13 +370,60 @@ fun SettingsScreen(
                 value = cellularQuality.localizedLabel(),
                 onClick = { picking = QualityTarget.CELLULAR },
             )
+            RowDivider()
+            SettingsRow(
+                iconPainter = painterResource(R.drawable.ic_dolby_atmos),
+                title = stringResource(R.string.dolby_atmos),
+                subtitle = stringResource(
+                    if (dolbyAtmosSupported) {
+                        R.string.dolby_atmos_subtitle
+                    } else {
+                        R.string.dolby_atmos_unavailable
+                    },
+                ),
+                enabled = dolbyAtmosSupported,
+                trailing = {
+                    Switch(
+                        checked = allowDolbyAtmos && dolbyAtmosSupported,
+                        onCheckedChange = AppSettings::setAllowDolbyAtmos,
+                        enabled = dolbyAtmosSupported,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { if (dolbyAtmosSupported) AppSettings.setAllowDolbyAtmos(!allowDolbyAtmos) },
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.GraphicEq,
+                title = "Output precision",
+                subtitle = buildString {
+                    append(outputStatus.sink)
+                    append(" · ")
+                    append(outputStatus.deviceName)
+                    (outputStatus.actualSampleRateHz ?: outputStatus.sampleRatesHz.firstOrNull())
+                        ?.let { append(" · ${it / 1000.0} kHz") }
+                    append(" · ")
+                    append(AudioOutputStatus.encodingLabel(outputStatus))
+                },
+            )
+            SegmentedControl(
+                options = OutputPcmMode.entries.map(OutputPcmMode::label),
+                selectedIndex = OutputPcmMode.entries.indexOf(outputPcmMode),
+                onSelect = { AppSettings.setOutputPcmMode(OutputPcmMode.entries[it]) },
+                modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+            )
+            RowDivider()
+            SettingsSubRow(
+                title = "Prefer USB DAC",
+                checked = preferUsbDac,
+                onCheckedChange = AppSettings::setPreferUsbDac,
+                badge = "Connected".takeIf { outputStatus.isUsb },
+            )
         }
 
-        // Its own group rather than rows bolted onto the two above, because a
-        // download is not a third kind of connection. The ceilings answer "what
-        // does this minute cost"; these answer "what am I keeping, and when may
-        // it be fetched" — and those two questions only make sense read
-        // together, which is what puts them side by side here.
         SettingsGroup(header = stringResource(R.string.downloads)) {
             SettingsRow(
                 icon = Icons.Rounded.Download,
@@ -330,21 +432,21 @@ fun SettingsScreen(
                 value = downloadQuality.localizedLabel(),
                 onClick = { pickingDownloadQuality = true },
             )
-            // Reads as part of Download quality above it, not as a setting
-            // of its own — same treatment as Play animated cover over
-            // cellular gets under Animated cover art.
             SettingsSubRow(
                 title = stringResource(R.string.download_wifi_only),
                 checked = wifiOnlyDownloads,
                 onCheckedChange = AppSettings::setWifiOnlyDownloads,
                 badge = stringResource(R.string.blocking).takeIf { wifiOnlyDownloads && metered == true },
             )
+            SettingsSubRow(
+                title = "Export compatible downloads",
+                checked = exportDownloads,
+                onCheckedChange = AppSettings::setExportDownloads,
+                badge = "Music/YZ-Music".takeIf { exportDownloads },
+            )
         }
 
         SettingsGroup(header = stringResource(R.string.playback)) {
-            // Automix decides its own length from each pair of tracks —
-            // tempo, key, structure — so it replaces the manual slider rather
-            // than needing it set to anything first.
             if (!smartFade) {
                 SliderRow(
                     icon = Icons.Rounded.Waves,
@@ -391,7 +493,7 @@ fun SettingsScreen(
                         SettingsRow(
                             icon = Icons.Rounded.AutoAwesome,
                             title = "Neural Audio Refinement",
-                            subtitle = "AI beat & vocal analysis active",
+                            subtitle = "AI beat & vocal analysis active · ${automixPerformance.label}",
                             trailing = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Surface(
@@ -530,12 +632,12 @@ fun SettingsScreen(
                         Text(
                             text = stringResource(R.string.double_tap_seek),
                             style = MaterialTheme.typography.bodyLarge,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onBackground,
                         )
                         Text(
                             text = stringResource(R.string.double_tap_seek_subtitle),
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.6f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     SegmentedControl(
@@ -565,27 +667,20 @@ fun SettingsScreen(
             )
             RowDivider()
             SettingsRow(
-                icon = Icons.Rounded.Tune,
-                title = stringResource(R.string.equalizer),
-                subtitle = stringResource(R.string.equalizer_subtitle),
-                onClick = { openEqualizer(context, sessionId) },
-            )
-            RowDivider()
-            SettingsRow(
-                icon = Icons.Rounded.GraphicEq,
-                title = stringResource(R.string.show_nerd_stats),
-                subtitle = stringResource(R.string.show_nerd_stats_subtitle),
+                icon = Icons.Rounded.History,
+                title = stringResource(R.string.dont_repeat_songs),
+                subtitle = stringResource(R.string.dont_repeat_songs_subtitle),
                 trailing = {
                     Switch(
-                        checked = nerdStats,
-                        onCheckedChange = AppSettings::setShowNerdStats,
+                        checked = dontRepeatSuggestions,
+                        onCheckedChange = AppSettings::setDontRepeatSuggestions,
                         colors = SwitchDefaults.colors(
                             checkedTrackColor = MaterialTheme.colorScheme.primary,
                             checkedBorderColor = MaterialTheme.colorScheme.primary,
                         ),
                     )
                 },
-                onClick = { AppSettings.setShowNerdStats(!nerdStats) },
+                onClick = { AppSettings.setDontRepeatSuggestions(!dontRepeatSuggestions) },
             )
             RowDivider()
             SettingsRow(
@@ -604,6 +699,76 @@ fun SettingsScreen(
                 },
                 onClick = { AppSettings.setConvertVideoToAudio(!convertVideoToAudio) },
             )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.Tune,
+                title = stringResource(R.string.equalizer),
+                subtitle = stringResource(R.string.equalizer_subtitle),
+                onClick = { openEqualizer(context, sessionId) },
+            )
+        }
+
+        SettingsGroup(header = stringResource(R.string.performance)) {
+            SettingsRow(
+                icon = YZMusicIcons.Performance,
+                title = stringResource(R.string.high_performance_mode),
+                subtitle = if (highPerformanceMode) {
+                    stringResource(R.string.high_performance_active, selectedPerformanceRefreshRate)
+                } else {
+                    stringResource(R.string.high_performance_subtitle)
+                },
+                badge = stringResource(R.string.beta),
+                trailing = {
+                    Switch(
+                        checked = highPerformanceMode,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                showPerformanceWarning = true
+                            } else {
+                                AppSettings.setHighPerformanceMode(false)
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = {
+                    if (highPerformanceMode) {
+                        AppSettings.setHighPerformanceMode(false)
+                    } else {
+                        showPerformanceWarning = true
+                    }
+                },
+            )
+            if (highPerformanceMode) {
+                RowDivider()
+                SettingsRow(
+                    icon = YZMusicIcons.FrameRate,
+                    title = stringResource(R.string.refresh_rate),
+                )
+                SegmentedControl(
+                    options = supportedRefreshRates.map { "$it Hz" },
+                    selectedIndex = supportedRefreshRates.indexOf(selectedPerformanceRefreshRate).coerceAtLeast(0),
+                    onSelect = { index ->
+                        AppSettings.setPerformanceRefreshRate(supportedRefreshRates[index])
+                    },
+                    modifier = Modifier.padding(
+                        start = ROW_INSET,
+                        end = ROW_INSET,
+                        bottom = 14.dp,
+                    ),
+                )
+            }
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.Tune,
+                title = stringResource(R.string.automix_performance),
+                subtitle = stringResource(R.string.automix_performance_subtitle),
+                value = automixPerformance.label,
+                onClick = { pickingAutomixPerformance = true },
+            )
         }
 
         SettingsGroup(header = stringResource(R.string.appearance)) {
@@ -616,23 +781,6 @@ fun SettingsScreen(
             )
             RowDivider()
             AccentColorRow()
-            RowDivider()
-            SettingsRow(
-                icon = Icons.Rounded.MotionPhotosOff,
-                title = stringResource(R.string.reduce_animation),
-                subtitle = stringResource(R.string.reduce_animation_subtitle),
-                trailing = {
-                    Switch(
-                        checked = reduceAnimation,
-                        onCheckedChange = AppSettings::setReduceAnimation,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = { AppSettings.setReduceAnimation(!reduceAnimation) },
-            )
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.BlurOff,
@@ -651,10 +799,48 @@ fun SettingsScreen(
                 onClick = { AppSettings.setReduceDynamicBlur(!reduceDynamicBlur) },
             )
             RowDivider()
-            // Left out where the player won't honour it: a window too wide for
-            // the player to fill and too narrow to stand a page beside it keeps
-            // the sleeve either way. A docked pane is a phone's width, so it does
-            // honour it — see [fullBleedArtworkAvailable].
+            SettingsRow(
+                icon = Icons.Rounded.AutoAwesome,
+                title = stringResource(R.string.liquid_glass),
+                subtitle = stringResource(
+                    if (liquidGlassSupported) {
+                        R.string.liquid_glass_subtitle
+                    } else {
+                        R.string.liquid_glass_unavailable
+                    },
+                ),
+                enabled = liquidGlassSupported,
+                trailing = {
+                    Switch(
+                        checked = liquidGlass && liquidGlassSupported,
+                        onCheckedChange = AppSettings::setLiquidGlass,
+                        enabled = liquidGlassSupported,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { if (liquidGlassSupported) AppSettings.setLiquidGlass(!liquidGlass) },
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.MotionPhotosOff,
+                title = stringResource(R.string.reduce_animation),
+                subtitle = stringResource(R.string.reduce_animation_subtitle),
+                trailing = {
+                    Switch(
+                        checked = reduceAnimation,
+                        onCheckedChange = AppSettings::setReduceAnimation,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setReduceAnimation(!reduceAnimation) },
+            )
+            RowDivider()
             if (fullBleedArtworkAvailable(windowWidth)) {
                 SettingsRow(
                     icon = Icons.Rounded.Fullscreen,
@@ -690,11 +876,6 @@ fun SettingsScreen(
                 },
                 onClick = { AppSettings.setAnimatedCanvas(!animatedCanvas) },
             )
-            // Reads as part of the Animated cover art option above it, not
-            // as a separate setting. Nothing to narrow while the clip itself
-            // is off. Defaults to off: a clip loops for as long as its track
-            // plays, so on cellular this is not a one-time video cost but
-            // that cost repeated on every loop — see AppSettings.canvasOverCellular.
             if (animatedCanvas) {
                 SettingsSubRow(
                     title = stringResource(R.string.animated_cover_cellular),
@@ -719,7 +900,9 @@ fun SettingsScreen(
                     Chevron()
                 }
             }
-            RowDivider()
+        }
+
+        SettingsGroup(header = stringResource(R.string.lyrics)) {
             SettingsRow(
                 icon = Icons.AutoMirrored.Rounded.Notes,
                 title = stringResource(R.string.synced_lyrics),
@@ -736,9 +919,6 @@ fun SettingsScreen(
                 },
                 onClick = { AppSettings.setSyncedLyrics(!syncedLyrics) },
             )
-            // Nothing to choose between while the feature is off, and the
-            // sources are third-party services being reached on the user's
-            // connection — which is the part worth being able to narrow.
             if (syncedLyrics) {
                 RowDivider()
                 SettingsRow(
@@ -751,7 +931,124 @@ fun SettingsScreen(
                     trailing = { Chevron() },
                     onClick = onLyricsSources,
                 )
+                RowDivider()
+                SettingsRow(
+                    icon = Icons.Rounded.AutoAwesome,
+                    title = stringResource(R.string.prioritize_syllable_sync),
+                    subtitle = stringResource(R.string.prioritize_syllable_sync_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = prioritizeSyllableSync,
+                            onCheckedChange = AppSettings::setPrioritizeSyllableSync,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setPrioritizeSyllableSync(!prioritizeSyllableSync) },
+                )
+                RowDivider()
+                SettingsRow(
+                    icon = Icons.Rounded.BlurOn,
+                    title = stringResource(R.string.blur_unfocused_lyrics),
+                    subtitle = stringResource(R.string.blur_unfocused_lyrics_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = lyricsBlur,
+                            onCheckedChange = AppSettings::setLyricsBlur,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setLyricsBlur(!lyricsBlur) },
+                )
+                RowDivider()
+                SettingsRow(
+                    icon = Icons.Rounded.History,
+                    title = stringResource(R.string.lyrics_debug_logs),
+                    subtitle = stringResource(R.string.lyrics_debug_logs_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = showLyricsLogs,
+                            onCheckedChange = AppSettings::setShowLyricsLogs,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setShowLyricsLogs(!showLyricsLogs) },
+                )
             }
+        }
+
+        SettingsGroup(header = stringResource(R.string.local_music)) {
+            SettingsRow(
+                icon = Icons.Rounded.Folder,
+                title = stringResource(R.string.local_music_folder),
+                subtitle = LocalMediaRepository.selectedFolderLabel(localMusicFolderUri)
+                    ?: stringResource(R.string.all_audio_folders),
+                onClick = { localMusicFolderPicker.launch(null) },
+            )
+            if (localMusicFolderUri.isNotBlank()) {
+                RowDivider()
+                SettingsRow(
+                    icon = Icons.Rounded.LibraryMusic,
+                    title = stringResource(R.string.use_all_audio_folders),
+                    subtitle = stringResource(R.string.use_all_audio_folders_subtitle),
+                    onClick = { AppSettings.setLocalMusicFolderUri("") },
+                )
+            }
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.FilterAlt,
+                title = stringResource(R.string.filter_non_music_audio),
+                subtitle = stringResource(R.string.filter_non_music_audio_subtitle),
+                trailing = {
+                    Switch(
+                        checked = filterNonMusicAudio,
+                        onCheckedChange = AppSettings::setFilterNonMusicAudio,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setFilterNonMusicAudio(!filterNonMusicAudio) },
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.SmartDisplay,
+                title = stringResource(R.string.local_music_view_type),
+            )
+            SegmentedControl(
+                options = listOf(
+                    stringResource(R.string.list_view),
+                    stringResource(R.string.grid_view),
+                ),
+                selectedIndex = if (libraryViewType == LibraryViewType.LIST) 0 else 1,
+                onSelect = { index ->
+                    AppSettings.setLibraryViewType(if (index == 0) LibraryViewType.LIST else LibraryViewType.GRID)
+                },
+                modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.AutoMirrored.Rounded.Sort,
+                title = stringResource(R.string.default_sort_order),
+                value = stringResource(
+                    when (localMusicSort) {
+                        LocalMusicSort.TITLE_ASC -> R.string.sort_title_ascending
+                        LocalMusicSort.TITLE_DESC -> R.string.sort_title_descending
+                        LocalMusicSort.DATE_ADDED -> R.string.sort_date_added
+                        LocalMusicSort.DATE_MODIFIED -> R.string.sort_date_modified
+                    },
+                ),
+                onClick = { pickingLocalMusicSort = true },
+            )
         }
 
         val cacheLimitMb = (cacheLimitBytes / (1024 * 1024)).toInt()
@@ -760,8 +1057,7 @@ fun SettingsScreen(
                 icon = Icons.Rounded.Storage,
                 title = stringResource(R.string.song_cache_limit),
                 subtitle = if (cacheLimitMb > CACHE_WARNING_MB) {
-                    "Up to ${formatCacheSize(cacheLimitMb)} of downloaded audio kept on " +
-                        "disk — that's a real chunk of most phones' free storage."
+                    "Up to ${formatCacheSize(cacheLimitMb)} of downloaded audio kept on disk — that's a real chunk of most phones' free storage."
                 } else {
                     "Downloaded audio kept on disk for instant seeking and replays"
                 },
@@ -869,23 +1165,6 @@ fun SettingsScreen(
             )
             RowDivider()
             SettingsRow(
-                icon = Icons.Rounded.History,
-                title = stringResource(R.string.dont_repeat_songs),
-                subtitle = stringResource(R.string.dont_repeat_songs_subtitle),
-                trailing = {
-                    Switch(
-                        checked = dontRepeatSuggestions,
-                        onCheckedChange = AppSettings::setDontRepeatSuggestions,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = { AppSettings.setDontRepeatSuggestions(!dontRepeatSuggestions) },
-            )
-            RowDivider()
-            SettingsRow(
                 icon = Icons.Rounded.MusicOff,
                 title = stringResource(R.string.stop_music_on_close),
                 subtitle = stringResource(R.string.stop_music_on_close_subtitle),
@@ -928,6 +1207,25 @@ fun SettingsScreen(
                 title = stringResource(R.string.app_language),
                 subtitle = stringResource(languageDisplayNameRes(selectedLanguage)),
                 onClick = onAppLanguage,
+            )
+        }
+
+        SettingsGroup(header = stringResource(R.string.advanced_options)) {
+            SettingsRow(
+                icon = Icons.Rounded.GraphicEq,
+                title = stringResource(R.string.show_nerd_stats),
+                subtitle = stringResource(R.string.show_nerd_stats_subtitle),
+                trailing = {
+                    Switch(
+                        checked = nerdStats,
+                        onCheckedChange = AppSettings::setShowNerdStats,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setShowNerdStats(!nerdStats) },
             )
         }
 
@@ -998,6 +1296,82 @@ fun SettingsScreen(
     if (showNeuralAudioSheet) {
         NeuralAudioSheet(
             onDismissRequest = { showNeuralAudioSheet = false },
+        )
+    }
+
+    if (pickingAutomixPerformance) {
+        ModalBottomSheet(
+            onDismissRequest = { pickingAutomixPerformance = false },
+            containerColor = MaterialTheme.colorScheme.background,
+        ) {
+            AutomixPerformanceSheet(
+                selected = automixPerformance,
+                onSelect = { mode ->
+                    AppSettings.setAutomixPerformance(mode)
+                    pickingAutomixPerformance = false
+                },
+            )
+        }
+    }
+
+    if (pickingLocalMusicSort) {
+        ModalBottomSheet(
+            onDismissRequest = { pickingLocalMusicSort = false },
+            containerColor = MaterialTheme.colorScheme.background,
+        ) {
+            LocalMusicSortSheet(
+                selected = localMusicSort,
+                onSelect = { sort ->
+                    AppSettings.setLocalMusicSort(sort)
+                    pickingLocalMusicSort = false
+                },
+            )
+        }
+    }
+
+    if (showPerformanceWarning) {
+        AlertDialog(
+            onDismissRequest = { showPerformanceWarning = false },
+            title = { Text(stringResource(R.string.high_performance_before_enabling)) },
+            text = { Text(stringResource(R.string.high_performance_battery_warning)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPerformanceWarning = false
+                    batterySettingsLauncher.launch(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                        },
+                    )
+                }) {
+                    Text(stringResource(R.string.open_battery_settings))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPerformanceWarning = false }) {
+                    Text(stringResource(R.string.not_yet))
+                }
+            },
+        )
+    }
+
+    if (showPerformanceConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showPerformanceConfirmation = false },
+            title = { Text(stringResource(R.string.enable_high_performance_title)) },
+            text = { Text(stringResource(R.string.enable_high_performance_confirmation)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPerformanceConfirmation = false
+                    AppSettings.setHighPerformanceMode(true)
+                }) {
+                    Text(stringResource(R.string.enable))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPerformanceConfirmation = false }) {
+                    Text(stringResource(R.string.not_yet))
+                }
+            },
         )
     }
 
@@ -1154,6 +1528,7 @@ private fun AudioQuality.localizedLabel(): String = stringResource(
         AudioQuality.LOW -> R.string.low
         AudioQuality.MEDIUM -> R.string.medium
         AudioQuality.HIGH -> R.string.high
+        AudioQuality.LOSSLESS -> R.string.lossless
     },
 )
 
@@ -1417,6 +1792,151 @@ private fun DownloadQualitySheet(
     }
 }
 
+/** CPU budget picker for the background models that prepare Automix. */
+@Composable
+private fun AutomixPerformanceSheet(
+    selected: AutomixPerformanceMode,
+    onSelect: (AutomixPerformanceMode) -> Unit,
+) {
+    val haptics = LocalHapticFeedback.current
+    Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+        Row(
+            modifier = Modifier.padding(start = 22.dp, end = 22.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Tune,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text(
+                    text = stringResource(R.string.automix_performance),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    text = stringResource(R.string.automix_performance_warning),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+        AutomixPerformanceMode.entries.forEach { mode ->
+            val chosen = mode == selected
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelect(mode)
+                    }
+                    .padding(horizontal = 22.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = when (mode) {
+                            AutomixPerformanceMode.EFFICIENT -> stringResource(R.string.automix_mode_efficient)
+                            AutomixPerformanceMode.BALANCED -> stringResource(R.string.automix_mode_balanced)
+                            AutomixPerformanceMode.PERFORMANCE -> stringResource(R.string.automix_mode_performance)
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                    Text(
+                        text = stringResource(
+                            when (mode) {
+                                AutomixPerformanceMode.EFFICIENT -> R.string.automix_mode_efficient_subtitle
+                                AutomixPerformanceMode.BALANCED -> R.string.automix_mode_balanced_subtitle
+                                AutomixPerformanceMode.PERFORMANCE -> R.string.automix_mode_performance_subtitle
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (chosen) {
+                    Spacer(Modifier.width(12.dp))
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = stringResource(R.string.selected),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Bottom sheet picker for library sort ordering. */
+@Composable
+private fun LocalMusicSortSheet(
+    selected: LocalMusicSort,
+    onSelect: (LocalMusicSort) -> Unit,
+) {
+    val haptics = LocalHapticFeedback.current
+    Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+        Row(
+            modifier = Modifier.padding(start = 22.dp, end = 22.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.Sort,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(14.dp))
+            Text(
+                text = stringResource(R.string.sort_music),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+        LocalMusicSort.entries.forEach { sort ->
+            val chosen = sort == selected
+            val labelRes = when (sort) {
+                LocalMusicSort.TITLE_ASC -> R.string.sort_title_ascending
+                LocalMusicSort.TITLE_DESC -> R.string.sort_title_descending
+                LocalMusicSort.DATE_ADDED -> R.string.sort_date_added
+                LocalMusicSort.DATE_MODIFIED -> R.string.sort_date_modified
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelect(sort)
+                    }
+                    .padding(horizontal = 22.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(labelRes),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.weight(1f),
+                )
+                if (chosen) {
+                    Spacer(Modifier.width(12.dp))
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = stringResource(R.string.selected),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NeuralAudioSheet(
@@ -1583,6 +2103,36 @@ private fun NeuralAudioSheet(
                     }
                 }
             }
+
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = stringResource(R.string.automix_performance_mode),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            Text(
+                text = stringResource(R.string.automix_performance_mode_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+            val currentMode by AppSettings.automixPerformance.collectAsStateWithLifecycle()
+            SegmentedControl(
+                options = AutomixPerformanceMode.entries.map { it.label },
+                selectedIndex = AutomixPerformanceMode.entries.indexOf(currentMode),
+                onSelect = { AppSettings.setAutomixPerformance(AutomixPerformanceMode.entries[it]) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp),
+            )
+            Text(
+                text = currentMode.detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+            )
 
             // Diagnostic verification feedback
             verificationResults?.let { results ->
@@ -1820,13 +2370,14 @@ internal fun RowDivider() {
  */
 @Composable
 internal fun SettingsRow(
-    icon: ImageVector,
+    icon: ImageVector? = null,
     title: String,
     subtitle: String? = null,
     subtitleContent: (@Composable () -> Unit)? = null,
     value: String? = null,
     badge: String? = null,
     enabled: Boolean = true,
+    iconPainter: Painter? = null,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -1839,12 +2390,21 @@ internal fun SettingsRow(
             .padding(horizontal = ROW_INSET, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.size(ICON_SIZE),
-        )
+        if (iconPainter != null) {
+            Icon(
+                painter = iconPainter,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.size(ICON_SIZE),
+            )
+        } else if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.size(ICON_SIZE),
+            )
+        }
         Spacer(Modifier.width(ICON_GAP))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

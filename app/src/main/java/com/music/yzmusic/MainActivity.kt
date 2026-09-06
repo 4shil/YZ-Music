@@ -87,6 +87,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import com.music.yzmusic.auth.YtMusicLoginScreen
 import com.music.yzmusic.data.AppUpdateChecker
 import com.music.yzmusic.data.LocalMediaRepository
@@ -117,8 +119,13 @@ import com.music.yzmusic.playback.PlayerDeepLink
 import com.music.yzmusic.playback.QueueBuilder
 import com.music.yzmusic.playback.QueueShuffle
 import com.music.yzmusic.playback.autoplaySectionStart
+import com.music.yzmusic.playback.beginRadioQueue
+import com.music.yzmusic.playback.commitRadioQueue
+import com.music.yzmusic.playback.fromAutoplay
+import com.music.yzmusic.playback.loadAutoplayTracks
 import com.music.yzmusic.playback.playSongs
 import com.music.yzmusic.playback.toMediaItem
+import com.music.yzmusic.playback.toSong
 import com.music.yzmusic.playback.toggleAutoplay
 import com.music.yzmusic.download.DownloadSession
 import com.music.yzmusic.download.DownloadStore
@@ -137,6 +144,9 @@ import com.music.yzmusic.ui.components.BottomTab
 import com.music.yzmusic.ui.components.FLOATING_BAR_MAX_WIDTH
 import com.music.yzmusic.ui.components.FloatingBottomBar
 import com.music.yzmusic.ui.components.FrostedTopBar
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.music.yzmusic.ui.components.GlassNavBar
+import com.music.yzmusic.ui.components.floatingtabbar.rememberFloatingTabBarScrollConnection
 import com.music.yzmusic.ui.components.LastfmLoginAlert
 import com.music.yzmusic.data.sources.SourceRegistry
 import com.music.yzmusic.ui.components.ListenBrainzTokenAlert
@@ -170,8 +180,20 @@ import com.music.yzmusic.ui.replay.rememberReplayState
 import com.music.yzmusic.ui.theme.YZMusicTheme
 import com.music.yzmusic.ui.theme.rememberArtworkPalette
 import com.music.yzmusic.ui.theme.SystemBarIcons
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.platform.LocalView
+import android.view.View
+import com.music.yzmusic.ui.components.LocalAppBackdrop
+import com.music.yzmusic.ui.components.LocalLiquidGlassEnabled
+import com.music.yzmusic.ui.components.isGlassSupported
+import com.music.yzmusic.ui.components.backdrop.backdrops.LayerBackdrop
+import com.music.yzmusic.ui.components.backdrop.backdrops.layerBackdrop
+import com.music.yzmusic.ui.components.backdrop.backdrops.rememberLayerBackdrop
+import com.music.yzmusic.ui.performance.resolvePerformanceRefreshRate
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -186,28 +208,66 @@ class MainActivity : AppCompatActivity() {
         MusicLink.consume(intent)
         setContent {
             val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
+            val highPerformance by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
+            val liquidGlassEnabled by AppSettings.liquidGlass.collectAsStateWithLifecycle()
+            val performanceRefreshRate by AppSettings.performanceRefreshRate.collectAsStateWithLifecycle()
+            val composeView = LocalView.current
+            LaunchedEffect(highPerformance, performanceRefreshRate, composeView) {
+                applyPerformanceMode(highPerformance, performanceRefreshRate, composeView)
+            }
             val darkTheme = when (theme) {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
             }
             YZMusicTheme(darkTheme = darkTheme) {
-                // The window's width, measured rather than asked for.
-                //
-                // `Configuration.screenWidthDp` is the wrong question here: in a
-                // freeform or desktop window it can report the display rather
-                // than the window it is actually in, and it lands a beat late
-                // when that window is dragged. The layout downstream splits in
-                // two on the strength of this number and sizes both halves from
-                // it, so a stale one is a player pane sized for a window that no
-                // longer exists and a page squeezed to a sliver to pay for it.
-                // A measured constraint cannot be stale — it is the very width
-                // the split is about to be laid out in.
-                BoxWithConstraints(Modifier.fillMaxSize()) {
-                    YZMusicApp(darkTheme = darkTheme, windowWidth = maxWidth)
+                val windowBackground = MaterialTheme.colorScheme.background
+                val paintBackdrop: ContentDrawScope.() -> Unit = remember(windowBackground) {
+                    {
+                        drawRect(windowBackground)
+                        drawContent()
+                    }
+                }
+                val appBackdrop = rememberLayerBackdrop(onDraw = paintBackdrop)
+                CompositionLocalProvider(
+                    LocalLiquidGlassEnabled provides liquidGlassEnabled,
+                    LocalAppBackdrop provides appBackdrop,
+                ) {
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                        YZMusicApp(darkTheme = darkTheme, windowWidth = maxWidth, appBackdrop = appBackdrop)
+                    }
                 }
             }
         }
+    }
+
+    private fun applyPerformanceMode(enabled: Boolean, refreshRate: Int, composeView: View) {
+        val supportedRefreshRate = composeView.display.resolvePerformanceRefreshRate(refreshRate)
+        window.attributes = window.attributes.apply {
+            preferredRefreshRate = if (enabled) supportedRefreshRate.toFloat() else 0f
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            window.setFrameRatePowerSavingsBalanced(!enabled)
+            composeView.requestedFrameRate = if (enabled) {
+                supportedRefreshRate.toFloat()
+            } else {
+                View.REQUESTED_FRAME_RATE_CATEGORY_DEFAULT
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (AppSettings.highPerformance.value) {
+            val composeView = findViewById<View>(android.R.id.content) ?: window.decorView
+            applyPerformanceMode(true, AppSettings.performanceRefreshRate.value, composeView)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        val composeView = findViewById<View>(android.R.id.content) ?: window.decorView
+        applyPerformanceMode(false, AppSettings.performanceRefreshRate.value, composeView)
     }
 
     /**
@@ -231,11 +291,19 @@ private fun YZMusicApp(
     darkTheme: Boolean,
     /** The width of the window this is laid out in — see the call site. */
     windowWidth: Dp,
+    appBackdrop: LayerBackdrop,
     viewModel: MainViewModel = viewModel(),
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val hazeState = remember { HazeState() }
+    val glassActive = LocalLiquidGlassEnabled.current && isGlassSupported()
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val glassSamplesBackdrop = glassActive && !reduceDynamicBlur
+    // What folds [GlassNavBar] between its expanded and inline shapes. Held here
+    // rather than inside the bar because the page's scroll is what drives it,
+    // and the page is a sibling of the bar rather than a child.
+    val navBarScroll = rememberFloatingTabBarScrollConnection()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     // Whether there is room to keep the player open beside the page rather than
     // raising it over one. Read all over what follows, because most of what the
@@ -381,6 +449,8 @@ private fun YZMusicApp(
     val lyricsChecked by viewModel.lyricsChecked.collectAsStateWithLifecycle()
     val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
     val searchSuggestions by viewModel.suggestions.collectAsStateWithLifecycle()
+    val searchLoadingMore by viewModel.searchLoadingMore.collectAsStateWithLifecycle()
+    val searchScrollReset by viewModel.searchScrollReset.collectAsStateWithLifecycle()
     val detailStack by viewModel.detailStack.collectAsStateWithLifecycle()
     val detail = detailStack.lastOrNull()
     // Local Music has no artwork to wash the bar in, so it renders with a
@@ -539,14 +609,29 @@ private fun YZMusicApp(
         }
     }
 
-    val tabs = listOf(
-        BottomTab(stringResource(R.string.play), YZMusicIcons.Play),
-        BottomTab(stringResource(R.string.explore), YZMusicIcons.Explore),
-        BottomTab(stringResource(R.string.library), YZMusicIcons.Library),
-        BottomTab(stringResource(R.string.search), YZMusicIcons.Search),
-    )
+    // Held, not rebuilt. `listOf` hands back a new instance on every pass, and a
+    // List is not a type the compiler can call stable, so under strong skipping
+    // the bar this is handed to compares it by identity, never matches, and so
+    // can never skip. This composable re-runs on every frame of a scroll — it
+    // reads [scrolled] — which made the whole floating bar, both of its states
+    // and every glass surface on them recompose once per frame for the length of
+    // a fold. Keyed on the labels so a locale change still rebuilds it.
+    val playLabel = stringResource(R.string.play)
+    val exploreLabel = stringResource(R.string.explore)
+    val libraryLabel = stringResource(R.string.library)
+    val searchLabel = stringResource(R.string.search)
+    val tabs = remember(playLabel, exploreLabel, libraryLabel, searchLabel) {
+        listOf(
+            BottomTab(playLabel, YZMusicIcons.Play),
+            BottomTab(exploreLabel, YZMusicIcons.Explore),
+            BottomTab(libraryLabel, YZMusicIcons.Library),
+            BottomTab(searchLabel, YZMusicIcons.Search),
+        )
+    }
 
     val scope = rememberCoroutineScope()
+    var activeRadioSeed by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var playRequestGeneration by remember { mutableIntStateOf(0) }
 
     val play: (List<Song>, Int) -> Unit = { songs, index ->
         scope.launch {
@@ -585,27 +670,99 @@ private fun YZMusicApp(
      * where the surrounding list *is* the thing the user asked for.
      */
     val playRadio: (Song) -> Unit = { song ->
+        playRequestGeneration++
+        activeRadioSeed = null
         scope.launch {
             val resolved = YtMusicRepository.resolveAudio(song)
             controller?.playSongs(listOf(resolved), 0)
             if (!playerDocked) showNowPlaying = true
         }
     }
+
+    /**
+     * Starts the explicit station offered by every song overflow menu.
+     *
+     * The related tracks come from YouTube Music's own RDAMVM watch queue.
+     * Loading happens before the player is touched so a failed request cannot
+     * destroy the queue already playing. Once ready, the whole old queue is
+     * replaced in one Media3 operation.
+     */
+    val startRadio: (Song) -> Unit = { song ->
+        val originalController = controller
+        if (originalController != null) {
+            val request = ++playRequestGeneration
+            val originalManualQueue = (0 until originalController.mediaItemCount)
+                .map { originalController.getMediaItemAt(it) }
+                .filterNot { it.fromAutoplay }
+                .map { it.mediaId }
+            scope.launch {
+                val resolved = YtMusicRepository.resolveAudio(song)
+                val seed = resolved.copy(radioName = resolved.title)
+                val related = loadAutoplayTracks(
+                    existing = listOf(seed),
+                    seedSong = seed,
+                    limit = INITIAL_RADIO_TRACKS,
+                ).getOrElse {
+                    if (request == playRequestGeneration) {
+                        Toast.makeText(context, R.string.couldnt_load_tracks, Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+                if (related.isEmpty()) {
+                    if (request == playRequestGeneration) {
+                        Toast.makeText(context, R.string.couldnt_load_tracks, Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+                val activeController = controller
+                val activeManualQueue = (0 until activeController.mediaItemCount)
+                    .map { activeController.getMediaItemAt(it) }
+                    .filterNot { it.fromAutoplay }
+                    .map { it.mediaId }
+                if (request != playRequestGeneration || activeManualQueue != originalManualQueue) {
+                    return@launch
+                }
+                activeController.beginRadioQueue()
+                val currentIndex = activeController.currentMediaItemIndex
+                val currentItem = activeController.currentMediaItem
+                if (currentIndex >= 0 && currentItem?.mediaId == resolved.videoId) {
+                    if (currentIndex + 1 < activeController.mediaItemCount) {
+                        activeController.removeMediaItems(currentIndex + 1, activeController.mediaItemCount)
+                    }
+                    if (currentIndex > 0) activeController.removeMediaItems(0, currentIndex)
+                    activeController.addMediaItems(1, related.map { it.toMediaItem() })
+                    activeRadioSeed = resolved.videoId to resolved.title
+                } else {
+                    activeRadioSeed = null
+                    activeController.playSongs(listOf(seed) + related, 0)
+                }
+                activeController.commitRadioQueue()
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.radio_started, resolved.title),
+                    Toast.LENGTH_SHORT,
+                ).show()
+                if (!playerDocked) showNowPlaying = true
+            }
+        }
+    }
     val addToQueue: (Song) -> Unit = { song ->
         scope.launch {
             val resolved = YtMusicRepository.resolveAudio(song)
-            // The end of what the user queued, not the end of the queue: a song
-            // asked for by name outranks whatever AutoPlay lined up behind it.
-            controller?.let { it.addMediaItem(it.autoplaySectionStart(), resolved.toMediaItem()) }
+            controller?.let {
+                val queued = resolved.copy(radioName = it.currentMediaItem?.toSong()?.radioName)
+                it.addMediaItem(it.autoplaySectionStart(), queued.toMediaItem())
+            }
         }
     }
     val playNext: (Song) -> Unit = { song ->
         scope.launch {
             val resolved = YtMusicRepository.resolveAudio(song)
             controller?.let {
+                val queued = resolved.copy(radioName = it.currentMediaItem?.toSong()?.radioName)
                 it.addMediaItem(
                     (it.currentMediaItemIndex + 1).coerceAtMost(it.mediaItemCount),
-                    resolved.toMediaItem(),
+                    queued.toMediaItem(),
                 )
             }
         }
@@ -1111,8 +1268,12 @@ private fun YZMusicApp(
     // the pane a tablet keeps beside it. [docked] is the only difference
     // between the two, and only ever one of them is in the tree.
     val nowPlaying: @Composable (Song, Boolean) -> Unit = { song, docked ->
+        val displayedSong = activeRadioSeed
+            ?.takeIf { (videoId, _) -> song.radioName == null && videoId == song.videoId }
+            ?.let { (_, name) -> song.copy(radioName = name) }
+            ?: song
         NowPlayingScreen(
-            song = song,
+            song = displayedSong,
             windowWidth = windowWidth,
             isPlaying = player.isPlaying,
             isLoading = player.isLoading,
@@ -1351,7 +1512,30 @@ private fun YZMusicApp(
                             fadeIn(tween(180)) togetherWith fadeOut(tween(180))
                         }
                     },
-                    modifier = Modifier.hazeSource(hazeState),
+                    modifier = Modifier
+                        .hazeSource(hazeState)
+                        .then(
+                            if (glassActive) {
+                                Modifier
+                                    // Not under "reduce dynamic blur": nothing
+                                    // samples the layer then, and recording a
+                                    // whole page into one for no reader is the
+                                    // cost that setting exists to remove.
+                                    .then(
+                                        if (glassSamplesBackdrop) {
+                                            Modifier.layerBackdrop(appBackdrop)
+                                        } else {
+                                            Modifier
+                                        },
+                                    )
+                                    // Every page's scroll passes through here, so
+                                    // the glass bar collapses on all of them
+                                    // without each one having to know about it.
+                                    .nestedScroll(navBarScroll)
+                            } else {
+                                Modifier
+                            },
+                        ),
                     label = "content",
                 ) { key ->
                     // Every branch below reads `key` rather than the state that
@@ -1487,8 +1671,9 @@ private fun YZMusicApp(
                         // the record as well as the list, so downloading an album
                         // while its folder is open adds the folder rather than
                         // waiting for the page to be reopened.
+                        val isDownloads = page.browseId == "local:downloads"
                         val downloadCollections = remember(localSongs, savedCollections) {
-                            if (page.browseId == "local:downloads") {
+                            if (isDownloads) {
                                 Downloads.collectionsAmong(localSongs)
                             } else {
                                 emptyList()
@@ -1497,6 +1682,9 @@ private fun YZMusicApp(
                         LocalMusicScreen(
                             songs = localSongs,
                             collections = downloadCollections,
+                            isDownloads = isDownloads,
+                            currentSong = player.song,
+                            isPlaying = player.isPlaying,
                             onSongClick = play,
                             onSongLongPress = openSongMenu,
                             onSongSwipe = onSongSwipe,
@@ -1696,7 +1884,10 @@ private fun YZMusicApp(
                             filter = filter,
                             onFilterChange = viewModel::onFilterChange,
                             results = results,
+                            loadingMore = searchLoadingMore,
+                            onLoadMore = viewModel::loadMoreSearchResults,
                             listState = searchListState,
+                            scrollResetTrigger = searchScrollReset,
                             focusTrigger = searchFocusTrigger,
                             // Search hits are alternatives to each other, not a running
                             // order — play the one tapped and build a station from it.
@@ -1710,6 +1901,15 @@ private fun YZMusicApp(
                             },
                             onSongLongPress = openSongMenu,
                             onSongSwipe = onSongSwipe,
+                            onTopResultPlay = { song ->
+                                viewModel.recordSearch()
+                                playRadio(song)
+                            },
+                            onTopResultPlaylist = { song ->
+                                viewModel.recordSearch()
+                                viewModel.loadPlaylists()
+                                playlistTarget = song
+                            },
                             onBrowseClick = { item ->
                                 viewModel.recordSearch()
                                 viewModel.openDetail(
@@ -1886,7 +2086,50 @@ private fun YZMusicApp(
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
 
-                Column(
+                // One tab handler, whichever bar is drawing it.
+                val onTabSelected: (Int) -> Unit = { index ->
+                    // Re-tapping the search tab while already on it focuses the
+                    // input field and opens the keyboard rather than resetting.
+                    if (index == TAB_SEARCH && selectedTab == TAB_SEARCH) {
+                        searchFocusTrigger++
+                    } else {
+                        if (index != TAB_SEARCH) {
+                            searchFocusTrigger = 0
+                        }
+                        viewModel.clearDetail()
+                        showSettings = false
+                        showAccountScrobbling = false
+                        showReplay = false
+                        showHistory = false
+                        libraryShowAll = null
+                        selectedTab = index
+                    }
+                }
+
+                if (glassActive) {
+                    // Liquid glass replaces the two stacked bars with the single
+                    // component they are stacked to imitate: the now playing
+                    // controls dock into the tab bar rather than riding above it,
+                    // and the pair folds together on scroll. See [GlassNavBar].
+                    GlassNavBar(
+                        tabs = tabs,
+                        selectedIndex = selectedTab,
+                        onTabSelected = onTabSelected,
+                        scrollConnection = navBarScroll,
+                        song = player.song?.takeUnless { playerDocked },
+                        isPlaying = player.isPlaying,
+                        isLoading = player.isLoading,
+                        onPlayPause = {
+                            controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                        },
+                        onNext = { controller?.seekToNextMediaItem() },
+                        onExpand = { showNowPlaying = true },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .widthIn(max = FLOATING_BAR_MAX_WIDTH)
+                            .fillMaxWidth(),
+                    )
+                } else Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         // Capped and centred rather than run to the page's edges
@@ -1922,24 +2165,7 @@ private fun YZMusicApp(
                         tabs = tabs,
                         selectedIndex = selectedTab,
                         hazeState = hazeState,
-                        onTabSelected = { index ->
-                            // Re-tapping the search tab while already on it focuses the
-                            // input field and opens the keyboard rather than resetting.
-                            if (index == TAB_SEARCH && selectedTab == TAB_SEARCH) {
-                                searchFocusTrigger++
-                                return@FloatingBottomBar
-                            }
-                            if (index != TAB_SEARCH) {
-                                searchFocusTrigger = 0
-                            }
-                            viewModel.clearDetail()
-                            showSettings = false
-                            showAccountScrobbling = false
-                            showReplay = false
-                            showHistory = false
-                            libraryShowAll = null
-                            selectedTab = index
-                        },
+                        onTabSelected = onTabSelected,
                     )
                 }
             }
@@ -2064,6 +2290,7 @@ private fun YZMusicApp(
                     likeStatus = likeStatuses[song.videoId] ?: LikeStatus.INDIFFERENT,
                     onPlayNext = { playNext(song); songActions = null },
                     onAddToQueue = { addToQueue(song); songActions = null },
+                    onStartRadio = { startRadio(song); songActions = null },
                     // Stays open: the row it replaces itself with is the
                     // progress, and closing the sheet would hide the only
                     // answer to "did that work?".
@@ -2599,6 +2826,7 @@ private fun DockedPlayer(
  * from the end plays the outro instead.
  */
 private const val SEEK_END_GUARD_MS = 1_000L
+private const val INITIAL_RADIO_TRACKS = 24
 
 /**
  * How far a detail page scrolls before its title moves up into the bar.

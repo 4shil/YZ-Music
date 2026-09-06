@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.screens
+package com.music.yzmusic.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -17,13 +17,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import com.music.yzmusic.ui.components.bouncingOverscroll
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,10 +39,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Album
-import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.MusicNote
@@ -42,6 +53,8 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -60,17 +73,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.music.yzmusic.R
+import com.music.yzmusic.data.model.CARD_ART_PX
 import com.music.yzmusic.data.model.ROW_ART_PX
 import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.data.model.artworkAt
+import com.music.yzmusic.data.model.isSameTrackAs
+import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.LibraryViewType
+import com.music.yzmusic.data.settings.LocalMusicSort
 import com.music.yzmusic.download.DownloadedCollection
+import com.music.yzmusic.ui.components.ExplicitBadge
 import com.music.yzmusic.ui.components.MessageState
 import com.music.yzmusic.ui.components.PAGE_GUTTER
 import com.music.yzmusic.ui.components.ROW_DIVIDER_INSET
@@ -80,6 +105,7 @@ import com.music.yzmusic.ui.components.TopBarContentGap
 import com.music.yzmusic.ui.components.topBarHeight
 import com.music.yzmusic.ui.haptics.Haptic
 import com.music.yzmusic.ui.haptics.rememberHaptics
+import com.music.yzmusic.ui.icons.YZMusicIcons
 import java.util.Locale
 
 private const val LOCAL_TAB_SONGS = 0
@@ -133,8 +159,26 @@ fun LocalMusicScreen(
      * the tags are all there is.
      */
     collections: List<DownloadedCollection> = emptyList(),
+    isDownloads: Boolean = false,
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val sortOrder by if (isDownloads) {
+        AppSettings.downloadedMusicSort.collectAsStateWithLifecycle()
+    } else {
+        AppSettings.localMusicSort.collectAsStateWithLifecycle()
+    }
+    val viewType by if (isDownloads) {
+        AppSettings.downloadedMusicViewType.collectAsStateWithLifecycle()
+    } else {
+        AppSettings.libraryViewType.collectAsStateWithLifecycle()
+    }
+
+    val sortedSongs = remember(songs, sortOrder) {
+        songs.sortedForLibrary(sortOrder)
+    }
+
     // Which top-level tab is selected.
     var selectedTab by rememberSaveable { mutableIntStateOf(LOCAL_TAB_SONGS) }
 
@@ -178,6 +222,15 @@ fun LocalMusicScreen(
         LocalSearchField(
             query = searchQuery,
             onQueryChange = { searchQuery = it },
+            sortOrder = sortOrder,
+            onSortOrderChange = {
+                if (isDownloads) AppSettings.setDownloadedMusicSort(it) else AppSettings.setLocalMusicSort(it)
+            },
+            viewType = viewType,
+            onViewTypeToggle = {
+                val next = if (viewType == LibraryViewType.GRID) LibraryViewType.LIST else LibraryViewType.GRID
+                if (isDownloads) AppSettings.setDownloadedMusicViewType(next) else AppSettings.setLibraryViewType(next)
+            },
             modifier = Modifier.padding(
                 // The same clearance every other page under the frosted bar
                 // gets — see topBarContentPadding, which this screen can't use
@@ -244,7 +297,9 @@ fun LocalMusicScreen(
                 }
             },
             label = "local_music_content",
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .bouncingOverscroll(),
         ) { key ->
             when {
                 // Nothing to tab through. The tab row stays put rather than
@@ -266,6 +321,9 @@ fun LocalMusicScreen(
                         label = drillDownLabel ?: "",
                         artworkUrl = drillDownArt,
                         songs = drillDownSongs,
+                        viewType = viewType,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
                         onSongClick = onSongClick,
                         onSongLongPress = onSongLongPress,
                         onSongSwipe = onSongSwipe,
@@ -279,12 +337,15 @@ fun LocalMusicScreen(
                 }
 
                 key == "tab:$LOCAL_TAB_SONGS" -> {
-                    val filteredSongs = remember(songs, searchQuery) {
-                        if (searchQuery.isBlank()) songs
-                        else songs.filter { it.matchesSearch(searchQuery) }
+                    val filteredSongs = remember(sortedSongs, searchQuery) {
+                        if (searchQuery.isBlank()) sortedSongs
+                        else sortedSongs.filter { it.matchesSearch(searchQuery) }
                     }
                     SongsTab(
                         songs = filteredSongs,
+                        viewType = viewType,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
                         onSongClick = onSongClick,
                         onSongLongPress = onSongLongPress,
                         onSongSwipe = onSongSwipe,
@@ -293,14 +354,15 @@ fun LocalMusicScreen(
                 }
 
                 key == "tab:$LOCAL_TAB_ARTISTS" -> {
-                    val artists = remember(songs, searchQuery) {
-                        songs.groupBy { it.artist }
+                    val artists = remember(sortedSongs, searchQuery) {
+                        sortedSongs.groupBy { it.artist }
                             .entries
                             .filter { searchQuery.isBlank() || it.key.contains(searchQuery, ignoreCase = true) }
                             .sortedBy { it.key.lowercase(Locale.ROOT) }
                     }
                     ArtistsTab(
                         artists = artists,
+                        viewType = viewType,
                         onArtistClick = { artist, artistSongs ->
                             drillDownLabel = artist
                             drillDownSongs = artistSongs
@@ -313,8 +375,8 @@ fun LocalMusicScreen(
 
                 else -> {
                     // LOCAL_TAB_ALBUMS
-                    val albums = remember(songs, collections, searchQuery) {
-                        albumEntries(songs, collections).filter {
+                    val albums = remember(sortedSongs, collections, searchQuery) {
+                        albumEntries(sortedSongs, collections).filter {
                             searchQuery.isBlank() ||
                                 it.title.contains(searchQuery, ignoreCase = true) ||
                                 it.artist.contains(searchQuery, ignoreCase = true)
@@ -322,6 +384,7 @@ fun LocalMusicScreen(
                     }
                     AlbumsTab(
                         albums = albums,
+                        viewType = viewType,
                         onAlbumClick = { entry ->
                             drillDownLabel = entry.title
                             drillDownSongs = entry.songs
@@ -336,41 +399,92 @@ fun LocalMusicScreen(
     }
 }
 
+private fun List<Song>.sortedForLibrary(order: LocalMusicSort): List<Song> {
+    return when (order) {
+        LocalMusicSort.TITLE_ASC -> sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+        LocalMusicSort.TITLE_DESC -> sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.title })
+        LocalMusicSort.DATE_ADDED -> sortedWith(
+            compareByDescending<Song> { it.localDateAddedSeconds ?: 0L }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+        )
+        LocalMusicSort.DATE_MODIFIED -> sortedWith(
+            compareByDescending<Song> { it.localDateModifiedSeconds ?: 0L }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+        )
+    }
+}
+
 // ── Songs tab ─────────────────────────────────────────────────────────────────
 
 @Composable
 private fun SongsTab(
     songs: List<Song>,
+    viewType: LibraryViewType,
+    currentSong: Song?,
+    isPlaying: Boolean,
     onSongClick: (List<Song>, Int) -> Unit,
     onSongLongPress: (Song) -> Unit,
     onSongSwipe: (Song) -> Unit,
     contentPadding: PaddingValues,
 ) {
-    val listState = rememberLazyListState()
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = contentPadding,
-    ) {
-        item {
-            SectionHeader(
-                icon = Icons.Rounded.LibraryMusic,
-                title = "${songs.size} songs",
-            )
-        }
-        itemsIndexed(songs) { index, song ->
-            SongRow(
-                song = song,
-                onClick = { onSongClick(songs, index) },
-                onLongPress = { onSongLongPress(song) },
-                onSwipeToQueue = { onSongSwipe(song) },
-            )
-            if (index < songs.lastIndex) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+    if (viewType == LibraryViewType.GRID) {
+        val gridState = rememberLazyGridState()
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 140.dp),
+            state = gridState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = PAGE_GUTTER,
+                end = PAGE_GUTTER,
+                bottom = contentPadding.calculateBottomPadding(),
+            ),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                SectionHeader(
+                    icon = Icons.Rounded.LibraryMusic,
+                    title = "${songs.size} songs",
+                    modifier = Modifier.padding(horizontal = 0.dp, vertical = 14.dp),
                 )
+            }
+            itemsIndexed(songs) { index, song ->
+                SongGridCard(
+                    song = song,
+                    isCurrent = song.isSameTrackAs(currentSong),
+                    isPlaying = isPlaying && song.isSameTrackAs(currentSong),
+                    onClick = { onSongClick(songs, index) },
+                    onLongPress = { onSongLongPress(song) },
+                )
+            }
+        }
+    } else {
+        val listState = rememberLazyListState()
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            item {
+                SectionHeader(
+                    icon = Icons.Rounded.LibraryMusic,
+                    title = "${songs.size} songs",
+                )
+            }
+            itemsIndexed(songs) { index, song ->
+                SongRow(
+                    song = song,
+                    onClick = { onSongClick(songs, index) },
+                    onLongPress = { onSongLongPress(song) },
+                    onSwipeToQueue = { onSongSwipe(song) },
+                )
+                if (index < songs.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                }
             }
         }
     }
@@ -381,34 +495,67 @@ private fun SongsTab(
 @Composable
 private fun ArtistsTab(
     artists: List<Map.Entry<String, List<Song>>>,
+    viewType: LibraryViewType,
     onArtistClick: (String, List<Song>) -> Unit,
     onArtistLongPress: ((String, List<Song>) -> Unit)?,
     contentPadding: PaddingValues,
 ) {
-    val listState = rememberLazyListState()
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = contentPadding,
-    ) {
-        item {
-            SectionHeader(
-                icon = Icons.Rounded.Person,
-                title = "${artists.size} artists",
-            )
+    if (viewType == LibraryViewType.GRID) {
+        val gridState = rememberLazyGridState()
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 130.dp),
+            state = gridState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = PAGE_GUTTER,
+                end = PAGE_GUTTER,
+                bottom = contentPadding.calculateBottomPadding(),
+            ),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                SectionHeader(
+                    icon = Icons.Rounded.Person,
+                    title = "${artists.size} artists",
+                    modifier = Modifier.padding(horizontal = 0.dp, vertical = 14.dp),
+                )
+            }
+            items(artists) { (artist, artistSongs) ->
+                ArtistGridCard(
+                    name = artist,
+                    songCount = artistSongs.size,
+                    onClick = { onArtistClick(artist, artistSongs) },
+                    onLongPress = onArtistLongPress?.let { { it(artist, artistSongs) } },
+                )
+            }
         }
-        items(artists) { (artist, artistSongs) ->
-            ArtistRow(
-                name = artist,
-                songCount = artistSongs.size,
-                onClick = { onArtistClick(artist, artistSongs) },
-                onLongPress = onArtistLongPress?.let { { it(artist, artistSongs) } },
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
-                thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-            )
+    } else {
+        val listState = rememberLazyListState()
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            item {
+                SectionHeader(
+                    icon = Icons.Rounded.Person,
+                    title = "${artists.size} artists",
+                )
+            }
+            items(artists) { (artist, artistSongs) ->
+                ArtistRow(
+                    name = artist,
+                    songCount = artistSongs.size,
+                    onClick = { onArtistClick(artist, artistSongs) },
+                    onLongPress = onArtistLongPress?.let { { it(artist, artistSongs) } },
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+            }
         }
     }
 }
@@ -463,6 +610,56 @@ private fun ArtistRow(
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ArtistGridCard(
+    name: String,
+    songCount: Int,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Person,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(48.dp),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = name.ifBlank { stringResource(R.string.unknown_artist) },
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = "$songCount ${if (songCount == 1) "song" else "songs"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -555,45 +752,81 @@ private fun albumEntries(
 @Composable
 private fun AlbumsTab(
     albums: List<AlbumEntry>,
+    viewType: LibraryViewType,
     onAlbumClick: (AlbumEntry) -> Unit,
     onAlbumLongPress: ((String, List<Song>) -> Unit)?,
     contentPadding: PaddingValues,
 ) {
-    val listState = rememberLazyListState()
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = contentPadding,
-    ) {
-        item {
-            SectionHeader(
-                icon = Icons.Rounded.Album,
-                title = "${albums.size} ${if (albums.size == 1) "album" else "albums"}",
-            )
-        }
-        // Songs but no albums: nothing here was downloaded as a release and
-        // nothing carries an album tag either. Worth saying outright — a track
-        // downloaded one at a time from a row that never named a release has no
-        // album for any player to group it under.
-        if (albums.isEmpty()) {
-            item {
-                MessageState(
-                    message = "Nothing here belongs to an album or playlist yet. " +
-                        "Download a whole one and it turns up here.",
+    if (viewType == LibraryViewType.GRID) {
+        val gridState = rememberLazyGridState()
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 140.dp),
+            state = gridState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = PAGE_GUTTER,
+                end = PAGE_GUTTER,
+                bottom = contentPadding.calculateBottomPadding(),
+            ),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                SectionHeader(
+                    icon = Icons.Rounded.Album,
+                    title = "${albums.size} ${if (albums.size == 1) "album" else "albums"}",
+                    modifier = Modifier.padding(horizontal = 0.dp, vertical = 14.dp),
+                )
+            }
+            if (albums.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    MessageState(
+                        message = "Nothing here belongs to an album or playlist yet. " +
+                            "Download a whole one and it turns up here.",
+                    )
+                }
+            }
+            items(albums, key = { it.key }) { entry ->
+                AlbumGridCard(
+                    entry = entry,
+                    onClick = { onAlbumClick(entry) },
+                    onLongPress = onAlbumLongPress?.let { { it(entry.title, entry.songs) } },
                 )
             }
         }
-        items(albums, key = { it.key }) { entry ->
-            AlbumRow(
-                entry = entry,
-                onClick = { onAlbumClick(entry) },
-                onLongPress = onAlbumLongPress?.let { { it(entry.title, entry.songs) } },
-            )
-            HorizontalDivider(
-                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
-                thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-            )
+    } else {
+        val listState = rememberLazyListState()
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            item {
+                SectionHeader(
+                    icon = Icons.Rounded.Album,
+                    title = "${albums.size} ${if (albums.size == 1) "album" else "albums"}",
+                )
+            }
+            if (albums.isEmpty()) {
+                item {
+                    MessageState(
+                        message = "Nothing here belongs to an album or playlist yet. " +
+                            "Download a whole one and it turns up here.",
+                    )
+                }
+            }
+            items(albums, key = { it.key }) { entry ->
+                AlbumRow(
+                    entry = entry,
+                    onClick = { onAlbumClick(entry) },
+                    onLongPress = onAlbumLongPress?.let { { it(entry.title, entry.songs) } },
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+            }
         }
     }
 }
@@ -628,9 +861,6 @@ private fun AlbumRow(
             )
             Text(
                 text = buildString {
-                    // A playlist's tracks are off forty different releases, so
-                    // the first one's artist is not a credit for it — the kind
-                    // of thing it is says more, and is true.
                     if (entry.playlist) {
                         append("Playlist · ")
                     } else if (entry.artist.isNotBlank() && entry.artist != entry.title) {
@@ -650,6 +880,161 @@ private fun AlbumRow(
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp),
         )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AlbumGridCard(
+    entry: AlbumEntry,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (entry.playlist) Icons.AutoMirrored.Rounded.QueueMusic else Icons.Rounded.Album,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(44.dp),
+            )
+            val artUrl = entry.thumbnailUrl
+            if (artUrl != null) {
+                AsyncImage(
+                    model = artUrl.artworkAt(CARD_ART_PX),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(shape)
+                        .thumbnailBorder(shape),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = entry.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = buildString {
+                if (entry.playlist) {
+                    append("Playlist · ")
+                } else if (entry.artist.isNotBlank() && entry.artist != entry.title) {
+                    append("${entry.artist} · ")
+                }
+                append("${entry.songs.size} ${if (entry.songs.size == 1) "song" else "songs"}")
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SongGridCard(
+    song: Song,
+    isCurrent: Boolean,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongPress,
+            )
+            .padding(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.size(36.dp),
+            )
+            val artUrl = song.thumbnailUrl
+            if (artUrl != null) {
+                AsyncImage(
+                    model = artUrl.artworkAt(CARD_ART_PX),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(shape)
+                        .thumbnailBorder(shape),
+                )
+            }
+            if (isCurrent) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.PlayArrow,
+                        contentDescription = stringResource(R.string.now_playing),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = song.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (song.isExplicit == true) {
+                ExplicitBadge()
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(
+                text = song.artist.ifBlank { stringResource(R.string.unknown_artist) },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -695,11 +1080,143 @@ private fun CollectionArtwork(url: String?, playlist: Boolean, size: Dp) {
 // ── Drill-down song list ───────────────────────────────────────────────────────
 
 @Composable
+private fun DrillDownHeader(
+    label: String,
+    artworkUrl: String?,
+    onMore: (() -> Unit)?,
+    onBack: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 6.dp, end = PAGE_GUTTER, top = 6.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = stringResource(R.string.back),
+                tint = MaterialTheme.colorScheme.onBackground,
+            )
+        }
+        Spacer(Modifier.width(4.dp))
+        // Only where there is a real cover to show. An artist grouping
+        // has none, and a square of placeholder glyph next to the name
+        // would be decoration standing in for information.
+        if (artworkUrl != null) {
+            CollectionArtwork(url = artworkUrl, playlist = false, size = 40.dp)
+            Spacer(Modifier.width(10.dp))
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        // The same menu holding the row in the grid behind this opens.
+        // Reachable from here too because this is where someone ends up
+        // who wanted the whole album and tapped instead of held.
+        onMore?.let { more ->
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = more),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MoreHoriz,
+                    contentDescription = stringResource(R.string.more),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DrillDownActionRow(
+    songs: List<Song>,
+    onSongClick: (List<Song>, Int) -> Unit,
+    onShuffle: (List<Song>) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // Play button
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.primary)
+                .clickable { if (songs.isNotEmpty()) onSongClick(songs, 0) }
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.play),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
+        // Shuffle button
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.secondaryContainer)
+                .clickable { if (songs.isNotEmpty()) onShuffle(songs) }
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                Icons.Rounded.Shuffle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.shuffle),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+}
+
+@Composable
 private fun DrillDownSongList(
     label: String,
     /** The release's cover, where it has one — see [CollectionArtwork]. */
     artworkUrl: String?,
     songs: List<Song>,
+    viewType: LibraryViewType,
+    currentSong: Song?,
+    isPlaying: Boolean,
     onSongClick: (List<Song>, Int) -> Unit,
     onSongLongPress: (Song) -> Unit,
     onSongSwipe: (Song) -> Unit,
@@ -708,146 +1225,81 @@ private fun DrillDownSongList(
     onBack: () -> Unit,
     contentPadding: PaddingValues,
 ) {
-    val listState = rememberLazyListState()
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = contentPadding,
-    ) {
-        // Back + title header
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 6.dp, end = PAGE_GUTTER, top = 6.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onBackground,
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                // Only where there is a real cover to show. An artist grouping
-                // has none, and a square of placeholder glyph next to the name
-                // would be decoration standing in for information.
-                if (artworkUrl != null) {
-                    CollectionArtwork(url = artworkUrl, playlist = false, size = 40.dp)
-                    Spacer(Modifier.width(10.dp))
-                }
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+    if (viewType == LibraryViewType.GRID) {
+        val gridState = rememberLazyGridState()
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 140.dp),
+            state = gridState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = PAGE_GUTTER,
+                end = PAGE_GUTTER,
+                bottom = contentPadding.calculateBottomPadding(),
+            ),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                DrillDownHeader(
+                    label = label,
+                    artworkUrl = artworkUrl,
+                    onMore = onMore,
+                    onBack = onBack,
                 )
-                // The same menu holding the row in the grid behind this opens.
-                // Reachable from here too because this is where someone ends up
-                // who wanted the whole album and tapped instead of held.
-                onMore?.let { more ->
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .clickable(onClick = more),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreHoriz,
-                            contentDescription = "More",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+            }
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                DrillDownActionRow(
+                    songs = songs,
+                    onSongClick = onSongClick,
+                    onShuffle = onShuffle,
+                )
+            }
+            itemsIndexed(songs) { index, song ->
+                SongGridCard(
+                    song = song,
+                    isCurrent = song.isSameTrackAs(currentSong),
+                    isPlaying = isPlaying && song.isSameTrackAs(currentSong),
+                    onClick = { onSongClick(songs, index) },
+                    onLongPress = { onSongLongPress(song) },
+                )
             }
         }
-
-        // Play / Shuffle action row
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                // Play button
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(MaterialTheme.colorScheme.primary)
-                        .clickable { if (songs.isNotEmpty()) onSongClick(songs, 0) }
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Icon(
-                        Icons.Rounded.PlayArrow,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Play",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
-                // Shuffle button
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                        .clickable { if (songs.isNotEmpty()) onShuffle(songs) }
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Icon(
-                        Icons.Rounded.Shuffle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Shuffle",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-        }
-
-        // Song rows
-        itemsIndexed(songs) { index, song ->
-            SongRow(
-                song = song,
-                onClick = { onSongClick(songs, index) },
-                onLongPress = { onSongLongPress(song) },
-                onSwipeToQueue = { onSongSwipe(song) },
-            )
-            if (index < songs.lastIndex) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+    } else {
+        val listState = rememberLazyListState()
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            item {
+                DrillDownHeader(
+                    label = label,
+                    artworkUrl = artworkUrl,
+                    onMore = onMore,
+                    onBack = onBack,
                 )
+            }
+            item {
+                DrillDownActionRow(
+                    songs = songs,
+                    onSongClick = onSongClick,
+                    onShuffle = onShuffle,
+                )
+            }
+            itemsIndexed(songs) { index, song ->
+                SongRow(
+                    song = song,
+                    onClick = { onSongClick(songs, index) },
+                    onLongPress = { onSongLongPress(song) },
+                    onSwipeToQueue = { onSongSwipe(song) },
+                )
+                if (index < songs.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                }
             }
         }
     }
@@ -872,8 +1324,14 @@ private fun Song.matchesSearch(query: String): Boolean =
 private fun LocalSearchField(
     query: String,
     onQueryChange: (String) -> Unit,
+    sortOrder: LocalMusicSort,
+    onSortOrderChange: (LocalMusicSort) -> Unit,
+    viewType: LibraryViewType,
+    onViewTypeToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showSortMenu by remember { mutableStateOf(false) }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -892,7 +1350,7 @@ private fun LocalSearchField(
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    text = "Search this folder",
+                    text = stringResource(R.string.search_this_folder),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -922,6 +1380,80 @@ private fun LocalSearchField(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp),
                 )
+            }
+            Spacer(Modifier.width(4.dp))
+        }
+
+        // View type toggle button (Grid / List)
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onViewTypeToggle),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (viewType == LibraryViewType.GRID) YZMusicIcons.ListView else YZMusicIcons.GridView,
+                contentDescription = stringResource(
+                    if (viewType == LibraryViewType.GRID) R.string.switch_to_list_view else R.string.switch_to_grid_view
+                ),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+
+        Spacer(Modifier.width(2.dp))
+
+        // Sort menu button
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .clickable { showSortMenu = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.Sort,
+                contentDescription = stringResource(R.string.sort_music),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+            DropdownMenu(
+                expanded = showSortMenu,
+                onDismissRequest = { showSortMenu = false },
+            ) {
+                LocalMusicSort.entries.forEach { sort ->
+                    val labelRes = when (sort) {
+                        LocalMusicSort.TITLE_ASC -> R.string.sort_title_ascending
+                        LocalMusicSort.TITLE_DESC -> R.string.sort_title_descending
+                        LocalMusicSort.DATE_ADDED -> R.string.sort_date_added
+                        LocalMusicSort.DATE_MODIFIED -> R.string.sort_date_modified
+                    }
+                    val isSelected = sort == sortOrder
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = stringResource(labelRes),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            )
+                        },
+                        trailingIcon = if (isSelected) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        } else null,
+                        onClick = {
+                            onSortOrderChange(sort)
+                            showSortMenu = false
+                        },
+                    )
+                }
             }
         }
     }
@@ -962,11 +1494,15 @@ private fun LocalTab(
 }
 
 @Composable
-private fun SectionHeader(icon: ImageVector, title: String) {
+private fun SectionHeader(
+    icon: ImageVector,
+    title: String,
+    modifier: Modifier = Modifier.padding(horizontal = PAGE_GUTTER, vertical = 14.dp),
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = PAGE_GUTTER, vertical = 14.dp),
+            .then(modifier),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

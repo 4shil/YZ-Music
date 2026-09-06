@@ -145,11 +145,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import com.music.yzmusic.R
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -169,6 +171,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.music.yzmusic.ui.rememberIsForeground
+import com.music.yzmusic.ui.components.ExplicitBadge
 import com.music.yzmusic.ui.components.thumbnailBorder
 import com.music.yzmusic.ui.haptics.Haptic
 import com.music.yzmusic.ui.haptics.rememberHaptics
@@ -179,8 +182,11 @@ import com.music.yzmusic.data.settings.TrackAnalysisState
 import com.music.yzmusic.data.canvas.CanvasArtwork
 import com.music.yzmusic.data.canvas.CanvasRepository
 import com.music.yzmusic.data.canvas.CanvasSource
+import com.music.yzmusic.data.lyrics.Genius
 import com.music.yzmusic.data.lyrics.LyricLine
 import com.music.yzmusic.data.lyrics.LyricsSource
+import com.music.yzmusic.ui.components.LyricsLogConsole
+import androidx.compose.material.icons.rounded.History
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.data.settings.AudioQuality
 import com.music.yzmusic.data.model.LikeStatus
@@ -723,6 +729,8 @@ fun NowPlayingScreen(
 
     val queueOpen = navMode == NowPlayingMode.QUEUE && sheetState != PanelSheetState.COLLAPSED
     val lyricsOpen = navMode == NowPlayingMode.LYRICS && sheetState != PanelSheetState.COLLAPSED
+    var lyricsLogsOpen by remember { mutableStateOf(false) }
+    val showLyricsLogsEnabled by AppSettings.showLyricsLogs.collectAsStateWithLifecycle()
 
     val swallowDownToSheet = remember(queueOpen) {
         object : NestedScrollConnection {
@@ -767,6 +775,7 @@ fun NowPlayingScreen(
     }
 
     fun closeToFullPlayer() {
+        lyricsLogsOpen = false
         haptics.play(Haptic.Tap)
         applySheetState(PanelSheetState.COLLAPSED)
     }
@@ -778,20 +787,29 @@ fun NowPlayingScreen(
     }
 
     LaunchedEffect(song.videoId) {
+        lyricsLogsOpen = false
         if (navMode == NowPlayingMode.LYRICS) {
             closeToFullPlayer()
         }
     }
 
     BackHandler(enabled = sheetState != PanelSheetState.COLLAPSED) {
-        closeToFullPlayer()
+        if (lyricsLogsOpen) {
+            lyricsLogsOpen = false
+        } else {
+            closeToFullPlayer()
+        }
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val view = LocalView.current
-        DisposableEffect(view, sheetState) {
+        DisposableEffect(view, sheetState, lyricsLogsOpen) {
             val callback = if (sheetState != PanelSheetState.COLLAPSED) {
                 OverlayBack.register(view) {
-                    closeToFullPlayer()
+                    if (lyricsLogsOpen) {
+                        lyricsLogsOpen = false
+                    } else {
+                        closeToFullPlayer()
+                    }
                 }
             } else {
                 null
@@ -1198,11 +1216,26 @@ fun NowPlayingScreen(
                 if (!docked) {
                     Box(
                         Modifier
+                            .align(Alignment.TopCenter)
+                            .offset(y = 8.dp)
                             .width(38.dp)
                             .height(5.dp)
                             .clip(RoundedCornerShape(3.dp))
                             .background(Color.White.copy(alpha = 0.32f)),
                     )
+                    song.radioName?.let { radioName ->
+                        Text(
+                            text = stringResource(R.string.playing_radio, radioName),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.78f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(start = PLAYER_GUTTER, end = PLAYER_GUTTER, bottom = 1.dp),
+                        )
+                    }
                 }
             }
 
@@ -1648,17 +1681,28 @@ fun NowPlayingScreen(
                             // lead anywhere; the rest stay plain text.
                             modifier = Modifier.opensPage(song.albumId, onOpenAlbum),
                         )
-                        Text(
-                            text = song.artist,
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.W500,
-                                fontSize = titleSize,
-                            ),
-                            color = Color.White.copy(alpha = 0.55f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.opensPage(song.artistId, onOpenArtist),
-                        )
+                        ) {
+                            if (song.isExplicit == true) {
+                                ExplicitBadge(
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    backgroundColor = Color.White.copy(alpha = 0.18f),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(
+                                text = song.artist,
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.W500,
+                                    fontSize = titleSize,
+                                ),
+                                color = Color.White.copy(alpha = 0.55f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                     Spacer(Modifier.width(10.dp))
                     // Beside the credits rather than down in the toggle row:
@@ -1678,6 +1722,16 @@ fun NowPlayingScreen(
                         )
                         Spacer(Modifier.width(8.dp))
                     }
+                    if (navMode == NowPlayingMode.LYRICS && showLyricsLogsEnabled) {
+                        CircleGlyph(
+                            icon = Icons.Rounded.History,
+                            contentDescription = "Lyrics Logs",
+                            onClick = { lyricsLogsOpen = !lyricsLogsOpen },
+                            active = lyricsLogsOpen,
+                            haptic = Haptic.Tap,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
                     CircleGlyph(
                         icon = Icons.Rounded.MoreHoriz,
                         contentDescription = "More",
@@ -1686,22 +1740,34 @@ fun NowPlayingScreen(
                 }
 
                 if (navMode == NowPlayingMode.LYRICS && p > 0.01f) {
-                    LyricsPanel(
-                        lines = lyrics.orEmpty(),
-                        trackKey = song.videoId,
-                        positionMs = positionMs,
-                        isPlaying = isPlaying,
-                        onSeekToLine = onSeek,
-                        onClose = ::closeToFullPlayer,
-                        listState = lyricsListState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(top = HEADER_HEIGHT + 10.dp)
-                            .graphicsLayer {
-                                alpha = ((p - 0.20f) / 0.80f).coerceIn(0f, 1f)
-                                translationY = (1f - p) * 32.dp.toPx()
-                            },
-                    )
+                    if (lyricsLogsOpen) {
+                        LyricsLogConsole(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = HEADER_HEIGHT + 10.dp)
+                                .graphicsLayer {
+                                    alpha = ((p - 0.20f) / 0.80f).coerceIn(0f, 1f)
+                                    translationY = (1f - p) * 32.dp.toPx()
+                                },
+                        )
+                    } else {
+                        LyricsPanel(
+                            lines = lyrics.orEmpty(),
+                            trackKey = song.videoId,
+                            positionMs = positionMs,
+                            isPlaying = isPlaying,
+                            onSeekToLine = onSeek,
+                            onClose = ::closeToFullPlayer,
+                            listState = lyricsListState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = HEADER_HEIGHT + 10.dp)
+                                .graphicsLayer {
+                                    alpha = ((p - 0.20f) / 0.80f).coerceIn(0f, 1f)
+                                    translationY = (1f - p) * 32.dp.toPx()
+                                },
+                        )
+                    }
                 }
 
                 if (navMode == NowPlayingMode.QUEUE && p > 0.01f) {
@@ -2495,6 +2561,8 @@ private fun LyricsPanel(
     var placed by remember(trackKey, lines) { mutableStateOf(false) }
     var lastScrolledLine by remember(trackKey, lines) { mutableIntStateOf(-1) }
 
+    val isSynced = remember(lines) { lines.any { it.timeMs > 0L } }
+    val lyricsBlur by AppSettings.lyricsBlur.collectAsStateWithLifecycle()
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
 
@@ -2505,7 +2573,7 @@ private fun LyricsPanel(
     // switch for exactly this kind of flourish, and reduce dynamic blur
     // because adding a blur under a setting that says it drops them would be
     // the app disagreeing with itself.
-    val glowing = !reduceAnimation && !reduceDynamicBlur &&
+    val glowing = !reduceAnimation && !reduceDynamicBlur && lyricsBlur &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
     // Track user drag interaction to enter browsing mode.
@@ -2544,7 +2612,7 @@ private fun LyricsPanel(
     // The very first placement is a jump, not a scroll. Later moves animate smoothly
     // when advancing line-by-line, or snap cleanly if a large jump (seek / long browse) occurred.
     LaunchedEffect(activeLine, browsing, listState.isScrollInProgress) {
-        if (!browsing && !listState.isScrollInProgress && activeLine >= 0 && activeLine in lines.indices) {
+        if (isSynced && !browsing && !listState.isScrollInProgress && activeLine >= 0 && activeLine in lines.indices) {
             val currentHeight = listState.layoutInfo.viewportSize.height
             val viewport = if (currentHeight > 0) {
                 currentHeight
@@ -2616,10 +2684,18 @@ private fun LyricsPanel(
         }
     }
 
-    val lyricStyle = MaterialTheme.typography.headlineLarge.copy(
-        fontSize = 27.sp,
-        lineHeight = 33.sp,
-    )
+    val lyricStyle = if (isSynced) {
+        MaterialTheme.typography.headlineLarge.copy(
+            fontSize = 27.sp,
+            lineHeight = 33.sp,
+        )
+    } else {
+        MaterialTheme.typography.headlineMedium.copy(
+            fontSize = 23.sp,
+            lineHeight = 31.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
     val backingStyle = remember(lyricStyle) {
         lyricStyle.copy(
             fontSize = BACKING_FONT_SIZE,
@@ -2646,20 +2722,65 @@ private fun LyricsPanel(
         itemsIndexed(
             items = lines,
             key = { index, line -> ((line.timeMs shl 16) or (index.toLong() and 0xFFFF)) },
-            contentType = { _, line -> if (line.isGap) "gap" else "lyric" },
+            contentType = { _, line ->
+                if (!isSynced && Genius.isSectionHeader(line.text)) "section"
+                else if (line.isGap) "gap"
+                else "lyric"
+            },
         ) { index, line ->
+            if (!isSynced && Genius.isSectionHeader(line.text)) {
+                val sectionTitle = line.text.removePrefix("[").removeSuffix("]").trim()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = if (index == 0) 6.dp else 24.dp, bottom = 8.dp)
+                        .padding(horizontal = GLOW_ROOM),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.White.copy(alpha = 0.14f))
+                            .padding(horizontal = 11.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text = sectionTitle.uppercase(),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                letterSpacing = 1.3.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                            ),
+                            color = Color.White.copy(alpha = 0.9f),
+                        )
+                    }
+                }
+                return@itemsIndexed
+            }
+
+            if (!isSynced && line.isGap) {
+                Spacer(Modifier.height(14.dp))
+                return@itemsIndexed
+            }
+
             // Signed rather than absolute: a line already sung and one still to
             // come are not the same distance from being read, even at the same
             // number of rows away, so the two fade at different rates below.
             val offset = if (activeLine < 0) 0 else index - activeLine
             val distance = abs(offset)
-            val isActive = index == activeLine || index == alsoActive
+            val isActive = isSynced && (index == activeLine || index == alsoActive)
+            val blur by animateDpAsState(
+                targetValue = when {
+                    !isSynced || reduceDynamicBlur || !lyricsBlur || browsing || isActive -> 0.dp
+                    else -> (distance * 1.6f).coerceAtMost(7f).dp
+                },
+                label = "lyricBlur",
+            )
             // Lines already sung stay close to legible — they're what the eye
             // just read and glances back to. Lines still to come fade faster
             // and further, so the panel reads as an arrival rather than a wall
             // of equally-weighted text.
             val lineAlpha by animateFloatAsState(
                 targetValue = when {
+                    !isSynced -> 0.95f
                     browsing -> 1f
                     isActive -> 1f
                     offset < 0 -> (0.55f - distance * 0.05f).coerceAtLeast(0.30f)
@@ -2677,8 +2798,9 @@ private fun LyricsPanel(
                     contentDescription = "Instrumental",
                     tint = Color.White.copy(alpha = lineAlpha),
                     modifier = Modifier
+                        .blur(blur, BlurredEdgeTreatment.Unbounded)
                         .clip(LyricLineShape)
-                        .clickable {
+                        .clickable(enabled = isSynced) {
                             browsing = false
                             lastScrolledLine = -1
                             onSeekToLine(line.timeMs)
@@ -2712,8 +2834,9 @@ private fun LyricsPanel(
                         transformOrigin = TransformOrigin(0f, 0.5f)
                         alpha = lineAlpha
                     }
+                    .blur(blur, BlurredEdgeTreatment.Unbounded)
                     .clip(LyricLineShape)
-                    .clickable {
+                    .clickable(enabled = isSynced) {
                         browsing = false
                         lastScrolledLine = -1
                         onSeekToLine(line.timeMs)
@@ -2858,6 +2981,36 @@ private fun CurrentLyricLine(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isSynced = remember(lines) { lines.any { it.timeMs > 0L } }
+    if (!isSynced) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick)
+                .padding(vertical = 4.dp),
+        ) {
+            Icon(
+                imageVector = YZMusicIcons.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.lyrics_available_tap_to_view),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+                color = Color.White.copy(alpha = 0.85f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        return
+    }
+
     val clock = rememberLyricClock(positionMs, isPlaying)
 
     val index by remember(lines) {
@@ -3769,13 +3922,22 @@ private fun InlineQueueRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.55f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (song.isExplicit == true) {
+                    ExplicitBadge(
+                        color = Color.White.copy(alpha = 0.8f),
+                        backgroundColor = Color.White.copy(alpha = 0.18f),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (isCurrent) {
             Icon(

@@ -3,6 +3,7 @@ package com.music.yzmusic.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.music.yzmusic.R
 import com.music.yzmusic.auth.AuthStore
 import com.music.yzmusic.data.AppUpdateChecker
 import com.music.yzmusic.data.LocalMediaRepository
@@ -100,8 +101,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _results = MutableStateFlow<UiState<List<SearchResult>>?>(null)
     val results: StateFlow<UiState<List<SearchResult>>?> = _results.asStateFlow()
 
-    /** Songs is the default tab; there is no "All" tab any more. */
-    private val _filter = MutableStateFlow(SearchFilter.SONGS)
+    private val _searchLoadingMore = MutableStateFlow(false)
+    val searchLoadingMore: StateFlow<Boolean> = _searchLoadingMore.asStateFlow()
+    val isLoadingMore: StateFlow<Boolean> = _searchLoadingMore.asStateFlow()
+
+    /** Increments once per first-page request so the UI can reset its list. */
+    private val _searchScrollReset = MutableStateFlow(0)
+    val searchScrollReset: StateFlow<Int> = _searchScrollReset.asStateFlow()
+
+    /** The mixed YouTube Music result page is the fast, useful default. */
+    private val _filter = MutableStateFlow(SearchFilter.ALL)
     val filter: StateFlow<SearchFilter> = _filter.asStateFlow()
 
     /**
@@ -162,7 +171,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * up for the moment the narrower one takes rather than blanking the page
      * to a spinner.
      */
-    private val searchCache = LruCache<String, List<SearchResult>>(SEARCH_CACHE_ENTRIES)
+    private data class SearchCacheEntry(
+        val rows: List<SearchResult>,
+        val continuation: String?,
+    )
+
+    private data class SearchSession(
+        val key: String,
+        val requestId: Long,
+        val filter: SearchFilter,
+        val continuation: String?,
+    )
+
+    private val searchCache = LruCache<String, SearchCacheEntry>(SEARCH_CACHE_ENTRIES)
+    private var searchSession: SearchSession? = null
 
     /** Synced lyrics for whatever is playing; null while unknown or absent. */
     private val _lyrics = MutableStateFlow<List<LyricLine>?>(null)
@@ -1158,6 +1180,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Nothing in flight can still be waiting to overwrite the latter:
             // the id it would be checked against has already moved past it.
             newestRequestId.incrementAndGet()
+            searchSession = null
+            _searchLoadingMore.value = false
             _results.value = null
             _suggestions.value = emptyList()
             return
@@ -1247,6 +1271,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .filterKeys { it.startsWith(prefix) && query.startsWith(it.removePrefix(prefix), true) }
             .maxByOrNull { it.key.length }
             ?.value
+            ?.rows
     }
 
     private fun runSearch() {
@@ -1255,10 +1280,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Nothing in flight can still be waiting to overwrite this: the
             // id it would be checked against has already moved past it.
             newestRequestId.incrementAndGet()
+            searchSession = null
+            _searchLoadingMore.value = false
             _results.value = null
             return
         }
         val id = newestRequestId.incrementAndGet()
+        _searchScrollReset.value += 1
+        searchSession = null
+        _searchLoadingMore.value = false
         searchRequests.tryEmit(SearchRequest(query, _filter.value, id))
     }
 
@@ -1289,9 +1319,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // query has been run before, otherwise the closest earlier
                 // one. Only fall back to a spinner with neither.
                 val exact = searchCache.get(key)
-                val cached = exact ?: prefixMatch(request.query, request.filter)
+                val cached = exact?.rows ?: prefixMatch(request.query, request.filter)
                 _results.value = cached?.let { UiState.Success(it) } ?: UiState.Loading
-                if (exact != null) return@collectLatest
+                if (exact != null) {
+                    searchSession = SearchSession(key, request.requestId, request.filter, exact.continuation)
+                    return@collectLatest
+                }
 
                 // Search is YouTube's alone. A module is a *substitution*
                 // layer, not a catalogue to browse: it never has cover art,
@@ -1302,16 +1335,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // see [SourceResolver.substituteForYouTube] — which upgrades
                 // the ones it holds without any of them having to be a
                 // separate row to pick between.
-                val result = YtMusicRepository.search(request.query, request.filter)
+                val result = YtMusicRepository.searchPage(request.query, request.filter)
                 // A search that has been superseded shouldn't land on screen,
                 // whether it succeeded or failed.
                 if (request.requestId != newestRequestId.get()) return@collectLatest
                 _results.value = result.fold(
-                    onSuccess = { rows -> published(rows, key) },
+                    onSuccess = { page -> published(page, key, request.requestId) },
                     onFailure = { failure -> UiState.Error(failure.friendly()) },
                 )
             }
     }
+
+    /**
+     * Continues the visible search only when the list reaches its end. This is
+     * deliberately separate from the first-page request: waiting for every
+     * continuation was the reason a search sat on a spinner for seconds.
+     */
+    fun loadMoreSearchResults() {
+        val session = searchSession ?: return
+        val token = session.continuation ?: return
+        if (_searchLoadingMore.value) return
+        _searchLoadingMore.value = true
+        viewModelScope.launch {
+            val next = YtMusicRepository.searchContinuation(token, session.filter)
+            val stillCurrent = searchSession == session && session.requestId == newestRequestId.get()
+            if (stillCurrent) {
+                next.onSuccess { page ->
+                    val current = (_results.value as? UiState.Success)?.data.orEmpty()
+                    val merged = (current + page.rows).distinctBy(::searchResultKey)
+                    searchCache.put(session.key, SearchCacheEntry(merged, page.continuation))
+                    searchSession = session.copy(continuation = page.continuation)
+                    _results.value = UiState.Success(merged)
+                }
+                _searchLoadingMore.value = false
+            }
+        }
+    }
+
+    fun loadMoreSearch() = loadMoreSearchResults()
 
     /**
      * The typeahead pipeline, alongside [startSearchPipeline] and for the same
@@ -1353,12 +1414,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
-    /** Caches and publishes one result list. */
-    private fun published(rows: List<SearchResult>, key: String): UiState<List<SearchResult>> {
-        if (rows.isEmpty()) return UiState.Error("No results")
-        searchCache.put(key, rows)
+    /** Caches and publishes the initial result page without waiting for later pages. */
+    private fun published(
+        page: YtMusicRepository.SearchPage,
+        key: String,
+        requestId: Long,
+    ): UiState<List<SearchResult>> {
+        val rows = page.rows
+        if (rows.isEmpty()) return UiState.Error(text(R.string.no_results))
+        searchCache.put(key, SearchCacheEntry(rows, page.continuation))
+        searchSession = SearchSession(key, requestId, _filter.value, page.continuation)
         prefetchTopResult(rows)
         return UiState.Success(rows)
+    }
+
+    private fun searchResultKey(row: SearchResult): String = when (row) {
+        is SearchResult.TopTrack -> "v:${row.song.videoId}"
+        is SearchResult.Track -> "v:${row.song.videoId}"
+        is SearchResult.Browse -> "b:${row.item.browseId}"
     }
 
     /**
@@ -1415,7 +1488,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * rather than one nothing will ever ask for.
      */
     private fun prefetchTopResult(rows: List<SearchResult>) {
-        val song = rows.filterIsInstance<SearchResult.Track>().firstOrNull()?.song ?: return
+        val song = rows.firstNotNullOfOrNull {
+            when (it) {
+                is SearchResult.TopTrack -> it.song
+                is SearchResult.Track -> it.song
+                is SearchResult.Browse -> null
+            }
+        } ?: return
         viewModelScope.launch {
             runCatching {
                 val audio = YtMusicRepository.resolveAudio(song)
@@ -1878,4 +1957,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             "YouTube Music rejected the request — try signing in again"
         else -> message ?: "Something went wrong"
     }
+
+    private fun text(id: Int): String = getApplication<Application>().getString(id)
 }

@@ -1,4 +1,4 @@
-﻿<resources>
+<resources>
     <string name="app_name">YZ Music</string>
     <string name="playback_channel_name">Now playing</string>
     <string name="download_channel_name">Downloads</string>
@@ -13,8 +13,11 @@
     <string name="settings">Settings</string>
     <string name="search">Search</string>
     <string name="clear_search">Clear search</string>
+    <string name="no_results">No results</string>
+    <string name="voice_search">Voice search</string>
     <string name="library">Library</string>
     <string name="play">Play</string>
+    <string name="playlist_action">Playlist</string>
     <string name="explore">Explore</string>
     <string name="listen_now">Listen Now</string>
     <string name="downloads">Downloads</string>
@@ -95,6 +98,10 @@
     <string name="no_equalizer">No system equalizer on this device</string>
     <string name="no_dolby_atmos">No Dolby Atmos panel on this device</string>
     <string name="dolby_atmos_open_failed">Couldn’t open Dolby Atmos settings</string>
+    <string name="allow_dolby_atmos">Allow Dolby Atmos</string>
+    <string name="allow_dolby_atmos_subtitle">Stream multi-channel immersive audio when supported by device</string>
+    <string name="automix_performance_mode">Automix Processing Mode</string>
+    <string name="automix_performance_mode_subtitle">Thread allocation and CPU budget for beat and vocal analysis</string>
     <string name="update_available">Update available: v%1$s</string>
     <string name="software_update">Software Update</string>
     <string name="update_available_body">YZ Music %1$s is available to download.</string>
@@ -234,4 +241,88 @@
     <!-- Double-Tap Seek -->
     <string name="double_tap_seek">Double-tap to seek</string>
     <string name="double_tap_seek_subtitle">Double-tap left or right to skip seconds</string>
+
+    <!-- Radio Mode -->
+    <string name="start_radio">Start radio</string>
+    <string name="playing_radio">Playing %1$s Radio</string>
+    <string name="radio_started">%1$s radio started</string>
+    <string name="couldnt_load_tracks">Could not load these tracks</string>
+
+    <!-- Lyrics Blur & Logs -->
+    <string name="blur_unfocused_lyrics">Blur unfocused lyrics</string>
+    <string name="blur_unfocused_lyrics_subtitle">Keeps the spotlight on the current line</string>
+    <string name="lyrics_debug_logs">Lyrics Debug Logs</string>
+    <string name="lyrics_debug_logs_subtitle">Show live API queries and scraper activity in the lyrics panel</string>
+    <string name="lyrics_available_tap_to_view">Lyrics available • Tap to view</string>
+
+    <!-- Local Media Filter & Library Grid / Sort -->
+    <string name="filter_non_music_audio">Filter non-music audio</string>
+    <string name="filter_non_music_audio_subtitle">Hides clips under 30 seconds, WAV files, voice notes, recordings and system sounds</string>
+    <string name="grid_view">Grid</string>
+    <string name="list_view">List</string>
+    <string name="switch_to_grid_view">Switch to grid view</string>
+    <string name="switch_to_list_view">Switch to list view</string>
+    <string name="sort_music">Sort music</string>
+    <string name="sort_title_ascending">Alphabetical (A to Z)</string>
+    <string name="sort_title_descending">Alphabetical (Z to A)</string>
+    <string name="sort_date_added">Date added (newest first)</string>
+    <string name="sort_date_modified">Date modified (newest first)</string>
+    <string name="search_this_folder">Search this folder</string>
+    <string name="unknown_artist">Unknown Artist</string>
+
+    <!-- Liquid Glass -->
+    <string name="liquid_glass">Liquid Glass</string>
+    <string name="liquid_glass_subtitle">Real refracting glass on the floating nav bar. Android 12+ only; uses more GPU.</string>
+    <string name="liquid_glass_unavailable">Requires Android 12 or newer</string>
+    <string name="glass_blur">Glass Blur</string>
+    <string name="glass_blur_subtitle">Controls the strength of the Liquid Glass backdrop blur</string>
+    <string name="glass_blur_disabled_subtitle">Controls the strength of the Liquid Glass backdrop blur (inactive while Reduce dynamic blur is on)</string>
+
+    <!-- Performance -->
+    <string name="performance">Performance</string>
+    <string name="beta">Beta</string>
+    <string name="high_performance_mode">High performance mode</string>
+    <string name="high_performance_subtitle">Uses full animations and blur, and requests a higher display refresh rate</string>
+    <string name="high_performance_active">%1$d Hz requested. Android may lower it when needed.</string>
+    <string name="refresh_rate">Refresh rate</string>
+    <string name="high_performance_before_enabling">Before enabling</string>
+    <string name="high_performance_battery_warning">First set YZ Music\'s battery usage to Unrestricted. Higher refresh rates use more battery, CPU and GPU, and may warm your device.</string>
+    <string name="enable_high_performance_title">Enable high performance mode?</string>
+    <string name="enable_high_performance_confirmation">Enable only if YZ Music\'s battery use is set to Unrestricted. Android can still limit the refresh rate when the device is hot or low on power.</string>
+    <string name="open_battery_settings">Open battery settings</string>
+    <string name="enable">Enable</string>
+    <string name="not_yet">Not yet</string>
+
+    <!-- Automix Performance -->
+    <string name="automix_performance">Automix performance</string>
+    <string name="automix_performance_subtitle">Sets how much CPU background analysis may use</string>
+    <string name="automix_performance_warning">Higher performance analyses tracks faster, but can use more battery and make the phone warmer.</string>
+    <string name="automix_mode_efficient">Efficient</string>
+    <string name="automix_mode_efficient_subtitle">1 thread · lowest heat and battery use · analysis may take longer</string>
+    <string name="automix_mode_balanced">Balanced</string>
+    <string name="automix_mode_balanced_subtitle">2 threads · recommended balance of speed, heat and battery</string>
+    <string name="automix_mode_performance">Performance</string>
+    <string name="automix_mode_performance_subtitle">4 threads · fastest analysis · higher heat and battery use</string>
+
+    <!-- Local Music Folders & Sort -->
+    <string name="all_audio_folders">All audio folders</string>
+    <string name="local_music_folder">Local music folder</string>
+    <string name="use_all_audio_folders">Use all audio folders</string>
+    <string name="use_all_audio_folders_subtitle">Remove the folder limit and scan music across the device</string>
+    <string name="sort_default">Default order</string>
+    <string name="local_music_view_type">Default view</string>
+    <string name="default_sort_order">Default sort order</string>
+
+    <!-- Syllable Sync -->
+    <string name="prioritize_syllable_sync">Prioritize syllable-sync</string>
+    <string name="prioritize_syllable_sync_subtitle">Prefer word-by-word synced lyrics when available from providers</string>
+
+    <!-- Dolby Atmos -->
+    <string name="dolby_atmos">Dolby Atmos</string>
+    <string name="dolby_atmos_subtitle">Play the more immersive, surround version of a song when there is one.</string>
+    <string name="dolby_atmos_unavailable">This device can\'t play Atmos, so these songs play in their usual version</string>
+
+    <string name="lyrics">Lyrics</string>
+    <string name="advanced_options">Advanced Options</string>
 </resources>
+

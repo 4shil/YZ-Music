@@ -98,6 +98,7 @@ import com.music.yzmusic.data.model.artworkAt
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.ui.components.ArtworkWash
 import com.music.yzmusic.ui.components.DownloadedBadge
+import com.music.yzmusic.ui.components.ExplicitBadge
 import com.music.yzmusic.ui.components.MessageState
 import com.music.yzmusic.ui.components.PAGE_GUTTER
 import com.music.yzmusic.ui.components.ROW_DIVIDER_INSET
@@ -1545,13 +1546,19 @@ private fun CompactSongRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodyMedium,
-                color = palette.onBackgroundVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (song.isExplicit == true) {
+                    ExplicitBadge()
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.onBackgroundVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (downloadedTint != null) {
             DownloadedBadge(song.videoId, downloadedTint)
@@ -1615,13 +1622,19 @@ private fun SuggestedSongRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(2.dp))
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodyMedium,
-                color = palette.onBackgroundVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (song.isExplicit == true) {
+                    ExplicitBadge()
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.onBackgroundVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (downloadedTint != null) {
             DownloadedBadge(song.videoId, downloadedTint)

@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data.lyrics
+package com.music.yzmusic.data.lyrics
 
 /**
  * The databases [LyricsRepository] can ask, in the order it asks them.
@@ -51,6 +51,11 @@ enum class LyricsSource(
     MUSIXMATCH(
         label = "Musixmatch",
         detail = "Whole lines, from the biggest lyrics database there is",
+        wordSynced = false,
+    ),
+    GENIUS(
+        label = "Genius",
+        detail = "Plain text fallback, massive web catalogue",
         wordSynced = false,
     ),
 }

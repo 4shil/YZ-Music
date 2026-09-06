@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.components
+package com.music.yzmusic.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -55,10 +55,15 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.music.yzmusic.R
 import com.music.yzmusic.data.model.ROW_ART_PX
@@ -397,13 +402,19 @@ private fun SongRowContent(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(2.dp))
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodyMedium,
-                color = subtitleColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (song.isExplicit == true) {
+                    ExplicitBadge()
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = subtitleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (downloadedTint != null) {
             DownloadedBadge(song.videoId, downloadedTint)
@@ -460,6 +471,65 @@ fun DownloadedBadge(videoId: String, tint: Color, modifier: Modifier = Modifier)
         tint = tint,
         modifier = modifier.size(16.dp),
     )
+}
+
+/**
+ * Small indicator for explicit audio tracks ("E" badge).
+ */
+@Composable
+fun ExplicitBadge(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+    backgroundColor: Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
+) {
+    Box(
+        modifier = modifier
+            .semantics(mergeDescendants = true) { contentDescription = "Explicit" }
+            .clip(RoundedCornerShape(3.dp))
+            .background(backgroundColor)
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "E",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 10.sp,
+            ),
+            color = color,
+        )
+    }
+}
+
+/** A song title with the catalogue-standard outlined E for explicit audio. */
+@Composable
+fun ExplicitSongTitle(
+    song: Song,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        if (song.isExplicit == true) {
+            Text(
+                text = "E",
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                modifier = Modifier
+                    .border(1.dp, color.copy(alpha = 0.72f), RoundedCornerShape(2.dp))
+                    .padding(horizontal = 3.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            text = song.title,
+            style = style,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 /**

@@ -1,16 +1,18 @@
-﻿package com.music.yzmusic.data
+package com.music.yzmusic.data
 
 import android.Manifest
 import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import com.music.yzmusic.data.DebugLog as Log
 import androidx.core.content.ContextCompat
 import com.music.yzmusic.data.model.Song
+import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.download.DownloadStore
 import com.music.yzmusic.download.Downloads
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +23,24 @@ import java.util.Locale
 object LocalMediaRepository {
 
     private const val TAG = "YZ Music"
+    private const val MIN_LOCAL_MUSIC_DURATION_MS = 30_000L
+
+    private val localMusicExtensions = setOf(
+        "mp3", "m4a", "flac", "ogg", "opus", "aac", "webm",
+    )
+
+    private val nonMusicPathSegments = listOf(
+        "/alarms/",
+        "/notifications/",
+        "/ringtones/",
+        "/podcasts/",
+        "/audiobooks/",
+        "/recordings/",
+        "/voice recorder/",
+        "/sound_recorder/",
+        "/call_rec/",
+        "/whatsapp voice notes/",
+    )
 
     /** Check if storage/audio permission is granted to query device local music. */
     fun hasStoragePermission(context: Context): Boolean {
@@ -65,6 +85,8 @@ object LocalMediaRepository {
                     MediaStore.Audio.Media.RELATIVE_PATH,
                     MediaStore.Audio.Media.ALBUM,
                     MediaStore.Audio.Media.ALBUM_ID,
+                    MediaStore.Audio.Media.DATE_ADDED,
+                    MediaStore.Audio.Media.DATE_MODIFIED,
                 )
                 val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
                 val selectionArgs = arrayOf("%${DownloadStore.FOLDER}%")
@@ -80,6 +102,8 @@ object LocalMediaRepository {
                     val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
                     val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                     val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                    val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
                     val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
 
                     while (cursor.moveToNext()) {
@@ -87,6 +111,8 @@ object LocalMediaRepository {
                         val name = cursor.getString(nameCol) ?: continue
                         val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
                         val albumId = cursor.getLong(albumIdCol)
+                        val dateAdded = cursor.getLong(dateAddedCol).takeIf { it > 0 }
+                        val dateModified = cursor.getLong(dateModifiedCol).takeIf { it > 0 }
                         val tags = ScannedTags(
                             albumName = cursor.getString(albumCol).cleanTag(),
                             artworkUrl = if (albumId > 0) {
@@ -94,6 +120,8 @@ object LocalMediaRepository {
                             } else {
                                 null
                             },
+                            dateAddedSeconds = dateAdded,
+                            dateModifiedSeconds = dateModified,
                         )
                         scanned[contentUri] = tags
                         if (contentUri !in knownUris && isAudioFileName(name)) {
@@ -122,10 +150,13 @@ object LocalMediaRepository {
         }.onFailure { Log.w(TAG, "Failed scanning Music/YZ Music directory: ${it.message}") }
 
         val filled = appDownloads.map { song ->
-            if (song.albumName != null) return@map song
             val uri = song.localUri ?: return@map song
-            val album = scanned[uri]?.albumName ?: return@map song
-            song.copy(albumName = album)
+            val tags = scanned[uri] ?: return@map song
+            song.copy(
+                albumName = song.albumName ?: tags.albumName,
+                localDateAddedSeconds = tags.dateAddedSeconds,
+                localDateModifiedSeconds = tags.dateModifiedSeconds,
+            )
         }
 
         (filled + extraSongs).distinctBy { it.localUri ?: it.videoId }
@@ -135,7 +166,12 @@ object LocalMediaRepository {
      * The parts of a scanner row worth reading back — everything else about a
      * download is better known from the record that made it.
      */
-    private class ScannedTags(val albumName: String?, val artworkUrl: String?)
+    private class ScannedTags(
+        val albumName: String?,
+        val artworkUrl: String?,
+        val dateAddedSeconds: Long? = null,
+        val dateModifiedSeconds: Long? = null,
+    )
 
     /** What MediaStore writes into a column it has nothing for. */
     private fun String?.cleanTag(): String? =
@@ -160,6 +196,7 @@ object LocalMediaRepository {
         val videoIdByUri = Downloads.saved.value.entries.associate { (id, uri) -> uri to id }
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DISPLAY_NAME,
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
@@ -167,9 +204,30 @@ object LocalMediaRepository {
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.DATA,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DATE_MODIFIED,
         )
 
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= 5000"
+        val filterNonMusic = AppSettings.filterNonMusicAudio.value
+        val selection = if (filterNonMusic) {
+            buildString {
+                append("${MediaStore.Audio.Media.IS_MUSIC} != 0")
+                append(" AND ${MediaStore.Audio.Media.DURATION} >= ?")
+                append(" AND ${MediaStore.Audio.Media.IS_ALARM} = 0")
+                append(" AND ${MediaStore.Audio.Media.IS_NOTIFICATION} = 0")
+                append(" AND ${MediaStore.Audio.Media.IS_RINGTONE} = 0")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    append(" AND ${MediaStore.Audio.Media.IS_PODCAST} = 0")
+                }
+            }
+        } else {
+            "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= 5000"
+        }
+        val selectionArgs = if (filterNonMusic) {
+            arrayOf(MIN_LOCAL_MUSIC_DURATION_MS.toString())
+        } else {
+            null
+        }
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
         runCatching {
@@ -177,10 +235,11 @@ object LocalMediaRepository {
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
                 selection,
-                null,
+                selectionArgs,
                 sortOrder,
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val displayNameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
                 val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                 val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
                 val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
@@ -188,11 +247,14 @@ object LocalMediaRepository {
                 val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val trackCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
                 val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
 
                 val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
+                    val displayName = cursor.getString(displayNameCol).orEmpty()
                     val rawTitle = cursor.getString(titleCol)
                     val rawArtist = cursor.getString(artistCol)
                     val rawAlbum = cursor.getString(albumCol)
@@ -201,9 +263,16 @@ object LocalMediaRepository {
                     val rawTrack = cursor.getInt(trackCol)
                     val trackNumber = (rawTrack % 1_000).takeIf { it > 0 }
                     val path = cursor.getString(dataCol)
+                    val dateAdded = cursor.getLong(dateAddedCol).takeIf { it > 0 }
+                    val dateModified = cursor.getLong(dateModifiedCol).takeIf { it > 0 }
+
+                    if (filterNonMusic && !isEligibleLocalMusic(durationMs, displayName, path)) continue
+                    if (!isInSelectedFolder(path, AppSettings.localMusicFolderUri.value)) continue
 
                     val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
-                    val title = rawTitle.takeUnless { it.isNullOrBlank() } ?: "Track $id"
+                    val title = rawTitle.cleanTag()?.removeAudioExtension()
+                        ?: displayName.substringBeforeLast('.').takeIf { it.isNotBlank() }
+                        ?: "Track $id"
                     val artist = rawArtist.takeUnless { it.isNullOrBlank() || it == "<unknown>" } ?: "Unknown Artist"
                     val albumName = rawAlbum.takeUnless { it.isNullOrBlank() || it == "<unknown>" }
                     val artworkUrl = if (albumId > 0) ContentUris.withAppendedId(albumArtBaseUri, albumId).toString() else null
@@ -221,6 +290,8 @@ object LocalMediaRepository {
                             trackNumber = trackNumber,
                             localUri = contentUri,
                             localPath = path,
+                            localDateAddedSeconds = dateAdded,
+                            localDateModifiedSeconds = dateModified,
                         )
                     )
                 }
@@ -228,6 +299,35 @@ object LocalMediaRepository {
         }.onFailure { Log.w(TAG, "Failed scanning device local music: ${it.message}") }
 
         songs
+    }
+
+    /**
+     * MediaStore's `IS_MUSIC` flag is advisory and often includes notification
+     * sounds, voice notes and recorder output. Keep this second gate independent
+     * of scanner metadata so the same bad rows stay out across Android vendors.
+     */
+    internal fun isEligibleLocalMusic(durationMs: Long, displayName: String, path: String?): Boolean {
+        if (durationMs < MIN_LOCAL_MUSIC_DURATION_MS) return false
+
+        val fileName = path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+            ?: displayName
+        val extension = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (extension !in localMusicExtensions) return false
+
+        val normalizedPath = path
+            ?.replace('\\', '/')
+            ?.lowercase(Locale.ROOT)
+            ?: return true
+        return nonMusicPathSegments.none(normalizedPath::contains)
+    }
+
+    private fun String.removeAudioExtension(): String {
+        val extension = substringAfterLast('.', "").lowercase(Locale.ROOT)
+        return if (extension in localMusicExtensions || extension == "wav") {
+            substringBeforeLast('.').ifBlank { this }
+        } else {
+            this
+        }
     }
 
     private fun isAudioFileName(name: String): Boolean {
@@ -293,4 +393,38 @@ object LocalMediaRepository {
         val secs = totalSecs % 60
         return String.format(Locale.ROOT, "%d:%02d", minutes, secs)
     }
+
+    /** Human-readable path for the folder setting without exposing provider internals. */
+    fun selectedFolderLabel(treeUri: String): String? = selectedFolder(treeUri)?.label
+
+    internal fun isInSelectedFolder(path: String?, treeUri: String): Boolean {
+        if (treeUri.isBlank()) return true
+        val folder = selectedFolder(treeUri) ?: return false
+        val candidate = path?.normalizedPath() ?: return false
+        return candidate == folder.absolutePath || candidate.startsWith("${folder.absolutePath}/")
+    }
+
+    private data class SelectedFolder(val absolutePath: String, val label: String)
+
+    private fun selectedFolder(treeUri: String): SelectedFolder? = runCatching {
+        val documentId = DocumentsContract.getTreeDocumentId(Uri.parse(treeUri))
+        if (documentId.startsWith("raw:")) {
+            val path = documentId.removePrefix("raw:").normalizedPath()
+            return@runCatching SelectedFolder(path, path.substringAfterLast('/'))
+        }
+        val volume = documentId.substringBefore(':')
+        val relative = documentId.substringAfter(':', "").trim('/')
+        val volumeRoot = if (volume.equals("primary", ignoreCase = true)) {
+            "/storage/emulated/0"
+        } else {
+            "/storage/$volume"
+        }
+        SelectedFolder(
+            absolutePath = listOf(volumeRoot, relative).filter { it.isNotBlank() }.joinToString("/").normalizedPath(),
+            label = relative.ifBlank { volume },
+        )
+    }.getOrNull()
+
+    private fun String.normalizedPath(): String =
+        replace('\\', '/').trimEnd('/').lowercase(Locale.ROOT)
 }

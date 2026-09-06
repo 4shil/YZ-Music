@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.components
+package com.music.yzmusic.ui.components
 
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlaylistRemove
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ThumbDownOffAlt
@@ -56,10 +57,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.music.yzmusic.R
 import com.music.yzmusic.data.model.LikeStatus
 import com.music.yzmusic.data.model.ROW_ART_PX
 import com.music.yzmusic.data.model.Song
@@ -109,6 +112,7 @@ fun SongActionsSheet(
     likeStatus: LikeStatus,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
+    onStartRadio: (() -> Unit)? = null,
     onDownload: () -> Unit,
     onToggleLike: () -> Unit,
     onToggleDislike: () -> Unit,
@@ -191,6 +195,14 @@ fun SongActionsSheet(
         }
 
         DownloadRow(song, palette, isOffline, onDownload)
+        if (onStartRadio != null && !isOffline) {
+            ActionRow(
+                icon = Icons.Rounded.Radio,
+                label = stringResource(R.string.start_radio),
+                accent = palette.accent,
+                onClick = onStartRadio,
+            )
+        }
         ActionRow(
             icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
             label = "Play next",

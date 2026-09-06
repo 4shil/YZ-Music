@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data.sources
+package com.music.yzmusic.data.sources
 
 import com.music.yzmusic.data.model.Song
 import java.util.Locale
@@ -21,6 +21,7 @@ data class StreamFormat(
     val kbps: Int? = null,
     val sampleRateHz: Int? = null,
     val bitDepth: Int? = null,
+    val isAtmos: Boolean = false,
 ) {
     /**
      * Whether this is a bit-exact copy of the master the source holds.
@@ -33,17 +34,21 @@ data class StreamFormat(
     val isLossless: Boolean?
         get() = codec?.let { it in LOSSLESS_CODECS }
 
+    val isDolbyAtmos: Boolean
+        get() = isAtmos || codec?.lowercase(Locale.ROOT) in DOLBY_ATMOS_CODECS
+
     /** "24-bit · 192 kHz", "FLAC", "320 kbps" — whichever parts are known. */
     val summary: String
         get() = listOfNotNull(
-            codec?.uppercase(Locale.ROOT),
+            if (isDolbyAtmos) "Dolby Atmos" else codec?.uppercase(Locale.ROOT),
             bitDepth?.let { "$it-bit" },
             sampleRateHz?.let { "${"%.1f".format(Locale.ROOT, it / 1000f).removeSuffix(".0")} kHz" },
-            kbps?.takeIf { isLossless != true }?.let { "$it kbps" },
+            kbps?.takeIf { isLossless != true && !isDolbyAtmos }?.let { "$it kbps" },
         ).joinToString(" · ").ifEmpty { "Unknown format" }
 
     private companion object {
         val LOSSLESS_CODECS = setOf("flac", "alac", "wav", "aiff", "ape", "wv", "dsf", "dff")
+        val DOLBY_ATMOS_CODECS = setOf("eac3-joc", "eac3", "atmos")
     }
 }
 

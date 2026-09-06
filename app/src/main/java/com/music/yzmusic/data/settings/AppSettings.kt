@@ -24,6 +24,42 @@ enum class AudioQuality(
     LOW(64, "Low", "~64 kbps · smallest download", "29 MB/hr"),
     MEDIUM(128, "Medium", "~128 kbps · balanced", "58 MB/hr"),
     HIGH(Int.MAX_VALUE, "High", "Best available · ~171 kbps Opus", "77 MB/hr"),
+    LOSSLESS(Int.MAX_VALUE, "Lossless", "Modules + JioSaavn, bit-exact where available", "300+ MB/hr");
+
+    fun permitsLossless(): Boolean = this == LOSSLESS
+}
+
+/**
+ * PCM format requested from Media3's AudioTrack sink.
+ */
+enum class OutputPcmMode(val label: String) {
+    PCM_16("16-bit PCM"),
+    FLOAT_32("32-bit float"),
+}
+
+/**
+ * CPU and thread budget for on-device Automix DSP analysis.
+ */
+enum class AutomixPerformanceMode(val label: String, val detail: String, val threads: Int) {
+    EFFICIENT("Efficient", "1 worker thread · lowest battery usage", 1),
+    BALANCED("Balanced", "2 worker threads · default", 2),
+    PERFORMANCE("Performance", "4 worker threads · fastest background analysis", 4),
+}
+
+/**
+ * Grid or List presentation for Library and Downloaded music.
+ */
+enum class LibraryViewType(val label: String) {
+    LIST("List"),
+    GRID("Grid"),
+}
+
+/** Stable persisted ordering for each on-device music library. */
+enum class LocalMusicSort {
+    TITLE_ASC,
+    TITLE_DESC,
+    DATE_ADDED,
+    DATE_MODIFIED,
 }
 
 /**
@@ -275,6 +311,9 @@ object AppSettings {
      */
     val prioritizeSyllableSync = MutableStateFlow(false)
 
+    /** When enabled, shows lyrics fetching and Genius scraping logs in the lyrics menu/panel. */
+    val showLyricsLogs = MutableStateFlow(false)
+
     /** Disk budget for cached audio. [AudioCache][com.music.yzmusic.playback.AudioCache] evicts past it. */
     val audioCacheLimitBytes = MutableStateFlow(DEFAULT_CACHE_LIMIT_BYTES)
 
@@ -369,6 +408,28 @@ object AppSettings {
             audioQualityWifi.value
         }
 
+    val outputPcmMode = MutableStateFlow(OutputPcmMode.PCM_16)
+    val highPerformance = MutableStateFlow(false)
+    val highPerformanceMode: MutableStateFlow<Boolean> get() = highPerformance
+    val performanceRefreshRate = MutableStateFlow(DEFAULT_PERFORMANCE_REFRESH_RATE)
+    val preferUsbDac = MutableStateFlow(false)
+    val exportDownloads = MutableStateFlow(false)
+    val localMusicFolderUri = MutableStateFlow("")
+    val liquidGlass = MutableStateFlow(false)
+    val glassBlur = MutableStateFlow(DEFAULT_GLASS_BLUR)
+    val automixPerformance = MutableStateFlow(AutomixPerformanceMode.BALANCED)
+    val filterNonMusicAudio = MutableStateFlow(true)
+    val lyricsBlur = MutableStateFlow(true)
+    val libraryViewType = MutableStateFlow(LibraryViewType.LIST)
+    val downloadedMusicViewType = MutableStateFlow(LibraryViewType.LIST)
+    val localMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
+    val downloadedMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
+    val allowDolbyAtmos = MutableStateFlow(true)
+    val lastfmPrimaryArtistOnly = MutableStateFlow(false)
+    val listenbrainzPrimaryArtistOnly = MutableStateFlow(false)
+    val persistedRepeatMode = MutableStateFlow(0)
+    val persistedShuffleMode = MutableStateFlow(false)
+
     /**
      * Whether a download may start on the connection in hand.
      *
@@ -438,6 +499,7 @@ object AppSettings {
         lyricsSources.value = readLyricsSources()
         lyricsSourceOrder.value = readLyricsSourceOrder()
         prioritizeSyllableSync.value = prefs.getBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, false)
+        showLyricsLogs.value = prefs.getBoolean(KEY_SHOW_LYRICS_LOGS, false)
         audioCacheLimitBytes.value = prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES)
             .coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
         lastfmEnabled.value = prefs.getBoolean(KEY_LASTFM_ENABLED, false)
@@ -456,6 +518,36 @@ object AppSettings {
         spotifySpdcToken.value = prefs.getString(KEY_SPOTIFY_SPDC_TOKEN, "").orEmpty()
         replayGenres.value = prefs.getBoolean(KEY_REPLAY_GENRES, true)
         pinnedPlaylists.value = readPinnedPlaylists()
+        outputPcmMode.value = runCatching {
+            OutputPcmMode.valueOf(prefs.getString(KEY_OUTPUT_PCM_MODE, OutputPcmMode.PCM_16.name) ?: OutputPcmMode.PCM_16.name)
+        }.getOrDefault(OutputPcmMode.PCM_16)
+        preferUsbDac.value = prefs.getBoolean(KEY_PREFER_USB_DAC, false)
+        highPerformance.value = prefs.getBoolean(KEY_HIGH_PERFORMANCE, false)
+        performanceRefreshRate.value = normalizePerformanceRefreshRate(
+            prefs.getInt(KEY_PERFORMANCE_REFRESH_RATE, DEFAULT_PERFORMANCE_REFRESH_RATE)
+        )
+        exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, false)
+        localMusicFolderUri.value = prefs.getString(KEY_LOCAL_MUSIC_FOLDER_URI, "").orEmpty()
+        liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
+        glassBlur.value = prefs.getFloat(KEY_GLASS_BLUR, DEFAULT_GLASS_BLUR).coerceIn(0f, 1f)
+        automixPerformance.value = runCatching {
+            AutomixPerformanceMode.valueOf(prefs.getString(KEY_AUTOMIX_PERFORMANCE, AutomixPerformanceMode.BALANCED.name) ?: AutomixPerformanceMode.BALANCED.name)
+        }.getOrDefault(AutomixPerformanceMode.BALANCED)
+        filterNonMusicAudio.value = prefs.getBoolean(KEY_FILTER_NON_MUSIC_AUDIO, true)
+        lyricsBlur.value = prefs.getBoolean(KEY_LYRICS_BLUR, true)
+        libraryViewType.value = runCatching {
+            LibraryViewType.valueOf(prefs.getString(KEY_LIBRARY_VIEW_TYPE, LibraryViewType.LIST.name) ?: LibraryViewType.LIST.name)
+        }.getOrDefault(LibraryViewType.LIST)
+        downloadedMusicViewType.value = runCatching {
+            LibraryViewType.valueOf(prefs.getString(KEY_DOWNLOADED_MUSIC_VIEW_TYPE, LibraryViewType.LIST.name) ?: LibraryViewType.LIST.name)
+        }.getOrDefault(LibraryViewType.LIST)
+        localMusicSort.value = readLocalMusicSort(KEY_LOCAL_MUSIC_SORT)
+        downloadedMusicSort.value = readLocalMusicSort(KEY_DOWNLOADED_MUSIC_SORT)
+        allowDolbyAtmos.value = prefs.getBoolean(KEY_ALLOW_DOLBY_ATMOS, true)
+        lastfmPrimaryArtistOnly.value = prefs.getBoolean(KEY_LASTFM_PRIMARY_ARTIST_ONLY, false)
+        listenbrainzPrimaryArtistOnly.value = prefs.getBoolean(KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY, false)
+        persistedRepeatMode.value = prefs.getInt(KEY_REPEAT_MODE, 0)
+        persistedShuffleMode.value = prefs.getBoolean(KEY_SHUFFLE_MODE, false)
     }
 
     /**
@@ -654,12 +746,16 @@ object AppSettings {
 
     fun setConvertVideoToAudio(value: Boolean) {
         convertVideoToAudio.value = value
-        prefs.edit().putBoolean(KEY_CONVERT_VIDEO_TO_AUDIO, value).apply()
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_CONVERT_VIDEO_TO_AUDIO, value).apply()
+        }
     }
 
     fun setReduceDynamicBlur(value: Boolean) {
         reduceDynamicBlur.value = value
-        prefs.edit().putBoolean(KEY_REDUCE_BLUR, value).apply()
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_REDUCE_BLUR, value).apply()
+        }
     }
 
     fun setSyncedLyrics(value: Boolean) {
@@ -711,6 +807,11 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_PRIORITIZE_SYLLABLE_SYNC, value).apply()
     }
 
+    fun setShowLyricsLogs(value: Boolean) {
+        showLyricsLogs.value = value
+        prefs.edit().putBoolean(KEY_SHOW_LYRICS_LOGS, value).apply()
+    }
+
     /**
      * Puts the source list, its order and [prioritizeSyllableSync] back the
      * way a fresh install finds them. [syncedLyrics] itself is left alone —
@@ -720,6 +821,7 @@ object AppSettings {
         setLyricsSources(LyricsSource.entries.toSet())
         setLyricsSourceOrder(LyricsSource.entries)
         setPrioritizeSyllableSync(false)
+        setShowLyricsLogs(false)
     }
 
     fun setAnimatedCanvas(value: Boolean) {
@@ -847,6 +949,163 @@ object AppSettings {
     private fun readPinnedPlaylists(): List<String> {
         val stored = prefs.getString(KEY_PINNED_PLAYLISTS, null) ?: return emptyList()
         return stored.split(",").filter { it.isNotBlank() }
+    }
+
+    fun setOutputPcmMode(value: OutputPcmMode) {
+        outputPcmMode.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_OUTPUT_PCM_MODE, value.name).apply()
+        }
+    }
+
+    fun setPreferUsbDac(value: Boolean) {
+        preferUsbDac.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_PREFER_USB_DAC, value).apply()
+        }
+    }
+
+    fun setLiquidGlass(value: Boolean) {
+        liquidGlass.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_LIQUID_GLASS, value).apply()
+        }
+    }
+
+    fun setGlassBlur(value: Float) {
+        val clamped = value.coerceIn(0f, 1f)
+        glassBlur.value = clamped
+        if (::prefs.isInitialized) {
+            prefs.edit().putFloat(KEY_GLASS_BLUR, clamped).apply()
+        }
+    }
+
+    fun resetGlassBlur() {
+        setGlassBlur(DEFAULT_GLASS_BLUR)
+    }
+
+    fun setHighPerformance(value: Boolean) {
+        highPerformance.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_HIGH_PERFORMANCE, value).apply()
+        }
+    }
+
+    fun setHighPerformanceMode(value: Boolean) = setHighPerformance(value)
+
+    fun setPerformanceRefreshRate(value: Int) {
+        val normalized = normalizePerformanceRefreshRate(value)
+        performanceRefreshRate.value = normalized
+        if (::prefs.isInitialized) {
+            prefs.edit().putInt(KEY_PERFORMANCE_REFRESH_RATE, normalized).apply()
+        }
+    }
+
+    fun setExportDownloads(value: Boolean) {
+        exportDownloads.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_EXPORT_DOWNLOADS, value).apply()
+        }
+    }
+
+    fun setLocalMusicFolderUri(value: String) {
+        localMusicFolderUri.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_LOCAL_MUSIC_FOLDER_URI, value).apply()
+        }
+    }
+
+    fun setAutomixPerformance(value: AutomixPerformanceMode) {
+        automixPerformance.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_AUTOMIX_PERFORMANCE, value.name).apply()
+        }
+    }
+
+    fun setFilterNonMusicAudio(value: Boolean) {
+        filterNonMusicAudio.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_FILTER_NON_MUSIC_AUDIO, value).apply()
+        }
+    }
+
+    fun setLyricsBlur(value: Boolean) {
+        lyricsBlur.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_LYRICS_BLUR, value).apply()
+        }
+    }
+
+    fun setLibraryViewType(value: LibraryViewType) {
+        libraryViewType.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_LIBRARY_VIEW_TYPE, value.name).apply()
+        }
+    }
+
+    fun setDownloadedMusicViewType(value: LibraryViewType) {
+        downloadedMusicViewType.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_DOWNLOADED_MUSIC_VIEW_TYPE, value.name).apply()
+        }
+    }
+
+    fun setLocalMusicSort(value: LocalMusicSort) {
+        localMusicSort.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_LOCAL_MUSIC_SORT, value.name).apply()
+        }
+    }
+
+    fun setDownloadedMusicSort(value: LocalMusicSort) {
+        downloadedMusicSort.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_DOWNLOADED_MUSIC_SORT, value.name).apply()
+        }
+    }
+
+    private fun readLocalMusicSort(key: String): LocalMusicSort =
+        if (::prefs.isInitialized) {
+            prefs.getString(key, null)
+                ?.let { saved -> LocalMusicSort.entries.firstOrNull { it.name == saved } }
+                ?: LocalMusicSort.TITLE_ASC
+        } else {
+            LocalMusicSort.TITLE_ASC
+        }
+
+    fun setAllowDolbyAtmos(value: Boolean) {
+        allowDolbyAtmos.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_ALLOW_DOLBY_ATMOS, value).apply()
+        }
+    }
+
+    fun setLastfmPrimaryArtistOnly(value: Boolean) {
+        lastfmPrimaryArtistOnly.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_LASTFM_PRIMARY_ARTIST_ONLY, value).apply()
+        }
+    }
+
+    fun setListenbrainzPrimaryArtistOnly(value: Boolean) {
+        listenbrainzPrimaryArtistOnly.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY, value).apply()
+        }
+    }
+
+    fun setPersistedRepeatMode(value: Int) {
+        persistedRepeatMode.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putInt(KEY_REPEAT_MODE, value).apply()
+        }
+    }
+
+    fun setPersistedShuffleMode(value: Boolean) {
+        persistedShuffleMode.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putBoolean(KEY_SHUFFLE_MODE, value).apply()
+        }
     }
 
     // ── Backup ──────────────────────────────────────────────────────────────
@@ -985,6 +1244,30 @@ object AppSettings {
     private const val KEY_LISTENBRAINZ_ENABLED = "listenbrainz_enabled"
     private const val KEY_LISTENBRAINZ_TOKEN = "listenbrainz_token"
     private const val KEY_SPOTIFY_SPDC_TOKEN = "spotify_spdc_token"
+    private const val KEY_OUTPUT_PCM_MODE = "output_pcm_mode"
+    private const val KEY_PREFER_USB_DAC = "prefer_usb_dac"
+    private const val KEY_HIGH_PERFORMANCE = "high_performance"
+    private const val KEY_PERFORMANCE_REFRESH_RATE = "performance_refresh_rate"
+    private const val KEY_EXPORT_DOWNLOADS = "export_downloads"
+    private const val KEY_LOCAL_MUSIC_FOLDER_URI = "local_music_folder_uri"
+    private const val KEY_LIQUID_GLASS = "liquid_glass"
+    private const val KEY_AUTOMIX_PERFORMANCE = "automix_performance"
+    private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
+    private const val KEY_LYRICS_BLUR = "lyrics_blur"
+    private const val KEY_SHOW_LYRICS_LOGS = "show_lyrics_logs"
+    private const val KEY_LIBRARY_VIEW_TYPE = "library_view_type"
+    private const val KEY_DOWNLOADED_MUSIC_VIEW_TYPE = "downloaded_music_view_type"
+    private const val KEY_LOCAL_MUSIC_SORT = "local_music_sort"
+    private const val KEY_DOWNLOADED_MUSIC_SORT = "downloaded_music_sort"
+    private const val KEY_ALLOW_DOLBY_ATMOS = "allow_dolby_atmos"
+    private const val KEY_LASTFM_PRIMARY_ARTIST_ONLY = "lastfm_primary_artist_only"
+    private const val KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY = "listenbrainz_primary_artist_only"
+    private const val KEY_REPEAT_MODE = "repeat_mode"
+    private const val KEY_SHUFFLE_MODE = "shuffle_mode"
+
+    const val DEFAULT_PERFORMANCE_REFRESH_RATE = 120
+    fun normalizePerformanceRefreshRate(value: Int): Int =
+        value.takeIf { it in 50..240 } ?: DEFAULT_PERFORMANCE_REFRESH_RATE
 
     private const val KEY_LAST_VERSION_CODE = "last_version_code"
 }

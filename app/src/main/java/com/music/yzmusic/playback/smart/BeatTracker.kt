@@ -26,6 +26,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
+import com.music.yzmusic.data.settings.AppSettings
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.math.abs
@@ -72,7 +73,7 @@ class BeatTracker(private val context: Context) {
                 val file = SmartAudioModelManager.getModelFile(context, SmartAudioModelManager.ModelType.BEAT)
                     ?: return null
                 val options = OrtSession.SessionOptions().apply {
-                    setIntraOpNumThreads(INFERENCE_THREADS)
+                    setIntraOpNumThreads(AppSettings.automixPerformance.value.threads.coerceAtLeast(1))
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                     // ORT's arena allocator keeps every block it has ever needed, which for this
                     // graph is tens of megabytes of native heap retained for the life of the

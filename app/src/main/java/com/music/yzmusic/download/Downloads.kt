@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.download
+package com.music.yzmusic.download
 
 import android.content.Context
 import android.content.Intent
@@ -814,6 +814,40 @@ object Downloads {
                     return@coroutineScope
                 }
 
+                val manifest = route.offlineManifest
+                if (manifest != null) {
+                    val onSegment: (Long, Long) -> Unit = { written, total ->
+                        val fraction = written.toFloat() / total
+                        _active.update { it + (id to DownloadState.Running(fraction)) }
+                        DownloadSession.running(id, fraction)
+                    }
+                    val words = lyrics?.await()
+                    val savedUri = if (manifest.dash) {
+                        OfflineDash.save(
+                            context = context,
+                            id = id,
+                            url = manifest.url,
+                            headers = manifest.headers,
+                            lyrics = words,
+                            onProgress = onSegment,
+                        )
+                    } else {
+                        OfflineHls.save(
+                            context = context,
+                            id = id,
+                            url = manifest.url,
+                            headers = manifest.headers,
+                            lyrics = words,
+                            onProgress = onSegment,
+                        )
+                    }
+                    remember(song, track, savedUri)
+                    DownloadSession.done(id)
+                    clear(id)
+                    Log.d(TAG, "saved offline ${if (manifest.dash) "DASH" else "HLS"} package for $name")
+                    return@coroutineScope
+                }
+
                 val destination = DownloadStore.begin(context, name, route.mimeType)
                 pending = destination
                 destination.openStream().use { sink ->
@@ -860,7 +894,19 @@ object Downloads {
         val mimeType: String,
         /** For the log line, so a download's provenance is on the record. */
         val describe: String,
+        val offlineManifest: Manifest? = null,
         val write: suspend (OutputStream, (written: Long, total: Long) -> Unit) -> Unit,
+    )
+
+    /**
+     * A stream that arrived as an index rather than as audio, and which of the
+     * two index formats it is. Both are saved into the same offline package —
+     * see [OfflineDash] — so [dash] only decides who does the parsing.
+     */
+    internal class Manifest(
+        val url: String,
+        val headers: Map<String, String>,
+        val dash: Boolean = false,
     )
 
     /**
@@ -877,10 +923,18 @@ object Downloads {
      */
     private suspend fun routeFor(track: Song, quality: DownloadQuality): Route {
         fromSources(track, quality)?.let { (stream, storable) ->
+            val dash = OfflineDash.handles(stream.url)
+            val hls = stream.url.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
+            val packaged = hls || dash
+            // A package is only useful inside the app. When the user explicitly
+            // exports files for another player, decline it here and let the
+            // ordinary portable-file fallback resolve instead.
+            if (packaged && AppSettings.exportDownloads.value) return@let
             return Route(
-                extension = storable.extension,
-                mimeType = storable.mimeType,
+                extension = if (packaged) "m3u8" else storable.extension,
+                mimeType = if (packaged) "application/vnd.apple.mpegurl" else storable.mimeType,
                 describe = stream.format.summary,
+                offlineManifest = Manifest(stream.url, stream.headers, dash = dash).takeIf { packaged },
                 write = { sink, onProgress ->
                     Downloader.fetchDirect(stream.url, stream.headers, sink, onProgress)
                 },

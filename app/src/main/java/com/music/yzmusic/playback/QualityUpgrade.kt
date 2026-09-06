@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.playback
+package com.music.yzmusic.playback
 
 import android.net.Uri
 import android.util.Log
@@ -463,6 +463,23 @@ object QualityUpgrade {
         shelved.remove(mediaId)
         auditioning -= mediaId
         NerdStats.onLosslessRaceEnd(mediaId)
+    }
+
+    /**
+     * Re-opens the upgrade question for [mediaId] because the listener asked
+     * it — the player menu's "Upgrade quality", see
+     * [PlaybackService.upgradeQualityNow].
+     *
+     * Every set this clears holds a *no*: asked and answered, or broke on its
+     * last swap, or was reverted out of. Each of those is the right answer for
+     * the automatic path, which has no way to know anything has changed and
+     * would otherwise never look at this track again for the rest of the
+     * session. None of them survives being contradicted by the listener.
+     */
+    fun allowAgain(mediaId: String) {
+        forget(mediaId)
+        asked -= mediaId
+        refused -= mediaId
     }
 
     /**

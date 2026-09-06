@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.playback
+package com.music.yzmusic.playback
 
 import com.music.yzmusic.data.YtMusicRepository
 import com.music.yzmusic.data.model.SearchFilter
@@ -80,5 +80,7 @@ suspend fun loadAutoplayTracks(
     } catch (failure: Throwable) {
         return Result.failure(failure)
     }
-    return Result.success(resolved.map { it.copy(fromAutoplay = true) })
+    return Result.success(resolved.map {
+        it.copy(fromAutoplay = true, radioName = seedSong.radioName)
+    })
 }

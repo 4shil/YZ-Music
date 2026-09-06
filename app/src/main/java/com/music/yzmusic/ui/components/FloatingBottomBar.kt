@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.ui.components
+package com.music.yzmusic.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
@@ -69,8 +69,11 @@ data class BottomTab(
  * Tighter than the 8 it was, which shows up as a selection indicator reaching
  * closer to the edge on all four sides rather than floating in the middle of a
  * wide margin.
+ *
+ * Shared with [GlassNavBar], which is meant to measure the same as this bar
+ * rather than merely near it.
  */
-private val PILL_INSET = 6.dp
+internal val PILL_INSET = 6.dp
 
 /**
  * Each tab's own vertical padding, and the counterweight to [PILL_INSET].
@@ -82,7 +85,10 @@ private val PILL_INSET = 6.dp
  * numbers are a pair: change one and the bar's height moves unless the other
  * moves against it.
  */
-private val TAB_VERTICAL_PADDING = 9.dp
+internal val TAB_VERTICAL_PADDING = 9.dp
+
+/** The gap between a tab's glyph and its label, in both bars. */
+internal val TAB_ICON_LABEL_GAP = 2.dp
 
 /**
  * The spring the selection indicator and the tab glyphs both travel on.
@@ -137,6 +143,7 @@ fun FloatingBottomBar(
     val pillShape = RoundedCornerShape(percent = 50)
     val container = MaterialTheme.colorScheme.surface
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val useGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
     // The liquid settle is exactly the motion "reduce animation" promises to
     // drop — snapping both the indicator's travel and the glyph's pop to
@@ -187,6 +194,12 @@ fun FloatingBottomBar(
 
     LaunchedEffect(selectedIndex) { dragOffset = 0f }
 
+    val indicatorColor = if (useGlass) {
+        glassIndicatorColor().copy(alpha = 0.14f)
+    } else {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+    }
+
     Box(
         modifier = modifier
             .navigationBarsPadding()
@@ -197,6 +210,8 @@ fun FloatingBottomBar(
             .then(
                 if (reduceDynamicBlur) {
                     Modifier.background(container)
+                } else if (useGlass) {
+                    Modifier.liquidGlass(shape = pillShape)
                 } else {
                     Modifier.hazeEffect(
                         state = hazeState,
@@ -204,7 +219,7 @@ fun FloatingBottomBar(
                     )
                 },
             )
-            .border(0.5.dp, Color.White.copy(alpha = 0.10f), pillShape)
+            .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, pillShape)
             .padding(horizontal = PILL_INSET, vertical = PILL_INSET),
     ) {
         if (tabWidthPx > 0f) {
@@ -223,7 +238,7 @@ fun FloatingBottomBar(
                         scaleY = 1f - lag * STRETCH * SQUASH
                     }
                     .clip(pillShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                    .background(indicatorColor),
             )
         }
 
@@ -276,11 +291,15 @@ fun FloatingBottomBar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val glassTint = glassContentColor()
+            val adaptiveTint = if (useGlass) glassTint else null
             tabs.forEachIndexed { index, tab ->
                 BottomBarItem(
                     tab = tab,
                     selected = index == selectedIndex,
                     glassSpec = glassSpec,
+                    selectedTint = adaptiveTint,
+                    unselectedTint = adaptiveTint?.copy(alpha = 0.65f),
                     onClick = { onTabSelected(index) },
                     modifier = Modifier.weight(1f),
                 )
@@ -294,6 +313,8 @@ private fun BottomBarItem(
     tab: BottomTab,
     selected: Boolean,
     glassSpec: AnimationSpec<Float>,
+    selectedTint: Color? = null,
+    unselectedTint: Color? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -307,9 +328,9 @@ private fun BottomBarItem(
     val haptics = rememberHaptics()
     val tint by animateColorAsState(
         targetValue = if (selected) {
-            MaterialTheme.colorScheme.primary
+            selectedTint ?: MaterialTheme.colorScheme.primary
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            unselectedTint ?: MaterialTheme.colorScheme.onSurfaceVariant
         },
         animationSpec = tween(200),
         label = "tabTint",
@@ -339,7 +360,7 @@ private fun BottomBarItem(
                     scaleY = scale
                 },
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(TAB_ICON_LABEL_GAP))
         Text(
             text = tab.label,
             style = MaterialTheme.typography.labelSmall,

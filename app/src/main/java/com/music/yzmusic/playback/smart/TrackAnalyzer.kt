@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Modeled on Orchard's own TrackAnalyzer (https://github.com/SFG5453/Orchard).
  * Phase 1 was the DSP-only pass (native/analyzer/audio_analysis.cpp); Phase 2
  * adds the Beat This! ONNX model (see [BeatTracker]) and Phase 3 the
@@ -29,8 +29,13 @@ import android.net.Uri
 import android.util.Log
 import androidx.media3.common.util.UnstableApi
 import com.music.yzmusic.playback.AudioCache
+import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.AutomixPerformanceMode
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.max
 import java.util.Locale
@@ -134,10 +139,32 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
 
     private fun discardsOf(key: String): Int = discarded[key] ?: 0
 
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
+    private val executor = ThreadPoolExecutor(
+        AppSettings.automixPerformance.value.threads.coerceAtLeast(1),
+        AppSettings.automixPerformance.value.threads.coerceAtLeast(1),
+        60L,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue(),
+    ) { runnable ->
         Thread(runnable, "bitchord-smart-analysis").apply {
             isDaemon = true
             priority = Thread.NORM_PRIORITY
+        }
+    }.apply {
+        allowCoreThreadTimeOut(true)
+    }
+
+    /**
+     * Dynamically adjusts thread budget according to AutomixPerformanceMode.
+     */
+    fun applyPerformanceMode(mode: AutomixPerformanceMode) {
+        val threads = mode.threads.coerceAtLeast(1)
+        if (executor.maximumPoolSize < threads) {
+            executor.maximumPoolSize = threads
+            executor.corePoolSize = threads
+        } else {
+            executor.corePoolSize = threads
+            executor.maximumPoolSize = threads
         }
     }
 

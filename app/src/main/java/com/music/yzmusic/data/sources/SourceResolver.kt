@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.data.sources
+package com.music.yzmusic.data.sources
 
 import android.net.Uri
 import android.util.Log
@@ -7,6 +7,7 @@ import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.data.settings.AudioQuality
 import com.music.yzmusic.data.settings.DownloadQuality
+import com.music.yzmusic.playback.AudioOutputPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -891,6 +892,15 @@ object SourceResolver {
      */
     internal fun isBetter(candidate: StreamFormat, current: StreamFormat?): Boolean {
         if (current == null) return true
+        val allowAtmos = AppSettings.allowDolbyAtmos.value && DeviceCodecs.playsDolbyAtmos
+        val candidateAtmos = AudioOutputPolicy.isAtmosFormat(candidate)
+        val currentAtmos = AudioOutputPolicy.isAtmosFormat(current)
+        if (allowAtmos) {
+            if (candidateAtmos != currentAtmos) return candidateAtmos
+        } else {
+            // When Atmos is disallowed or not decodable on device, prioritize standard stereo
+            if (candidateAtmos != currentAtmos) return !candidateAtmos
+        }
         if (candidate.isLossless != current.isLossless) return candidate.isLossless == true
         return (candidate.kbps ?: 0) > (current.kbps ?: 0)
     }

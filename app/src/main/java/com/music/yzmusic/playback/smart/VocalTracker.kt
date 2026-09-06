@@ -26,6 +26,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
+import com.music.yzmusic.data.settings.AppSettings
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -104,7 +105,7 @@ class VocalTracker(private val context: Context) {
                 val file = SmartAudioModelManager.getModelFile(context, SmartAudioModelManager.ModelType.VOCAL)
                     ?: return null
                 val options = OrtSession.SessionOptions().apply {
-                    setIntraOpNumThreads(INFERENCE_THREADS)
+                    setIntraOpNumThreads(AppSettings.automixPerformance.value.threads.coerceAtLeast(1))
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                     // Same reasoning as BeatTracker: the arena retains every block it allocates for
                     // the life of the session, which a backgrounded music player cannot justify.
