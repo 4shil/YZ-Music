@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.yzmusic.data.settings.AppSettings
@@ -46,10 +47,55 @@ fun isGlassSupported(sdkInt: Int = Build.VERSION.SDK_INT): Boolean = sdkInt >= B
 
 /** Apple-matched defaults (Echo's GlassEffectConfig()), fixed rather than user sliders. */
 private const val VIBRANCY = 1f
-private const val BLUR_RADIUS_DP = 8f
-private const val LENS_HEIGHT = 0.5f
-private const val LENS_AMOUNT = 0.5f
-private const val LENS_MAX_DP = 48f
+internal const val BLUR_RADIUS_DP = 8f
+internal const val LENS_HEIGHT = 0.5f
+internal const val LENS_AMOUNT = 0.5f
+internal const val LENS_MAX_DP = 48f
+
+/**
+ * Calculates the lens refraction height in pixels, scaled by [glassRefraction] (0.0 .. 1.0).
+ * 0.0 returns 0 (no refraction); 1.0 preserves 100% baseline refraction height.
+ */
+fun calculateGlassLensHeightPx(
+    glassRefraction: Float,
+    density: Density,
+    baseHeight: Float = LENS_HEIGHT,
+    maxDp: Float = LENS_MAX_DP,
+    scale: Float = GLASS_RESOLUTION_SCALE,
+): Float {
+    val factor = glassRefraction.coerceIn(0f, 1f)
+    if (factor <= 0f) return 0f
+    return with(density) { (factor * baseHeight * maxDp).dp.toPx() } * scale
+}
+
+/**
+ * Calculates the lens refraction amount in pixels, scaled by [glassRefraction] (0.0 .. 1.0).
+ * 0.0 returns 0 (no refraction); 1.0 preserves 100% baseline refraction amount.
+ */
+fun calculateGlassLensAmountPx(
+    glassRefraction: Float,
+    density: Density,
+    baseAmount: Float = LENS_AMOUNT,
+    maxDp: Float = LENS_MAX_DP,
+    scale: Float = GLASS_RESOLUTION_SCALE,
+): Float {
+    val factor = glassRefraction.coerceIn(0f, 1f)
+    if (factor <= 0f) return 0f
+    return with(density) { (factor * baseAmount * maxDp).dp.toPx() } * scale
+}
+
+/**
+ * Maps the normalized [glassBlur] factor (0.0 .. 1.0) to a dp blur radius,
+ * preserving the baseline [BLUR_RADIUS_DP] at [AppSettings.DEFAULT_GLASS_BLUR].
+ */
+fun calculateGlassBlurRadiusDp(
+    glassBlur: Float,
+    defaultBlur: Float = AppSettings.DEFAULT_GLASS_BLUR,
+    baseRadiusDp: Float = BLUR_RADIUS_DP,
+): Float {
+    if (defaultBlur <= 0f) return baseRadiusDp
+    return (glassBlur.coerceIn(0f, 1f) / defaultBlur) * baseRadiusDp
+}
 private const val SURFACE_OPACITY = 0.4f
 
 /**
@@ -94,11 +140,14 @@ fun Modifier.liquidGlass(shape: CornerBasedShape): Modifier {
         return background(MaterialTheme.colorScheme.surface, shape)
             .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, shape)
     }
+    val glassBlur by AppSettings.glassBlur.collectAsStateWithLifecycle()
+    val glassRefraction by AppSettings.glassRefraction.collectAsStateWithLifecycle()
     val backdrop = LocalAppBackdrop.current
     val density = LocalDensity.current
-    val blurPx = with(density) { BLUR_RADIUS_DP.dp.toPx() } * GLASS_RESOLUTION_SCALE
-    val lensHeightPx = with(density) { (LENS_HEIGHT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
-    val lensAmountPx = with(density) { (LENS_AMOUNT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val blurRadiusDp = calculateGlassBlurRadiusDp(glassBlur)
+    val blurPx = with(density) { blurRadiusDp.dp.toPx() } * GLASS_RESOLUTION_SCALE
+    val lensHeightPx = calculateGlassLensHeightPx(glassRefraction, density)
+    val lensAmountPx = calculateGlassLensAmountPx(glassRefraction, density)
     val surfaceTintColor = if (MaterialTheme.colorScheme.surface.luminance() > 0.5f) {
         Color(0xFFFAFAFA)
     } else {
@@ -111,7 +160,7 @@ fun Modifier.liquidGlass(shape: CornerBasedShape): Modifier {
         effects = {
             colorControls(saturation = 1f + 0.5f * VIBRANCY)
             blur(blurPx)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && lensHeightPx > 0f && lensAmountPx > 0f) {
                 lens(
                     refractionHeight = lensHeightPx,
                     refractionAmount = lensAmountPx,

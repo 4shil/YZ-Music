@@ -1,0 +1,60 @@
+{
+  "category:music": [
+    {
+      "id": "qobuz",
+      "name": "Qobuz",
+      "author": "YZ Music",
+      "version": "1.0.0",
+      "code": 1,
+      "type": "MODULE",
+      "description": "Qobuz Lossless & Studio Hi-Res FLAC audio source with ISRC matching",
+      "tags": ["LOSSLESS", "HI-RES", "FLAC", "STUDIO"],
+      "labels": ["LOSSLESS", "HI-RES", "FLAC", "STUDIO"],
+      "size": 12400,
+      "sizeLabel": "12 KB",
+      "download": "modules/qobuz.js",
+      "logo": "https://raw.githubusercontent.com/4shil/YZ-Music/main/app/src/main/assets/LogoTransparent.svg",
+      "icon": "https://raw.githubusercontent.com/4shil/YZ-Music/main/app/src/main/assets/LogoTransparent.svg",
+      "lastUpdated": "2026-09-06",
+      "trusted": true,
+      "featured": true,
+      "nsfw": false,
+      "sources": [
+        {
+          "name": "Qobuz Catalog API",
+          "lang": "all",
+          "id": "qobuz-api",
+          "baseUrl": "https://www.qobuz.com/api.json/0.2"
+        }
+      ]
+    },
+    {
+      "id": "tidal",
+      "name": "TIDAL",
+      "author": "YZ Music",
+      "version": "1.0.0",
+      "code": 1,
+      "type": "MODULE",
+      "description": "TIDAL Lossless & Max Hi-Res FLAC audio source with ISRC matching",
+      "tags": ["LOSSLESS", "HI-RES", "FLAC", "TIDAL"],
+      "labels": ["LOSSLESS", "HI-RES", "FLAC", "TIDAL"],
+      "size": 13100,
+      "sizeLabel": "13 KB",
+      "download": "modules/tidal.js",
+      "logo": "https://raw.githubusercontent.com/4shil/YZ-Music/main/app/src/main/assets/LogoTransparent.svg",
+      "icon": "https://raw.githubusercontent.com/4shil/YZ-Music/main/app/src/main/assets/LogoTransparent.svg",
+      "lastUpdated": "2026-09-06",
+      "trusted": true,
+      "featured": true,
+      "nsfw": false,
+      "sources": [
+        {
+          "name": "TIDAL Open API",
+          "lang": "all",
+          "id": "tidal-api",
+          "baseUrl": "https://api.tidal.com/v1"
+        }
+      ]
+    }
+  ]
+}

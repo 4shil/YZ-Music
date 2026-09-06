@@ -277,6 +277,9 @@
     <string name="glass_blur">Glass Blur</string>
     <string name="glass_blur_subtitle">Controls the strength of the Liquid Glass backdrop blur</string>
     <string name="glass_blur_disabled_subtitle">Controls the strength of the Liquid Glass backdrop blur (inactive while Reduce dynamic blur is on)</string>
+    <string name="glass_refraction">Glass Refraction</string>
+    <string name="glass_refraction_subtitle">Controls the curvature and refraction distortion of Liquid Glass</string>
+    <string name="glass_refraction_disabled_subtitle">Controls the curvature and refraction distortion (inactive while Reduce dynamic blur is on)</string>
 
     <!-- Performance -->
     <string name="performance">Performance</string>

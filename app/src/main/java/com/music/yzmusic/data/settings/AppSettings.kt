@@ -417,6 +417,7 @@ object AppSettings {
     val localMusicFolderUri = MutableStateFlow("")
     val liquidGlass = MutableStateFlow(false)
     val glassBlur = MutableStateFlow(DEFAULT_GLASS_BLUR)
+    val glassRefraction = MutableStateFlow(DEFAULT_GLASS_REFRACTION)
     val automixPerformance = MutableStateFlow(AutomixPerformanceMode.BALANCED)
     val filterNonMusicAudio = MutableStateFlow(true)
     val lyricsBlur = MutableStateFlow(true)
@@ -530,6 +531,7 @@ object AppSettings {
         localMusicFolderUri.value = prefs.getString(KEY_LOCAL_MUSIC_FOLDER_URI, "").orEmpty()
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
         glassBlur.value = prefs.getFloat(KEY_GLASS_BLUR, DEFAULT_GLASS_BLUR).coerceIn(0f, 1f)
+        glassRefraction.value = prefs.getFloat(KEY_GLASS_REFRACTION, DEFAULT_GLASS_REFRACTION).coerceIn(0f, 1f)
         automixPerformance.value = runCatching {
             AutomixPerformanceMode.valueOf(prefs.getString(KEY_AUTOMIX_PERFORMANCE, AutomixPerformanceMode.BALANCED.name) ?: AutomixPerformanceMode.BALANCED.name)
         }.getOrDefault(AutomixPerformanceMode.BALANCED)
@@ -984,6 +986,18 @@ object AppSettings {
         setGlassBlur(DEFAULT_GLASS_BLUR)
     }
 
+    fun setGlassRefraction(value: Float) {
+        val clamped = value.coerceIn(0f, 1f)
+        glassRefraction.value = clamped
+        if (::prefs.isInitialized) {
+            prefs.edit().putFloat(KEY_GLASS_REFRACTION, clamped).apply()
+        }
+    }
+
+    fun resetGlassRefraction() {
+        setGlassRefraction(DEFAULT_GLASS_REFRACTION)
+    }
+
     fun setHighPerformance(value: Boolean) {
         highPerformance.value = value
         if (::prefs.isInitialized) {
@@ -1251,6 +1265,10 @@ object AppSettings {
     private const val KEY_EXPORT_DOWNLOADS = "export_downloads"
     private const val KEY_LOCAL_MUSIC_FOLDER_URI = "local_music_folder_uri"
     private const val KEY_LIQUID_GLASS = "liquid_glass"
+    const val KEY_GLASS_BLUR = "glass_blur"
+    const val DEFAULT_GLASS_BLUR = 0.6f
+    const val KEY_GLASS_REFRACTION = "glass_refraction"
+    const val DEFAULT_GLASS_REFRACTION = 1.0f
     private const val KEY_AUTOMIX_PERFORMANCE = "automix_performance"
     private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
     private const val KEY_LYRICS_BLUR = "lyrics_blur"

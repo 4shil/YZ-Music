@@ -98,6 +98,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.launch
@@ -205,6 +207,8 @@ fun SettingsScreen(
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val liquidGlass by AppSettings.liquidGlass.collectAsStateWithLifecycle()
     val liquidGlassSupported = isGlassSupported()
+    val glassBlur by AppSettings.glassBlur.collectAsStateWithLifecycle()
+    val glassRefraction by AppSettings.glassRefraction.collectAsStateWithLifecycle()
     val highPerformanceMode by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
     val performanceRefreshRate by AppSettings.performanceRefreshRate.collectAsStateWithLifecycle()
     val currentDisplay = LocalView.current.display
@@ -539,11 +543,59 @@ fun SettingsScreen(
                             onClick = null,
                         )
                     }
+                    is SmartAudioModelManager.DownloadState.Validating -> {
+                        SettingsRow(
+                            icon = Icons.Rounded.Download,
+                            title = "Neural Audio Refinement",
+                            subtitle = "Validating neural models · ${s.modelName}...",
+                            trailing = {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(22.dp),
+                                        strokeWidth = 2.5.dp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = null,
+                        )
+                    }
+                    is SmartAudioModelManager.DownloadState.Cancelled -> {
+                        SettingsRow(
+                            icon = Icons.Rounded.Download,
+                            title = "Neural Audio Refinement",
+                            subtitle = "Download cancelled · Tap to download",
+                            trailing = {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                    modifier = Modifier.clickable {
+                                        scope.launch { SmartAudioModelManager.downloadModels(ctx) }
+                                    },
+                                ) {
+                                    Text(
+                                        text = "Download",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    )
+                                }
+                            },
+                            onClick = {
+                                scope.launch { SmartAudioModelManager.downloadModels(ctx) }
+                            },
+                        )
+                    }
                     is SmartAudioModelManager.DownloadState.Error -> {
                         SettingsRow(
                             icon = Icons.Rounded.Download,
                             title = "Neural Audio Refinement",
-                            subtitle = "Download failed · Tap to retry",
+                            subtitle = "${s.message.ifBlank { "Download failed" }} · Tap to retry",
                             trailing = {
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
@@ -823,6 +875,38 @@ fun SettingsScreen(
                 },
                 onClick = { if (liquidGlassSupported) AppSettings.setLiquidGlass(!liquidGlass) },
             )
+            if (liquidGlass && liquidGlassSupported) {
+                RowDivider()
+                SliderRow(
+                    icon = Icons.Rounded.BlurOn,
+                    title = stringResource(R.string.glass_blur),
+                    subtitle = stringResource(
+                        if (reduceDynamicBlur) R.string.glass_blur_disabled_subtitle else R.string.glass_blur_subtitle
+                    ),
+                    value = "${(glassBlur * 100f).roundToInt()}%",
+                    sliderValue = glassBlur,
+                    onSliderValue = AppSettings::setGlassBlur,
+                    valueRange = 0f..1f,
+                    steps = 0,
+                    enabled = !reduceDynamicBlur,
+                    onReset = AppSettings::resetGlassBlur,
+                )
+                RowDivider()
+                SliderRow(
+                    icon = Icons.Rounded.AutoAwesome,
+                    title = stringResource(R.string.glass_refraction),
+                    subtitle = stringResource(
+                        if (reduceDynamicBlur) R.string.glass_refraction_disabled_subtitle else R.string.glass_refraction_subtitle
+                    ),
+                    value = "${(glassRefraction * 100f).roundToInt()}%",
+                    sliderValue = glassRefraction,
+                    onSliderValue = AppSettings::setGlassRefraction,
+                    valueRange = 0f..1f,
+                    steps = 0,
+                    enabled = !reduceDynamicBlur,
+                    onReset = AppSettings::resetGlassRefraction,
+                )
+            }
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.MotionPhotosOff,
@@ -2528,14 +2612,29 @@ internal fun SliderRow(
     valueRange: ClosedFloatingPointRange<Float>,
     steps: Int,
     subtitle: String? = null,
+    enabled: Boolean = true,
+    onReset: (() -> Unit)? = null,
 ) {
     val colors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
         activeTrackColor = MaterialTheme.colorScheme.primary,
         inactiveTrackColor = MaterialTheme.colorScheme.outline,
+        disabledThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        disabledActiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        disabledInactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
     )
-    Column(Modifier.padding(start = ROW_INSET, end = ROW_INSET, top = 12.dp, bottom = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    val contentAlpha = if (enabled) 1f else 0.38f
+    Column(
+        Modifier
+            .padding(start = ROW_INSET, end = ROW_INSET, top = 12.dp, bottom = 4.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$title: $value"
+            }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.alpha(contentAlpha),
+        ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
@@ -2562,6 +2661,11 @@ internal fun SliderRow(
                 text = value,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = if (onReset != null && enabled) {
+                    Modifier.clickable(onClick = onReset)
+                } else {
+                    Modifier
+                },
             )
         }
         Slider(
@@ -2569,6 +2673,7 @@ internal fun SliderRow(
             onValueChange = onSliderValue,
             valueRange = valueRange,
             steps = steps,
+            enabled = enabled,
             colors = colors,
             // Bare track: the step ticks and the end-stop dot are noise when the
             // value is already spelled out on the line above.
@@ -2576,6 +2681,7 @@ internal fun SliderRow(
                 SliderDefaults.Track(
                     sliderState = state,
                     colors = colors,
+                    enabled = enabled,
                     drawStopIndicator = null,
                     drawTick = { _, _ -> },
                 )

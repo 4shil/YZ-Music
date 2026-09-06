@@ -42,3 +42,8 @@ keystore.properties
 commit_manifest*.md
 generate_synthetic_history.js
 
+# Temporary test files & unwanted scratch
+.freebuff/
+test_beat.onnx
+*.onnx
+app/src/test/java/com/music/yzmusic/CustomModuleValidationTest.kt

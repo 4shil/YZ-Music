@@ -77,4 +77,124 @@ class LiquidGlassTest {
         assertEquals(0.dp, elevations.inlineElevation)
         assertEquals(0.dp, elevations.expandedElevation)
     }
+
+    @Test
+    fun `glassBlur setting defaults to DEFAULT_GLASS_BLUR`() {
+        AppSettings.resetGlassBlur()
+        assertEquals(AppSettings.DEFAULT_GLASS_BLUR, AppSettings.glassBlur.value, 0.0001f)
+        assertEquals(0.6f, AppSettings.DEFAULT_GLASS_BLUR, 0.0001f)
+    }
+
+    @Test
+    fun `glassBlur setting updates state flow and clamps to 0 to 1 range`() {
+        AppSettings.setGlassBlur(0.2f)
+        assertEquals(0.2f, AppSettings.glassBlur.value, 0.0001f)
+
+        AppSettings.setGlassBlur(1.0f)
+        assertEquals(1.0f, AppSettings.glassBlur.value, 0.0001f)
+
+        // Lower clamp
+        AppSettings.setGlassBlur(-0.5f)
+        assertEquals(0.0f, AppSettings.glassBlur.value, 0.0001f)
+
+        // Upper clamp
+        AppSettings.setGlassBlur(1.5f)
+        assertEquals(1.0f, AppSettings.glassBlur.value, 0.0001f)
+    }
+
+    @Test
+    fun `resetGlassBlur restores default blur value`() {
+        AppSettings.setGlassBlur(0.85f)
+        assertEquals(0.85f, AppSettings.glassBlur.value, 0.0001f)
+
+        AppSettings.resetGlassBlur()
+        assertEquals(AppSettings.DEFAULT_GLASS_BLUR, AppSettings.glassBlur.value, 0.0001f)
+    }
+
+    @Test
+    fun `calculateGlassBlurRadiusDp preserves baseline 8dp at DEFAULT_GLASS_BLUR`() {
+        val radiusAtDefault = com.music.yzmusic.ui.components.calculateGlassBlurRadiusDp(AppSettings.DEFAULT_GLASS_BLUR)
+        assertEquals(com.music.yzmusic.ui.components.BLUR_RADIUS_DP, radiusAtDefault, 0.0001f)
+        assertEquals(8.0f, radiusAtDefault, 0.0001f)
+    }
+
+    @Test
+    fun `calculateGlassBlurRadiusDp scales correctly at min and max`() {
+        val radiusAtMin = com.music.yzmusic.ui.components.calculateGlassBlurRadiusDp(0.0f)
+        assertEquals(0.0f, radiusAtMin, 0.0001f)
+
+        val radiusAtMax = com.music.yzmusic.ui.components.calculateGlassBlurRadiusDp(1.0f)
+        val expectedMax = (1.0f / 0.6f) * 8.0f
+        assertEquals(expectedMax, radiusAtMax, 0.0001f)
+    }
+
+    @Test
+    fun `glassRefraction defaults to DEFAULT_GLASS_REFRACTION (1_0f)`() {
+        AppSettings.resetGlassRefraction()
+        assertEquals(AppSettings.DEFAULT_GLASS_REFRACTION, AppSettings.glassRefraction.value, 0.0001f)
+        assertEquals(1.0f, AppSettings.DEFAULT_GLASS_REFRACTION, 0.0001f)
+    }
+
+    @Test
+    fun `glassRefraction setting updates state flow and clamps to 0 to 1 range`() {
+        AppSettings.setGlassRefraction(0.5f)
+        assertEquals(0.5f, AppSettings.glassRefraction.value, 0.0001f)
+
+        AppSettings.setGlassRefraction(0.0f)
+        assertEquals(0.0f, AppSettings.glassRefraction.value, 0.0001f)
+
+        // Lower clamp
+        AppSettings.setGlassRefraction(-0.2f)
+        assertEquals(0.0f, AppSettings.glassRefraction.value, 0.0001f)
+
+        // Upper clamp
+        AppSettings.setGlassRefraction(1.8f)
+        assertEquals(1.0f, AppSettings.glassRefraction.value, 0.0001f)
+    }
+
+    @Test
+    fun `resetGlassRefraction restores default refraction value`() {
+        AppSettings.setGlassRefraction(0.3f)
+        assertEquals(0.3f, AppSettings.glassRefraction.value, 0.0001f)
+
+        AppSettings.resetGlassRefraction()
+        assertEquals(AppSettings.DEFAULT_GLASS_REFRACTION, AppSettings.glassRefraction.value, 0.0001f)
+    }
+
+    @Test
+    fun `glassBlur and glassRefraction mutate independently`() {
+        AppSettings.resetGlassBlur()
+        AppSettings.resetGlassRefraction()
+
+        AppSettings.setGlassBlur(0.25f)
+        assertEquals(0.25f, AppSettings.glassBlur.value, 0.0001f)
+        assertEquals(1.0f, AppSettings.glassRefraction.value, 0.0001f)
+
+        AppSettings.setGlassRefraction(0.4f)
+        assertEquals(0.25f, AppSettings.glassBlur.value, 0.0001f)
+        assertEquals(0.4f, AppSettings.glassRefraction.value, 0.0001f)
+    }
+
+    @Test
+    fun `calculateGlassLensHeightPx and AmountPx scale linearly with glassRefraction`() {
+        val density = androidx.compose.ui.unit.Density(density = 2f, fontScale = 1f)
+
+        // 0% Refraction -> exactly 0px (no distortion)
+        val h0 = com.music.yzmusic.ui.components.calculateGlassLensHeightPx(0.0f, density)
+        val a0 = com.music.yzmusic.ui.components.calculateGlassLensAmountPx(0.0f, density)
+        assertEquals(0.0f, h0, 0.0001f)
+        assertEquals(0.0f, a0, 0.0001f)
+
+        // 100% Refraction -> full baseline
+        val h100 = com.music.yzmusic.ui.components.calculateGlassLensHeightPx(1.0f, density)
+        val a100 = com.music.yzmusic.ui.components.calculateGlassLensAmountPx(1.0f, density)
+        assertTrue(h100 > 0f)
+        assertTrue(a100 > 0f)
+
+        // 50% Refraction -> exactly half
+        val h50 = com.music.yzmusic.ui.components.calculateGlassLensHeightPx(0.5f, density)
+        val a50 = com.music.yzmusic.ui.components.calculateGlassLensAmountPx(0.5f, density)
+        assertEquals(h100 * 0.5f, h50, 0.0001f)
+        assertEquals(a100 * 0.5f, a50, 0.0001f)
+    }
 }

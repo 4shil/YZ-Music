@@ -1,0 +1,20 @@
+{
+  "name": "yz-music-sources",
+  "version": "1.0.0",
+  "description": "YZ Music Custom Module Index and Lossless Music Sources (Qobuz & TIDAL)",
+  "main": "index.json",
+  "scripts": {
+    "start": "npx serve ."
+  },
+  "keywords": [
+    "yz-music",
+    "qobuz",
+    "tidal",
+    "custom-modules",
+    "lossless",
+    "hi-res",
+    "flac"
+  ],
+  "author": "YZ Music",
+  "license": "MIT"
+}

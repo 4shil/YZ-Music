@@ -9,14 +9,18 @@
 
 package com.music.yzmusic.ui.components
 
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
@@ -40,17 +44,27 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import coil3.compose.AsyncImage
 import com.music.yzmusic.R
 import com.music.yzmusic.data.model.ROW_ART_PX
@@ -92,6 +106,7 @@ fun GlassNavBar(
     isLoading: Boolean,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onPrevious: () -> Unit = {},
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -139,6 +154,7 @@ fun GlassNavBar(
                     contentColor = contentColor,
                     onPlayPause = onPlayPause,
                     onNext = onNext,
+                    onPrevious = onPrevious,
                     onExpand = onExpand,
                     modifier = accessoryModifier.then(glassSurface()),
                 )
@@ -154,6 +170,7 @@ fun GlassNavBar(
                     contentColor = contentColor,
                     onPlayPause = onPlayPause,
                     onNext = onNext,
+                    onPrevious = onPrevious,
                     onExpand = onExpand,
                     modifier = accessoryModifier.fillMaxWidth().then(glassSurface()),
                 )
@@ -264,6 +281,7 @@ private fun GlassNowPlaying(
     contentColor: Color,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onPrevious: () -> Unit = {},
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -275,6 +293,137 @@ private fun GlassNowPlaying(
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "accessoryPressScale",
     )
+    val density = LocalDensity.current
+    val touchSlop = LocalViewConfiguration.current.touchSlop
+    val minDisplacement = remember(density) { with(density) { 48.dp.toPx() } }
+    val minVelocity = remember(density) { with(density) { 500.dp.toPx() } }
+    val maxDragPx = remember(density) { with(density) { 120.dp.toPx() } }
+    val coroutineScope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    var lastActionTime by remember { mutableLongStateOf(0L) }
+    val classifier = remember(touchSlop, minDisplacement, minVelocity) {
+        MiniPlayerGestureClassifier(
+            touchSlopPx = touchSlop,
+            minDisplacementPx = minDisplacement,
+            minVelocityPx = minVelocity,
+        )
+    }
+
+    LaunchedEffect(song.videoId) {
+        if (offsetX.value != 0f) {
+            offsetX.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMedium,
+                ),
+            )
+        }
+    }
+
+    val gestureModifier = if (!isInline) {
+        Modifier.pointerInput(song.videoId) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val velocityTracker = VelocityTracker()
+                velocityTracker.addPosition(down.uptimeMillis, down.position)
+                var totalX = 0f
+                var totalY = 0f
+                classifier.reset()
+
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) {
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                        break
+                    }
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                    val delta = change.positionChange()
+                    totalX += delta.x
+                    totalY += delta.y
+
+                    val lock = classifier.onMove(totalX, totalY)
+                    if (lock == DirectionLock.HORIZONTAL) {
+                        change.consume()
+                        coroutineScope.launch {
+                            offsetX.snapTo((totalX * 0.65f).coerceIn(-maxDragPx, maxDragPx))
+                        }
+                    }
+                }
+
+                val velocity = velocityTracker.calculateVelocity()
+                val action = classifier.onRelease(totalX, totalY, velocity.x, velocity.y)
+                val now = SystemClock.uptimeMillis()
+                val canAct = (now - lastActionTime) >= 300L
+
+                when (action) {
+                    MiniPlayerAction.NEXT -> {
+                        if (canAct) {
+                            lastActionTime = now
+                            haptics.play(Haptic.SkipNext)
+                            onNext()
+                        }
+                        coroutineScope.launch {
+                            offsetX.animateTo(
+                                targetValue = 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMedium,
+                                ),
+                            )
+                        }
+                    }
+                    MiniPlayerAction.PREVIOUS -> {
+                        if (canAct) {
+                            lastActionTime = now
+                            haptics.play(Haptic.SkipPrevious)
+                            onPrevious()
+                        }
+                        coroutineScope.launch {
+                            offsetX.animateTo(
+                                targetValue = 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMedium,
+                                ),
+                            )
+                        }
+                    }
+                    MiniPlayerAction.EXPAND -> {
+                        if (canAct) {
+                            lastActionTime = now
+                            onExpand()
+                        }
+                        if (offsetX.value != 0f) {
+                            coroutineScope.launch {
+                                offsetX.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                        stiffness = Spring.StiffnessMedium,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                    MiniPlayerAction.NONE -> {
+                        if (offsetX.value != 0f) {
+                            coroutineScope.launch {
+                                offsetX.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                        stiffness = Spring.StiffnessMedium,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else Modifier
 
     val artSize = if (isInline) 32.dp else 40.dp
     val glyphSlot = if (isInline) 32.dp else 40.dp
@@ -300,6 +449,13 @@ private fun GlassNowPlaying(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
+                .graphicsLayer {
+                    translationX = offsetX.value
+                    if (!isInline) {
+                        alpha = (1f - (kotlin.math.abs(offsetX.value) / maxDragPx) * 0.25f).coerceIn(0.75f, 1f)
+                    }
+                }
+                .then(gestureModifier)
                 .clickable(
                     interactionSource = pressSource,
                     indication = null,

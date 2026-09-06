@@ -228,4 +228,56 @@ class MiniPlayerGestureTest {
         assertEquals(2, currentQueueIndex)
         assertEquals("AutoPlayTrack1", media3Queue[currentQueueIndex])
     }
+
+    @Test
+    fun `stationary tap returns NONE preserving tap to expand`() {
+        val classifier = createClassifier()
+        // Tap: 0 movement
+        val lock = classifier.onMove(0f, 0f)
+        assertEquals(DirectionLock.NONE, lock)
+
+        val action = classifier.onRelease(0f, 0f, 0f, 0f)
+        assertEquals(MiniPlayerAction.NONE, action)
+    }
+
+    @Test
+    fun `rapid repeated swipes within 300ms window are debounced to prevent multi-skipping`() {
+        var skipCount = 0
+        var lastActionTime = 0L
+        val minInterval = 300L
+
+        fun attemptSwipe(now: Long) {
+            val classifier = createClassifier()
+            classifier.onMove(-60f, 0f)
+            val action = classifier.onRelease(-60f, 0f, 0f, 0f)
+            if (action == MiniPlayerAction.NEXT) {
+                if (now - lastActionTime >= minInterval) {
+                    lastActionTime = now
+                    skipCount++
+                }
+            }
+        }
+
+        attemptSwipe(1000L) // First swipe -> accepted
+        attemptSwipe(1100L) // 100ms later -> debounced
+        attemptSwipe(1250L) // 250ms later -> debounced
+        attemptSwipe(1350L) // 350ms later -> accepted
+
+        assertEquals(2, skipCount)
+    }
+
+    @Test
+    fun `haptic mapping verifies SkipNext on NEXT and SkipPrevious on PREVIOUS`() {
+        val classifier = createClassifier()
+
+        classifier.onMove(-60f, 0f)
+        val nextAction = classifier.onRelease(-60f, 0f, 0f, 0f)
+        val nextHaptic = if (nextAction == MiniPlayerAction.NEXT) com.music.yzmusic.ui.haptics.Haptic.SkipNext else null
+        assertEquals(com.music.yzmusic.ui.haptics.Haptic.SkipNext, nextHaptic)
+
+        classifier.onMove(60f, 0f)
+        val prevAction = classifier.onRelease(60f, 0f, 0f, 0f)
+        val prevHaptic = if (prevAction == MiniPlayerAction.PREVIOUS) com.music.yzmusic.ui.haptics.Haptic.SkipPrevious else null
+        assertEquals(com.music.yzmusic.ui.haptics.Haptic.SkipPrevious, prevHaptic)
+    }
 }

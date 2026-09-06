@@ -160,7 +160,13 @@ fun MiniPlayer(
 
     LaunchedEffect(song.videoId) {
         if (offsetX.value != 0f) {
-            offsetX.snapTo(0f)
+            offsetX.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMedium,
+                ),
+            )
         }
     }
 
@@ -219,7 +225,7 @@ fun MiniPlayer(
                 MiniPlayerAction.PREVIOUS -> {
                     if (canAct) {
                         lastActionTime = now
-                        haptics.play(Haptic.SkipNext)
+                        haptics.play(Haptic.SkipPrevious)
                         onPrevious()
                     }
                     coroutineScope.launch {
@@ -306,6 +312,7 @@ fun MiniPlayer(
                 .fillMaxWidth()
                 .graphicsLayer {
                     translationX = offsetX.value
+                    alpha = (1f - (kotlin.math.abs(offsetX.value) / maxDragPx) * 0.25f).coerceIn(0.75f, 1f)
                 }
                 .padding(
                     horizontal = ROW_PADDING_HORIZONTAL,
