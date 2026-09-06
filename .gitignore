@@ -26,8 +26,11 @@ captures/
 
 # Log/OS files
 *.log
+*.tmp
+*.bak
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Release signing — never commit the key or its passwords
 keystore.properties
