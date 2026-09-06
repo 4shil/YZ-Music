@@ -250,7 +250,8 @@ fun MediaItem.toSong() = Song(
     radioName = mediaMetadata.extras?.getString(EXTRA_RADIO_NAME)
         ?: mediaMetadata.extras?.getString("bitchord.radioName"),
     setVideoId = mediaMetadata.extras?.getString(EXTRA_QUEUE_ITEM_ID)
-        ?: mediaMetadata.extras?.getString("bitchord.queueItemId"),
+        ?: mediaMetadata.extras?.getString("bitchord.queueItemId")
+        ?: mediaId.takeIf { it.isNotBlank() },
     localUri = mediaMetadata.extras?.getString(EXTRA_LOCAL_URI)
         ?: mediaMetadata.extras?.getString("bitchord.localUri"),
     localPath = mediaMetadata.extras?.getString(EXTRA_LOCAL_PATH)

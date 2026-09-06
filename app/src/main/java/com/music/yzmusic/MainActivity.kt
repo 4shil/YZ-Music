@@ -1365,7 +1365,7 @@ private fun YZMusicApp(
             onRemoveFromQueue = { controller?.removeMediaItem(it) },
             onMoveInQueue = { from, to ->
                 val c = controller
-                if (c != null && from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount && from != to) {
+                if (c != null && c.mediaItemCount > 1 && from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount && from != to) {
                     c.moveMediaItem(from, to)
                 }
             },

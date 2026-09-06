@@ -3380,11 +3380,19 @@ private fun InlineQueue(
     val dragState = rememberQueueDragState(
         listState = listState,
         lazyRange = 0 until totalLazyRows,
+        queueSize = queue.size,
         toQueueIndex = { lazyIndex ->
             lazyToQueueIndex(lazyIndex, autoplayStart, headingShown)
         },
         onMove = onMove,
     )
+
+    // Reset drag state when queue is disposed/unmounted
+    DisposableEffect(dragState) {
+        onDispose {
+            dragState.onDragEnd()
+        }
+    }
 
     // Open on what's playing, not at the top of a long queue.
     LaunchedEffect(currentIndex) {
@@ -3567,30 +3575,24 @@ internal fun queueToLazyIndex(queueIndex: Int, autoplayStart: Int, headingShown:
 
 /**
  * A key per row, stable across a reorder and unique even when the same song
- * appears twice. Uses [Song.playlistSetVideoId] if present, disambiguating
+ * appears twice. Uses [Song.setVideoId] if present, disambiguating
  * any collisions so LazyColumn never throws on duplicate keys.
  */
 @Composable
 private fun rememberQueueKeys(queue: List<Song>): List<String> {
-    val keyCache = remember { java.util.IdentityHashMap<Song, String>() }
     return remember(queue) {
         val used = HashSet<String>()
-        queue.mapIndexed { index, song ->
-            val existing = keyCache[song]
-            if (existing != null && used.add(existing)) {
-                existing
-            } else {
-                val candidate = song.setVideoId?.takeIf { it.isNotBlank() }
-                    ?: "${song.videoId}#${System.identityHashCode(song)}"
-                var key = candidate
-                var seq = 1
-                while (!used.add(key)) {
-                    key = "${candidate}_$seq"
-                    seq++
-                }
-                keyCache[song] = key
-                key
+        queue.mapIndexed { _, song ->
+            val baseId = song.setVideoId?.takeIf { it.isNotBlank() }
+                ?: song.videoId.takeIf { it.isNotBlank() }
+                ?: "song"
+            var key = baseId
+            var seq = 1
+            while (!used.add(key)) {
+                key = "${baseId}_$seq"
+                seq++
             }
+            key
         }
     }
 }
@@ -3660,11 +3662,13 @@ internal fun edgeScrollSpeed(
 private fun rememberQueueDragState(
     listState: LazyListState,
     lazyRange: IntRange,
+    queueSize: Int = 0,
     toQueueIndex: (Int) -> Int = { it },
     onMove: (Int, Int) -> Unit,
 ): QueueDragState {
     val state = remember(listState) { QueueDragState(listState) }
     state.lazyRange = lazyRange
+    state.queueSize = queueSize
     state.toQueueIndex = toQueueIndex
     state.onMove = onMove
     with(LocalDensity.current) {
@@ -3692,6 +3696,7 @@ private fun rememberQueueDragState(
 
 private class QueueDragState(private val listState: LazyListState) {
     var lazyRange: IntRange = IntRange.EMPTY
+    var queueSize: Int = 0
     var toQueueIndex: (Int) -> Int = { it }
     var onMove: (Int, Int) -> Unit = { _, _ -> }
 
@@ -3715,13 +3720,17 @@ private class QueueDragState(private val listState: LazyListState) {
         private set
 
     private var heldCenter: Float = Float.NaN
-    private var awaiting: Int? = null
+    private var pendingTargetKey: Any? = null
+    private var pendingFromIndex: Int = -1
+    private var pendingMoveTime: Long = 0L
 
     fun onDragStart(key: Any) {
         draggedKey = key
         heldCenter = Float.NaN
         renderOffset = 0f
-        awaiting = null
+        pendingTargetKey = null
+        pendingFromIndex = -1
+        pendingMoveTime = 0L
         setAutoScroll(0f)
     }
 
@@ -3733,7 +3742,9 @@ private class QueueDragState(private val listState: LazyListState) {
         draggedKey = null
         heldCenter = Float.NaN
         renderOffset = 0f
-        awaiting = null
+        pendingTargetKey = null
+        pendingFromIndex = -1
+        pendingMoveTime = 0L
         setAutoScroll(0f)
     }
 
@@ -3753,16 +3764,25 @@ private class QueueDragState(private val listState: LazyListState) {
         aimAutoScroll(top, dragged)
         renderOffset = insideViewport(top, dragged.size) - dragged.offset
 
-        awaiting?.let {
-            if (dragged.index != it) return
-            awaiting = null
+        pendingTargetKey?.let { targetKey ->
+            val elapsed = System.currentTimeMillis() - pendingMoveTime
+            val moved = dragged.index != pendingFromIndex
+            val targetItem = items.find { it.key == targetKey }
+            val completed = moved || targetItem == null || elapsed > 300L
+            if (!completed) return
+            pendingTargetKey = null
+            pendingFromIndex = -1
         }
+
         val target = swapTarget(items, dragged) ?: return
         val fromQueue = toQueueIndex(dragged.index)
         val toQueue = toQueueIndex(target.index)
-        if (fromQueue != toQueue) {
+        val maxIndex = queueSize - 1
+        if (maxIndex > 0 && fromQueue in 0..maxIndex && toQueue in 0..maxIndex && fromQueue != toQueue) {
             onMove(fromQueue, toQueue)
-            awaiting = target.index
+            pendingTargetKey = target.key
+            pendingFromIndex = dragged.index
+            pendingMoveTime = System.currentTimeMillis()
         }
     }
 
@@ -3863,6 +3883,9 @@ private fun InlineQueueRow(
             onDispose { endDrag() }
         }
     }
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -3885,12 +3908,12 @@ private fun InlineQueueRow(
                     .offset(x = (-4).dp)
                     .pointerInput(Unit) {
                         detectDragGestures(
-                            onDragStart = { onDragStart() },
-                            onDragEnd = { onDragEnd() },
-                            onDragCancel = { onDragEnd() },
+                            onDragStart = { currentOnDragStart() },
+                            onDragEnd = { currentOnDragEnd() },
+                            onDragCancel = { currentOnDragEnd() },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                onDrag(dragAmount.y)
+                                currentOnDrag(dragAmount.y)
                             },
                         )
                     },

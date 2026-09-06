@@ -3950,6 +3950,21 @@ class PlaybackService : MediaLibraryService() {
             crossfade.onSkipRequested()
             wrappedPlayer.seekToNext()
         }
+
+        override fun moveMediaItem(fromIndex: Int, newIndex: Int) {
+            val count = wrappedPlayer.mediaItemCount
+            if (count <= 1) return
+            if (fromIndex !in 0 until count || newIndex !in 0 until count || fromIndex == newIndex) return
+            wrappedPlayer.moveMediaItem(fromIndex, newIndex)
+        }
+
+        override fun moveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int) {
+            val count = wrappedPlayer.mediaItemCount
+            if (count <= 1) return
+            if (fromIndex !in 0 until count || toIndex !in fromIndex..count || newIndex !in 0..count) return
+            if (fromIndex == toIndex) return
+            wrappedPlayer.moveMediaItems(fromIndex, toIndex, newIndex)
+        }
     }
 
     companion object {
