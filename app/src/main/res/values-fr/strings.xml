@@ -1,4 +1,4 @@
-﻿<resources>
+<resources>
     <string name="app_name">YZ Music</string>
     <string name="playback_channel_name">Lecture en cours</string>
     <string name="download_channel_name">Téléchargements</string>
@@ -177,7 +177,7 @@
     <string name="blocking">Bloquant</string>
     <string name="crossfade">Fondu enchaîné</string>
     <string name="crossfade_subtitle">Fond une piste dans la suivante</string>
-    <string name="automix">Automix [BÊTA]</string>
+    <string name="automix">Automix</string>
     <string name="skip_silence">Ignorer les silences</string>
     <string name="skip_silence_subtitle">Coupe les silences de plus d\'une seconde</string>
     <string name="equalizer">Égaliseur</string>

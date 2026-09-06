@@ -1,4 +1,4 @@
-﻿<resources>
+<resources>
     <string name="app_name">YZ Music</string>
     <string name="playback_channel_name">Sedang diputar</string>
     <string name="download_channel_name">Unduhan</string>
@@ -173,7 +173,7 @@
     <string name="blocking">Memblokir</string>
     <string name="crossfade">Crossfade</string>
     <string name="crossfade_subtitle">Memadukan satu trek ke trek berikutnya</string>
-    <string name="automix">Automix [BETA]</string>
+    <string name="automix">Automix</string>
     <string name="skip_silence">Lewati keheningan</string>
     <string name="skip_silence_subtitle">Memotong jeda lebih dari satu detik</string>
     <string name="equalizer">Equalizer</string>

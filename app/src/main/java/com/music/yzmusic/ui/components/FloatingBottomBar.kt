@@ -195,7 +195,7 @@ fun FloatingBottomBar(
     LaunchedEffect(selectedIndex) { dragOffset = 0f }
 
     val indicatorColor = if (useGlass) {
-        glassIndicatorColor().copy(alpha = 0.14f)
+        Color.Transparent
     } else {
         MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
     }

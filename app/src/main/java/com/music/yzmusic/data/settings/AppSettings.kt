@@ -5,8 +5,10 @@ import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.Build
 import com.music.yzmusic.BuildConfig
 import com.music.yzmusic.data.lyrics.LyricsSource
+import com.music.yzmusic.ui.components.isGlassSupported
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -180,7 +182,7 @@ object AppSettings {
      *
      * See [com.music.yzmusic.playback.smart.TransitionPlanner].
      */
-    val smartFadeEnabled = MutableStateFlow(false)
+    val smartFadeEnabled = MutableStateFlow(true)
     val skipSilence = MutableStateFlow(false)
 
     /**
@@ -415,7 +417,7 @@ object AppSettings {
     val preferUsbDac = MutableStateFlow(false)
     val exportDownloads = MutableStateFlow(false)
     val localMusicFolderUri = MutableStateFlow("")
-    val liquidGlass = MutableStateFlow(false)
+    val liquidGlass = MutableStateFlow(isGlassSupported())
     val glassBlur = MutableStateFlow(DEFAULT_GLASS_BLUR)
     val glassRefraction = MutableStateFlow(DEFAULT_GLASS_REFRACTION)
     val automixPerformance = MutableStateFlow(AutomixPerformanceMode.BALANCED)
@@ -464,7 +466,12 @@ object AppSettings {
         readAll()
     }
 
-    private fun readAll() {
+    internal fun initForTest(preferences: SharedPreferences, sdkInt: Int = Build.VERSION.SDK_INT) {
+        prefs = preferences
+        readAll(sdkInt)
+    }
+
+    private fun readAll(sdkInt: Int = Build.VERSION.SDK_INT) {
         migrateSingleQuality()
         audioQualityWifi.value = readQuality(KEY_QUALITY_WIFI)
         audioQualityCellular.value = readQuality(KEY_QUALITY_CELLULAR)
@@ -472,7 +479,7 @@ object AppSettings {
         downloadQuality.value = readDownloadQuality()
         wifiOnlyDownloads.value = prefs.getBoolean(KEY_WIFI_ONLY_DOWNLOADS, true)
         crossfadeSeconds.value = prefs.getInt(KEY_CROSSFADE, 0)
-        smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, false)
+        smartFadeEnabled.value = prefs.getBoolean(KEY_SMART_FADE, true)
         skipSilence.value = prefs.getBoolean(KEY_SKIP_SILENCE, false)
         seekDurationSeconds.value = when (val saved = prefs.getInt(KEY_SEEK_DURATION_SECONDS, 10)) {
             5, 10, 25 -> saved
@@ -529,7 +536,11 @@ object AppSettings {
         )
         exportDownloads.value = prefs.getBoolean(KEY_EXPORT_DOWNLOADS, false)
         localMusicFolderUri.value = prefs.getString(KEY_LOCAL_MUSIC_FOLDER_URI, "").orEmpty()
-        liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
+        liquidGlass.value = if (prefs.contains(KEY_LIQUID_GLASS)) {
+            prefs.getBoolean(KEY_LIQUID_GLASS, false)
+        } else {
+            isGlassSupported(sdkInt)
+        }
         glassBlur.value = prefs.getFloat(KEY_GLASS_BLUR, DEFAULT_GLASS_BLUR).coerceIn(0f, 1f)
         glassRefraction.value = prefs.getFloat(KEY_GLASS_REFRACTION, DEFAULT_GLASS_REFRACTION).coerceIn(0f, 1f)
         automixPerformance.value = runCatching {

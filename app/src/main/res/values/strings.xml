@@ -184,7 +184,7 @@
     <string name="blocking">Blocking</string>
     <string name="crossfade">Crossfade</string>
     <string name="crossfade_subtitle">Blends one track into the next</string>
-    <string name="automix">Automix [BETA]</string>
+    <string name="automix">Automix</string>
     <string name="skip_silence">Skip silence</string>
     <string name="skip_silence_subtitle">Trim gaps longer than a second</string>
     <string name="equalizer">Equalizer</string>

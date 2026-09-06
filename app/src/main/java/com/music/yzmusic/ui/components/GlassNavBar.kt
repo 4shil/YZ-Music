@@ -62,6 +62,7 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -178,9 +179,11 @@ fun GlassNavBar(
         },
         // Transparent: the glass surface underneath is the background, and a
         // colour over it would be the thing you saw instead of the backdrop.
+        // Also indicatorColor is transparent so no colored selection pill is drawn.
         colors = FloatingTabBarDefaults.colors(
             backgroundColor = Color.Transparent,
             accessoryBackgroundColor = Color.Transparent,
+            indicatorColor = Color.Transparent,
         ),
         // Flat, because the glass is not. Every surface here already draws its
         // own [Shadow.Default] as part of the backdrop pass, and the library's
@@ -243,6 +246,7 @@ fun GlassNavBar(
                         Text(
                             text = tab.label,
                             style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                             color = tint,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

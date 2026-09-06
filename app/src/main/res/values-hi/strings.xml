@@ -1,4 +1,4 @@
-﻿<resources>
+<resources>
     <string name="app_name">YZ Music</string>
     <string name="playback_channel_name">अभी चल रहा है</string>
     <string name="download_channel_name">डाउनलोड</string>
@@ -177,7 +177,7 @@
     <string name="blocking">रोक रहा है</string>
     <string name="crossfade">क्रॉसफ़ेड</string>
     <string name="crossfade_subtitle">एक ट्रैक को अगले में मिलाता है</string>
-    <string name="automix">ऑटोमिक्स [BETA]</string>
+    <string name="automix">ऑटोमिक्स</string>
     <string name="skip_silence">खामोशी छोड़ें</string>
     <string name="skip_silence_subtitle">एक सेकंड से लंबे गैप को काटता है</string>
     <string name="equalizer">इक्वलाइज़र</string>

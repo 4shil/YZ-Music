@@ -1,4 +1,4 @@
-﻿<resources>
+<resources>
     <string name="app_name">YZ Music</string>
     <string name="playback_channel_name">再生中</string>
     <string name="download_channel_name">ダウンロード</string>
@@ -173,7 +173,7 @@
     <string name="blocking">ブロック中</string>
     <string name="crossfade">クロスフェード</string>
     <string name="crossfade_subtitle">1曲を次の曲へなめらかにつなげます</string>
-    <string name="automix">オートミックス [BETA]</string>
+    <string name="automix">オートミックス</string>
     <string name="skip_silence">無音をスキップ</string>
     <string name="skip_silence_subtitle">1秒より長い無音部分をカットします</string>
     <string name="equalizer">イコライザー</string>
