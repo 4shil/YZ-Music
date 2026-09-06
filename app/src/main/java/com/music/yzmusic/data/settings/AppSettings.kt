@@ -49,6 +49,23 @@ enum class AutomixPerformanceMode(val label: String, val detail: String, val thr
 }
 
 /**
+ * Render resolution scale for the Liquid Glass backdrop capture.
+ *
+ * [scale] is the resolution fraction the backdrop layer is captured and processed at.
+ * Downscaling significantly reduces the fillrate cost of Android's RenderEffect blur
+ * and the AGSL lens shader, and the blur hides the subsequent upscaling.
+ */
+enum class BackdropQuality(
+    val scale: Float,
+    val label: String,
+    val detail: String,
+) {
+    LOW(0.33f, "Low", "0.33x resolution · lowest GPU usage"),
+    MEDIUM(0.5f, "Medium", "0.5x resolution · balanced"),
+    HIGH(1.0f, "High", "1.0x resolution · maximum sharpness");
+}
+
+/**
  * Grid or List presentation for Library and Downloaded music.
  */
 enum class LibraryViewType(val label: String) {
@@ -420,6 +437,7 @@ object AppSettings {
     val liquidGlass = MutableStateFlow(isGlassSupported())
     val glassBlur = MutableStateFlow(DEFAULT_GLASS_BLUR)
     val glassRefraction = MutableStateFlow(DEFAULT_GLASS_REFRACTION)
+    val backdropQuality = MutableStateFlow(BackdropQuality.MEDIUM)
     val automixPerformance = MutableStateFlow(AutomixPerformanceMode.BALANCED)
     val filterNonMusicAudio = MutableStateFlow(true)
     val lyricsBlur = MutableStateFlow(true)
@@ -543,6 +561,13 @@ object AppSettings {
         }
         glassBlur.value = prefs.getFloat(KEY_GLASS_BLUR, DEFAULT_GLASS_BLUR).coerceIn(0f, 1f)
         glassRefraction.value = prefs.getFloat(KEY_GLASS_REFRACTION, DEFAULT_GLASS_REFRACTION).coerceIn(0f, 1f)
+        backdropQuality.value = if (prefs.contains(KEY_BACKDROP_QUALITY)) {
+            runCatching {
+                BackdropQuality.valueOf(prefs.getString(KEY_BACKDROP_QUALITY, DEFAULT_BACKDROP_QUALITY.name) ?: DEFAULT_BACKDROP_QUALITY.name)
+            }.getOrDefault(DEFAULT_BACKDROP_QUALITY)
+        } else {
+            DEFAULT_BACKDROP_QUALITY
+        }
         automixPerformance.value = runCatching {
             AutomixPerformanceMode.valueOf(prefs.getString(KEY_AUTOMIX_PERFORMANCE, AutomixPerformanceMode.BALANCED.name) ?: AutomixPerformanceMode.BALANCED.name)
         }.getOrDefault(AutomixPerformanceMode.BALANCED)
@@ -1009,6 +1034,17 @@ object AppSettings {
         setGlassRefraction(DEFAULT_GLASS_REFRACTION)
     }
 
+    fun setBackdropQuality(value: BackdropQuality) {
+        backdropQuality.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_BACKDROP_QUALITY, value.name).apply()
+        }
+    }
+
+    fun resetBackdropQuality() {
+        setBackdropQuality(DEFAULT_BACKDROP_QUALITY)
+    }
+
     fun setHighPerformance(value: Boolean) {
         highPerformance.value = value
         if (::prefs.isInitialized) {
@@ -1280,6 +1316,8 @@ object AppSettings {
     const val DEFAULT_GLASS_BLUR = 0.6f
     const val KEY_GLASS_REFRACTION = "glass_refraction"
     const val DEFAULT_GLASS_REFRACTION = 1.0f
+    const val KEY_BACKDROP_QUALITY = "backdrop_quality"
+    val DEFAULT_BACKDROP_QUALITY = BackdropQuality.MEDIUM
     private const val KEY_AUTOMIX_PERFORMANCE = "automix_performance"
     private const val KEY_FILTER_NON_MUSIC_AUDIO = "filter_non_music_audio"
     private const val KEY_LYRICS_BLUR = "lyrics_blur"

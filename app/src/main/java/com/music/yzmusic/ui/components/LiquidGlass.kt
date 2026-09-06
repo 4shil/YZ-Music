@@ -99,9 +99,9 @@ fun calculateGlassBlurRadiusDp(
 private const val SURFACE_OPACITY = 0.4f
 
 /**
- * Resolution fraction the glass surface records and processes its backdrop at.
+ * Resolution fraction the glass surface records and processes its backdrop at (default/fallback).
  */
-private const val GLASS_RESOLUTION_SCALE = 0.33f
+internal const val GLASS_RESOLUTION_SCALE = 0.33f
 
 /**
  * The hairline along a bar's edge, and what stands in for the glass rim
@@ -142,12 +142,14 @@ fun Modifier.liquidGlass(shape: CornerBasedShape): Modifier {
     }
     val glassBlur by AppSettings.glassBlur.collectAsStateWithLifecycle()
     val glassRefraction by AppSettings.glassRefraction.collectAsStateWithLifecycle()
+    val backdropQuality by AppSettings.backdropQuality.collectAsStateWithLifecycle()
+    val backdropScale = backdropQuality.scale
     val backdrop = LocalAppBackdrop.current
     val density = LocalDensity.current
     val blurRadiusDp = calculateGlassBlurRadiusDp(glassBlur)
-    val blurPx = with(density) { blurRadiusDp.dp.toPx() } * GLASS_RESOLUTION_SCALE
-    val lensHeightPx = calculateGlassLensHeightPx(glassRefraction, density)
-    val lensAmountPx = calculateGlassLensAmountPx(glassRefraction, density)
+    val blurPx = with(density) { blurRadiusDp.dp.toPx() } * backdropScale
+    val lensHeightPx = calculateGlassLensHeightPx(glassRefraction, density, scale = backdropScale)
+    val lensAmountPx = calculateGlassLensAmountPx(glassRefraction, density, scale = backdropScale)
     val surfaceTintColor = if (MaterialTheme.colorScheme.surface.luminance() > 0.5f) {
         Color(0xFFFAFAFA)
     } else {
@@ -174,6 +176,6 @@ fun Modifier.liquidGlass(shape: CornerBasedShape): Modifier {
         onDrawSurface = {
             drawRect(color = surfaceTintColor.copy(alpha = SURFACE_OPACITY), size = size)
         },
-        backdropScale = GLASS_RESOLUTION_SCALE,
+        backdropScale = backdropScale,
     )
 }

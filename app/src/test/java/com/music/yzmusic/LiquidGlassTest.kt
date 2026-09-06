@@ -2,6 +2,7 @@ package com.music.yzmusic
 
 import android.os.Build
 import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.BackdropQuality
 import com.music.yzmusic.ui.components.LocalAppBackdrop
 import com.music.yzmusic.ui.components.LocalLiquidGlassEnabled
 import com.music.yzmusic.ui.components.backdrop.backdrops.emptyBackdrop
@@ -196,5 +197,88 @@ class LiquidGlassTest {
         val a50 = com.music.yzmusic.ui.components.calculateGlassLensAmountPx(0.5f, density)
         assertEquals(h100 * 0.5f, h50, 0.0001f)
         assertEquals(a100 * 0.5f, a50, 0.0001f)
+    }
+
+    @Test
+    fun `BackdropQuality enum has correct scale values and names`() {
+        assertEquals(0.33f, BackdropQuality.LOW.scale, 0.0001f)
+        assertEquals(0.5f, BackdropQuality.MEDIUM.scale, 0.0001f)
+        assertEquals(1.0f, BackdropQuality.HIGH.scale, 0.0001f)
+        assertEquals(3, BackdropQuality.entries.size)
+    }
+
+    @Test
+    fun `backdropQuality setting defaults to DEFAULT_BACKDROP_QUALITY (MEDIUM)`() {
+        AppSettings.resetBackdropQuality()
+        assertEquals(AppSettings.DEFAULT_BACKDROP_QUALITY, AppSettings.backdropQuality.value)
+        assertEquals(BackdropQuality.MEDIUM, AppSettings.DEFAULT_BACKDROP_QUALITY)
+    }
+
+    @Test
+    fun `backdropQuality setting updates state flow`() {
+        AppSettings.setBackdropQuality(BackdropQuality.LOW)
+        assertEquals(BackdropQuality.LOW, AppSettings.backdropQuality.value)
+
+        AppSettings.setBackdropQuality(BackdropQuality.HIGH)
+        assertEquals(BackdropQuality.HIGH, AppSettings.backdropQuality.value)
+
+        AppSettings.setBackdropQuality(BackdropQuality.MEDIUM)
+        assertEquals(BackdropQuality.MEDIUM, AppSettings.backdropQuality.value)
+    }
+
+    @Test
+    fun `resetBackdropQuality restores default MEDIUM`() {
+        AppSettings.setBackdropQuality(BackdropQuality.HIGH)
+        assertEquals(BackdropQuality.HIGH, AppSettings.backdropQuality.value)
+
+        AppSettings.resetBackdropQuality()
+        assertEquals(BackdropQuality.MEDIUM, AppSettings.backdropQuality.value)
+    }
+
+    @Test
+    fun `glassBlur glassRefraction and backdropQuality mutate independently`() {
+        AppSettings.resetGlassBlur()
+        AppSettings.resetGlassRefraction()
+        AppSettings.resetBackdropQuality()
+
+        AppSettings.setGlassBlur(0.4f)
+        AppSettings.setGlassRefraction(0.7f)
+        AppSettings.setBackdropQuality(BackdropQuality.HIGH)
+
+        assertEquals(0.4f, AppSettings.glassBlur.value, 0.0001f)
+        assertEquals(0.7f, AppSettings.glassRefraction.value, 0.0001f)
+        assertEquals(BackdropQuality.HIGH, AppSettings.backdropQuality.value)
+
+        AppSettings.resetGlassBlur()
+        assertEquals(AppSettings.DEFAULT_GLASS_BLUR, AppSettings.glassBlur.value, 0.0001f)
+        assertEquals(0.7f, AppSettings.glassRefraction.value, 0.0001f)
+        assertEquals(BackdropQuality.HIGH, AppSettings.backdropQuality.value)
+    }
+
+    @Test
+    fun `calculateGlassLensHeightPx and AmountPx scale with custom scale parameter`() {
+        val density = androidx.compose.ui.unit.Density(density = 2f, fontScale = 1f)
+
+        val hDefault = com.music.yzmusic.ui.components.calculateGlassLensHeightPx(1.0f, density, scale = 0.33f)
+        val hMedium = com.music.yzmusic.ui.components.calculateGlassLensHeightPx(1.0f, density, scale = 0.5f)
+        val hHigh = com.music.yzmusic.ui.components.calculateGlassLensHeightPx(1.0f, density, scale = 1.0f)
+
+        assertTrue(hDefault > 0f)
+        assertTrue(hMedium > hDefault)
+        assertTrue(hHigh > hMedium)
+
+        assertEquals(hHigh * 0.5f, hMedium, 0.0001f)
+        assertEquals(hHigh * 0.33f, hDefault, 0.0001f)
+
+        val aDefault = com.music.yzmusic.ui.components.calculateGlassLensAmountPx(1.0f, density, scale = 0.33f)
+        val aMedium = com.music.yzmusic.ui.components.calculateGlassLensAmountPx(1.0f, density, scale = 0.5f)
+        val aHigh = com.music.yzmusic.ui.components.calculateGlassLensAmountPx(1.0f, density, scale = 1.0f)
+
+        assertTrue(aDefault > 0f)
+        assertTrue(aMedium > aDefault)
+        assertTrue(aHigh > aMedium)
+
+        assertEquals(aHigh * 0.5f, aMedium, 0.0001f)
+        assertEquals(aHigh * 0.33f, aDefault, 0.0001f)
     }
 }

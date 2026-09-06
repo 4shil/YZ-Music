@@ -183,6 +183,7 @@ fun SettingsScreen(
     onSources: () -> Unit,
     onSpotifyCanvasAuth: () -> Unit,
     onAppLanguage: () -> Unit,
+    onLiquidGlass: () -> Unit = {},
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -861,52 +862,10 @@ fun SettingsScreen(
                         R.string.liquid_glass_unavailable
                     },
                 ),
+                value = if (!liquidGlassSupported) null else if (liquidGlass) stringResource(R.string.on) else stringResource(R.string.off),
                 enabled = liquidGlassSupported,
-                trailing = {
-                    Switch(
-                        checked = liquidGlass && liquidGlassSupported,
-                        onCheckedChange = AppSettings::setLiquidGlass,
-                        enabled = liquidGlassSupported,
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            checkedBorderColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                },
-                onClick = { if (liquidGlassSupported) AppSettings.setLiquidGlass(!liquidGlass) },
+                onClick = if (liquidGlassSupported) onLiquidGlass else null,
             )
-            if (liquidGlass && liquidGlassSupported) {
-                RowDivider()
-                SliderRow(
-                    icon = Icons.Rounded.BlurOn,
-                    title = stringResource(R.string.glass_blur),
-                    subtitle = stringResource(
-                        if (reduceDynamicBlur) R.string.glass_blur_disabled_subtitle else R.string.glass_blur_subtitle
-                    ),
-                    value = "${(glassBlur * 100f).roundToInt()}%",
-                    sliderValue = glassBlur,
-                    onSliderValue = AppSettings::setGlassBlur,
-                    valueRange = 0f..1f,
-                    steps = 0,
-                    enabled = !reduceDynamicBlur,
-                    onReset = AppSettings::resetGlassBlur,
-                )
-                RowDivider()
-                SliderRow(
-                    icon = Icons.Rounded.AutoAwesome,
-                    title = stringResource(R.string.glass_refraction),
-                    subtitle = stringResource(
-                        if (reduceDynamicBlur) R.string.glass_refraction_disabled_subtitle else R.string.glass_refraction_subtitle
-                    ),
-                    value = "${(glassRefraction * 100f).roundToInt()}%",
-                    sliderValue = glassRefraction,
-                    onSliderValue = AppSettings::setGlassRefraction,
-                    valueRange = 0f..1f,
-                    steps = 0,
-                    enabled = !reduceDynamicBlur,
-                    onReset = AppSettings::resetGlassRefraction,
-                )
-            }
             RowDivider()
             SettingsRow(
                 icon = Icons.Rounded.MotionPhotosOff,

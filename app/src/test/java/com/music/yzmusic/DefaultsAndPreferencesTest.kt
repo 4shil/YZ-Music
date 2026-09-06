@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import androidx.compose.ui.graphics.Color
 import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.BackdropQuality
 import com.music.yzmusic.ui.components.floatingtabbar.FloatingTabBarColors
 import com.music.yzmusic.ui.components.floatingtabbar.FloatingTabBarDefaults
 import com.music.yzmusic.ui.components.isGlassSupported
@@ -77,6 +78,64 @@ class DefaultsAndPreferencesTest {
     }
 
     @Test
+    fun `fresh preferences default backdrop quality to MEDIUM`() {
+        val emptyPrefs = FakeSharedPreferences()
+        AppSettings.initForTest(emptyPrefs, sdkInt = Build.VERSION_CODES.S)
+
+        assertEquals("Backdrop quality should default to MEDIUM on fresh install",
+            BackdropQuality.MEDIUM, AppSettings.backdropQuality.value)
+    }
+
+    @Test
+    fun `existing backdrop quality LOW preference is preserved`() {
+        val prefs = FakeSharedPreferences().apply {
+            putString("backdrop_quality", "LOW")
+        }
+        AppSettings.initForTest(prefs, sdkInt = Build.VERSION_CODES.S)
+
+        assertEquals("Existing backdrop_quality=LOW preference must be preserved",
+            BackdropQuality.LOW, AppSettings.backdropQuality.value)
+    }
+
+    @Test
+    fun `existing backdrop quality HIGH preference is preserved`() {
+        val prefs = FakeSharedPreferences().apply {
+            putString("backdrop_quality", "HIGH")
+        }
+        AppSettings.initForTest(prefs, sdkInt = Build.VERSION_CODES.S)
+
+        assertEquals("Existing backdrop_quality=HIGH preference must be preserved",
+            BackdropQuality.HIGH, AppSettings.backdropQuality.value)
+    }
+
+    @Test
+    fun `existing preferences without backdrop_quality key safely default to MEDIUM`() {
+        val prefs = FakeSharedPreferences().apply {
+            putBoolean("liquid_glass", true)
+            putFloat("glass_blur", 0.75f)
+            putFloat("glass_refraction", 0.5f)
+        }
+        AppSettings.initForTest(prefs, sdkInt = Build.VERSION_CODES.S)
+
+        assertEquals("Missing backdrop_quality should safely default to MEDIUM",
+            BackdropQuality.MEDIUM, AppSettings.backdropQuality.value)
+        assertEquals(0.75f, AppSettings.glassBlur.value, 0.0001f)
+        assertEquals(0.5f, AppSettings.glassRefraction.value, 0.0001f)
+        assertTrue(AppSettings.liquidGlass.value)
+    }
+
+    @Test
+    fun `invalid or unknown backdrop quality string falls back safely to MEDIUM`() {
+        val prefs = FakeSharedPreferences().apply {
+            putString("backdrop_quality", "ULTRA_HIGH_4K")
+        }
+        AppSettings.initForTest(prefs, sdkInt = Build.VERSION_CODES.S)
+
+        assertEquals("Invalid backdrop_quality value should safely fallback to MEDIUM",
+            BackdropQuality.MEDIUM, AppSettings.backdropQuality.value)
+    }
+
+    @Test
     fun `glass navbar indicatorColor is transparent`() {
         val glassColors = FloatingTabBarColors(
             backgroundColor = Color.Transparent,
@@ -117,6 +176,14 @@ class DefaultsAndPreferencesTest {
         private val data = mutableMapOf<String, Any?>()
 
         fun putBoolean(key: String, value: Boolean) {
+            data[key] = value
+        }
+
+        fun putString(key: String, value: String?) {
+            data[key] = value
+        }
+
+        fun putFloat(key: String, value: Float) {
             data[key] = value
         }
 

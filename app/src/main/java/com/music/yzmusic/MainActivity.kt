@@ -110,6 +110,7 @@ import com.music.yzmusic.data.settings.ThemeMode
 import com.music.yzmusic.ui.screens.AccountAndScrobblingScreen
 import com.music.yzmusic.ui.screens.ExploreScreen
 import com.music.yzmusic.ui.screens.HistoryScreen
+import com.music.yzmusic.ui.screens.LiquidGlassScreen
 import com.music.yzmusic.ui.screens.SettingsScreen
 import com.music.yzmusic.ui.screens.SourcesScreen
 import com.music.yzmusic.ui.screens.SpotifyCanvasAuthScreen
@@ -346,6 +347,7 @@ private fun YZMusicApp(
     var replaySharePage by remember { mutableStateOf<ReplayStoryPage?>(null) }
     var showAccountScrobbling by remember { mutableStateOf(false) }
     var showSources by remember { mutableStateOf(false) }
+    var showLiquidGlass by remember { mutableStateOf(false) }
     var showSpotifyCanvasAuth by remember { mutableStateOf(false) }
     
     // Hosted here rather than inside SourcesScreen so its scrim covers the tab
@@ -474,6 +476,8 @@ private fun YZMusicApp(
     LaunchedEffect(showSettings) {
         if (!showSettings) {
             showAccountScrobbling = false
+            showSources = false
+            showLiquidGlass = false
         }
     }
 
@@ -1419,7 +1423,7 @@ private fun YZMusicApp(
             showReplay = false
         }
         BackHandler(
-            enabled = detail != null && !showSettings && !showAccountScrobbling && !showSources &&
+            enabled = detail != null && !showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass &&
                 !showReplay,
         ) { viewModel.closeDetail() }
         BackHandler(enabled = showAccountScrobbling) {
@@ -1428,10 +1432,13 @@ private fun YZMusicApp(
         BackHandler(enabled = showSources) {
             showSources = false
         }
+        BackHandler(enabled = showLiquidGlass) {
+            showLiquidGlass = false
+        }
         // One back step out of Settings, or out of any tab but Home, lands on
         // Home rather than exiting — only Home itself hands back to the system,
         // which is what actually closes/minimizes the app.
-        BackHandler(enabled = showSettings && !showAccountScrobbling && !showSources) {
+        BackHandler(enabled = showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass) {
             showSettings = false
             // Only when Settings was the whole of what was on screen. Opened
             // over Replay or over a release page, closing it reveals that again
@@ -1440,7 +1447,7 @@ private fun YZMusicApp(
         }
         BackHandler(
             enabled = detail == null && !showSettings && !showAccountScrobbling &&
-                !showSources && !showReplay && selectedTab != TAB_HOME,
+                !showSources && !showLiquidGlass && !showReplay && selectedTab != TAB_HOME,
         ) {
             selectedTab = TAB_HOME
         }
@@ -1473,6 +1480,7 @@ private fun YZMusicApp(
                         libraryShowAll != null && detail == null -> "library_show_all"
                         showAccountScrobbling -> "account_scrobbling"
                         showSources -> "sources"
+                        showLiquidGlass -> "liquid_glass"
                         // Above Replay, not below it. The top bar's account
                         // button sets `showSettings` from every page including
                         // this one, so with Replay winning the tie the button
@@ -1632,6 +1640,10 @@ private fun YZMusicApp(
                                 customModuleAlert = true
                             },
                         )
+                    } else if (key == "liquid_glass") {
+                        LiquidGlassScreen(
+                            contentPadding = listPadding,
+                        )
                     } else if (key == "settings") {
                         SettingsScreen(
                             windowWidth = windowWidth,
@@ -1651,6 +1663,7 @@ private fun YZMusicApp(
                             onSources = { showSources = true },
                             onSpotifyCanvasAuth = { showSpotifyCanvasAuth = true },
                             onAppLanguage = { showAppLanguage = true },
+                            onLiquidGlass = { showLiquidGlass = true },
                             contentPadding = listPadding,
                         )
                     } else if (page != null && page.browseId.isDeviceFolder()) {
@@ -1974,7 +1987,7 @@ private fun YZMusicApp(
                 // Every top bar is a fade rather than a pane — see [TopFadeBlur].
                 // Drawn before the bar so the bar's own content sits on top of it.
                 val isDetailVisible = detail != null && !isLocalDetail && !showSettings &&
-                    !showAccountScrobbling && !showSources && !showReplay
+                    !showAccountScrobbling && !showSources && !showLiquidGlass && !showReplay
                 TopFadeBlur(
                     hazeState = hazeState,
                     // Replay paints its own full-bleed black backdrop up under the
@@ -1998,6 +2011,7 @@ private fun YZMusicApp(
                         libraryShowAll != null && detail == null -> libraryShowAll?.title.orEmpty()
                         showAccountScrobbling -> "Account & scrobbling"
                         showSources -> "Sources"
+                        showLiquidGlass -> stringResource(R.string.liquid_glass)
                         showSettings -> "Settings"
                         showReplay -> "Replay"
                         detail != null -> detail.title
@@ -2008,7 +2022,7 @@ private fun YZMusicApp(
                     // Search has no large in-list header to hand the title back to —
                     // the field takes that space — so its bar title is always up.
                     scrolled = when {
-                        showSettings || showAccountScrobbling || showSources || showHistory ||
+                        showSettings || showAccountScrobbling || showSources || showLiquidGlass || showHistory ||
                             (libraryShowAll != null && detail == null) -> true
                         // The page leads with its own large "Replay", so the bar
                         // stays out of the way until that has been scrolled off.
@@ -2023,6 +2037,7 @@ private fun YZMusicApp(
                         libraryShowAll != null && detail == null -> ({ libraryShowAll = null })
                         showAccountScrobbling -> ({ showAccountScrobbling = false })
                         showSources -> ({ showSources = false })
+                        showLiquidGlass -> ({ showLiquidGlass = false })
                         showSettings -> ({ showSettings = false })
                         showReplay -> ({ showReplay = false })
                         detail != null -> ({ viewModel.closeDetail(); Unit })
@@ -2032,7 +2047,7 @@ private fun YZMusicApp(
                     actions = {
                         // Only worth surfacing where there's room for it and it won't
                         // be mistaken for a per-page action — Home, at rest.
-                        if (!showSettings && !showAccountScrobbling && !showSources && detail == null && selectedTab == TAB_HOME) {
+                        if (!showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass && detail == null && selectedTab == TAB_HOME) {
                             updateNotice?.let { update ->
                                 IconButton(onClick = { showUpdateDialog = true }) {
                                     Icon(
@@ -2043,7 +2058,7 @@ private fun YZMusicApp(
                                 }
                             }
                         }
-                        if (!showSettings && !showAccountScrobbling) {
+                        if (!showSettings && !showAccountScrobbling && !showLiquidGlass) {
                             // Left of the account photo, and only on Library itself:
                             // a history is a record of what was played, which reads
                             // as that tab's business rather than every tab's.
@@ -2099,6 +2114,8 @@ private fun YZMusicApp(
                         viewModel.clearDetail()
                         showSettings = false
                         showAccountScrobbling = false
+                        showSources = false
+                        showLiquidGlass = false
                         showReplay = false
                         showHistory = false
                         libraryShowAll = null

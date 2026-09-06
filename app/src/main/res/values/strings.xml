@@ -280,6 +280,18 @@
     <string name="glass_refraction">Glass Refraction</string>
     <string name="glass_refraction_subtitle">Controls the curvature and refraction distortion of Liquid Glass</string>
     <string name="glass_refraction_disabled_subtitle">Controls the curvature and refraction distortion (inactive while Reduce dynamic blur is on)</string>
+    <string name="glass_blur_title">Blur</string>
+    <string name="glass_refraction_title">Refraction</string>
+    <string name="backdrop_quality">Backdrop Quality</string>
+    <string name="backdrop_quality_subtitle">Controls rendering resolution and sharpness of the backdrop</string>
+    <string name="backdrop_quality_disabled_subtitle">Controls rendering resolution of the backdrop (inactive while Reduce dynamic blur is on)</string>
+    <string name="backdrop_quality_sheet_subtitle">Select rendering resolution for Liquid Glass</string>
+    <string name="backdrop_quality_low_subtitle">0.33x resolution · lowest GPU usage</string>
+    <string name="backdrop_quality_medium_subtitle">0.5x resolution · balanced quality and performance</string>
+    <string name="backdrop_quality_high_subtitle">1.0x resolution · maximum sharpness</string>
+    <string name="backdrop_quality_high_warning">High backdrop quality uses more GPU resources and may reduce performance or battery life. Recommended for capable devices.</string>
+    <string name="controls">Controls</string>
+    <string name="on">On</string>
 
     <!-- Performance -->
     <string name="performance">Performance</string>
