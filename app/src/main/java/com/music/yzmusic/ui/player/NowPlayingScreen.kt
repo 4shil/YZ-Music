@@ -3363,47 +3363,72 @@ private fun InlineQueue(
         autoplaySectionStart(queue.map { it.fromAutoplay }, currentIndex)
     }
 
-    val manualRows = remember(queue, autoplayStart) {
-        if (autoplayStart in 0..queue.size) queue.subList(0, autoplayStart) else queue
-    }
-    val autoplayRows = remember(queue, autoplayStart) {
-        if (autoplayStart in 0..queue.size) queue.subList(autoplayStart, queue.size) else emptyList()
-    }
+    // Each section reorders on its own — a drag never crosses the line
+    // between what was queued by hand and what AutoPlay picked, same as
+    // [addToQueue] and [playNext] already respect it.
+    //
+    // Both draw straight from the live [queue], never from a snapshot taken
+    // when the drag began: the boundary between the sections moves on its own
+    // as tracks play, so a frozen copy of either one goes stale the moment it
+    // does — AutoPlay's section would keep listing tracks that have long
+    // since played, and the row indices behind `onJumpTo`/`onRemove` would
+    // start pointing at the wrong songs. Each swap is sent to the player as
+    // it happens instead, and the rows animate into place off the live order.
+    val manualRows = queue.subList(0, autoplayStart)
+    val autoplayRows = queue.subList(autoplayStart, queue.size)
+    // A song can be queued twice, so videoId alone isn't always a unique key
+    // — LazyColumn throws on a repeat. Suffixing by how many times that id
+    // has already been seen keeps every key unique while staying stable
+    // across a reorder, which plain videoId+index (the previous key) wasn't:
+    // that changed on every swap and silently broke animateItem's ability to
+    // tell "this row moved" from "this row was replaced".
+    val manualKeys = remember(manualRows) { manualRows.stableQueueKeys() }
+    val autoplayKeys = remember(autoplayRows) { autoplayRows.stableQueueKeys("autoplay/") }
 
-    // Stable keys per row, unique even for duplicate tracks and persisting across reordering.
-    val queueKeys = rememberQueueKeys(queue)
-
-    val headingShown = (autoplayEnabled || autoplayStart < queue.size) && autoplayStart in 0..queue.size
-    val totalLazyRows = queue.size + if (headingShown) 1 else 0
-
-    // Single unified drag state for the entire queue.
-    val dragState = rememberQueueDragState(
+    // The heading is a row of the same LazyColumn, so it shifts every
+    // AutoPlay index below it along by one — hence the offset back to queue
+    // indices, which is what [onMove] and the rest of the callbacks take.
+    val headingShown = autoplayEnabled || autoplayStart < queue.size
+    val headingCount = if (headingShown) 1 else 0
+    // Nothing moves at or above the track playing right now: what's already
+    // been played is history, and the current row is the boundary the sections
+    // are drawn from. Only what's still to come is the user's to reorder.
+    // AutoPlay's section needs no such limit — [autoplaySectionStart] always
+    // puts it after the current track.
+    val firstMovable = (currentIndex + 1).coerceIn(0, autoplayStart)
+    val manualDrag = rememberQueueDragState(
         listState = listState,
-        lazyRange = 0 until totalLazyRows,
-        queueSize = queue.size,
-        toQueueIndex = { lazyIndex ->
-            lazyToQueueIndex(lazyIndex, autoplayStart, headingShown)
-        },
+        lazyRange = firstMovable until autoplayStart,
+        lazyOffset = 0,
+        onMove = onMove,
+    )
+    val autoplayDrag = rememberQueueDragState(
+        listState = listState,
+        lazyRange = (autoplayStart + headingCount) until (autoplayStart + headingCount + autoplayRows.size),
+        lazyOffset = headingCount,
         onMove = onMove,
     )
 
-    // Reset drag state when queue is disposed/unmounted
-    DisposableEffect(dragState) {
-        onDispose {
-            dragState.onDragEnd()
-        }
-    }
-
-    // Open on what's playing, not at the top of a long queue.
+    // Open on what's playing, not at the top of a long queue. The heading sits
+    // between the two sections, so it counts as a row once it's above this one.
+    //
+    // Never mid-drag, though. A track ending while a row is held would jump the
+    // list out from under the finger, and the jump takes the list's scroll off
+    // the edge auto-scroll below — which would leave the rest of that drag
+    // unable to scroll at all. Reordering is also the one time the user is
+    // certainly looking somewhere other than at the current track.
     LaunchedEffect(currentIndex) {
-        if (!dragState.isDragging && currentIndex in queue.indices) {
-            val targetLazyIndex = queueToLazyIndex(currentIndex, autoplayStart, headingShown)
-            listState.scrollToItem(targetLazyIndex)
+        val holdingNow = manualDrag.draggedKey != null || autoplayDrag.draggedKey != null
+        if (!holdingNow && currentIndex in queue.indices) {
+            val target = currentIndex + if (currentIndex >= autoplayStart) 1 else 0
+            if (target != listState.firstVisibleItemIndex) {
+                listState.scrollToItem(target)
+            }
         }
     }
 
     val coroutineScope = rememberCoroutineScope()
-    val holding = dragState.isDragging
+    val holding = manualDrag.draggedKey != null || autoplayDrag.draggedKey != null
 
     val swallowDownOverscroll = remember {
         object : NestedScrollConnection {
@@ -3478,33 +3503,42 @@ private fun InlineQueue(
                 ),
             contentPadding = PaddingValues(horizontal = PLAYER_GUTTER),
         ) {
+            // What was asked for: the album, playlist or station the queue was
+            // started from, plus anything queued by hand since.
             itemsIndexed(
                 items = manualRows,
-                key = { index, _ -> queueKeys.getOrElse(index) { "queue_$index" } },
-                contentType = { _, _ -> "queue_song" },
+                key = { index, _ -> manualKeys[index] },
             ) { index, song ->
-                val key = queueKeys.getOrElse(index) { "queue_$index" }
-                val dragging = dragState.draggedKey == key
+                val key = manualKeys[index]
+                val dragging = manualDrag.draggedKey == key
                 InlineQueueRow(
                     song = song,
                     isCurrent = index == currentIndex,
                     onClick = { onJumpTo(index) },
                     onRemove = { onRemove(index) },
-                    draggable = true,
+                    // Only what's still queued ahead. The playing track and
+                    // everything already played sit above the line a drag
+                    // can't cross.
+                    draggable = index >= firstMovable,
                     dragging = dragging,
-                    onDragStart = { dragState.onDragStart(key) },
-                    onDrag = dragState::onDrag,
-                    onDragEnd = dragState::onDragEnd,
+                    onDragStart = { manualDrag.onDragStart(key) },
+                    onDrag = manualDrag::onDrag,
+                    onDragEnd = manualDrag::onDragEnd,
                     modifier = Modifier
                         .zIndex(if (dragging) 1f else 0f)
-                        .graphicsLayer { translationY = if (dragging) dragState.renderOffset else 0f }
-                        .then(if (dragState.draggedKey != null) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)),
+                        .graphicsLayer { translationY = if (dragging) manualDrag.renderOffset else 0f }
+                        // The dragged row follows the finger, so it is the one
+                        // row that must not also be animating to a slot. Its
+                        // neighbours skip the animation too, for as long as
+                        // *anything* in the section is being dragged — see the
+                        // note on [manualDrag] below for why.
+                        .then(if (manualDrag.draggedKey != null) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)),
                 )
             }
             // Heading first, then what AutoPlay has lined up under it. With
             // nothing lined up yet it closes the queue as a promise instead.
             if (headingShown) {
-                item(key = "autoplay-heading", contentType = "autoplay_heading") {
+                item(key = "autoplay-heading") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -3539,12 +3573,11 @@ private fun InlineQueue(
             }
             itemsIndexed(
                 items = autoplayRows,
-                key = { index, _ -> queueKeys.getOrElse(autoplayStart + index) { "queue_${autoplayStart + index}" } },
-                contentType = { _, _ -> "queue_song" },
+                key = { index, _ -> autoplayKeys[index] },
             ) { index, song ->
                 val at = autoplayStart + index
-                val key = queueKeys.getOrElse(at) { "queue_$at" }
-                val dragging = dragState.draggedKey == key
+                val key = autoplayKeys[index]
+                val dragging = autoplayDrag.draggedKey == key
                 InlineQueueRow(
                     song = song,
                     isCurrent = at == currentIndex,
@@ -3552,48 +3585,31 @@ private fun InlineQueue(
                     onRemove = { onRemove(at) },
                     draggable = true,
                     dragging = dragging,
-                    onDragStart = { dragState.onDragStart(key) },
-                    onDrag = dragState::onDrag,
-                    onDragEnd = dragState::onDragEnd,
+                    onDragStart = { autoplayDrag.onDragStart(key) },
+                    onDrag = autoplayDrag::onDrag,
+                    onDragEnd = autoplayDrag::onDragEnd,
                     modifier = Modifier
                         .zIndex(if (dragging) 1f else 0f)
-                        .graphicsLayer { translationY = if (dragging) dragState.renderOffset else 0f }
-                        .then(if (dragState.draggedKey != null) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)),
+                        .graphicsLayer { translationY = if (dragging) autoplayDrag.renderOffset else 0f }
+                        .then(if (autoplayDrag.draggedKey != null) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)),
                 )
             }
         }
     }
 }
 
-internal fun lazyToQueueIndex(lazyIndex: Int, autoplayStart: Int, headingShown: Boolean): Int {
-    return if (headingShown && lazyIndex > autoplayStart) lazyIndex - 1 else lazyIndex
-}
-
-internal fun queueToLazyIndex(queueIndex: Int, autoplayStart: Int, headingShown: Boolean): Int {
-    return if (headingShown && queueIndex >= autoplayStart) queueIndex + 1 else queueIndex
-}
-
 /**
  * A key per row, stable across a reorder and unique even when the same song
- * appears twice. Uses [Song.setVideoId] if present, disambiguating
- * any collisions so LazyColumn never throws on duplicate keys.
+ * appears twice — the Nth time a given videoId is seen gets suffixed with
+ * that count, so two copies of one song each keep their own identity instead
+ * of colliding on the same LazyColumn key.
  */
-@Composable
-private fun rememberQueueKeys(queue: List<Song>): List<String> {
-    return remember(queue) {
-        val used = HashSet<String>()
-        queue.mapIndexed { _, song ->
-            val baseId = song.setVideoId?.takeIf { it.isNotBlank() }
-                ?: song.videoId.takeIf { it.isNotBlank() }
-                ?: "song"
-            var key = baseId
-            var seq = 1
-            while (!used.add(key)) {
-                key = "${baseId}_$seq"
-                seq++
-            }
-            key
-        }
+private fun List<Song>.stableQueueKeys(prefix: String = ""): List<String> {
+    val seen = HashMap<String, Int>()
+    return map { song ->
+        val n = seen.getOrDefault(song.videoId, 0)
+        seen[song.videoId] = n + 1
+        if (n == 0) "$prefix${song.videoId}" else "$prefix${song.videoId}#$n"
     }
 }
 
@@ -3662,20 +3678,29 @@ internal fun edgeScrollSpeed(
 private fun rememberQueueDragState(
     listState: LazyListState,
     lazyRange: IntRange,
-    queueSize: Int = 0,
-    toQueueIndex: (Int) -> Int = { it },
+    lazyOffset: Int,
     onMove: (Int, Int) -> Unit,
 ): QueueDragState {
     val state = remember(listState) { QueueDragState(listState) }
     state.lazyRange = lazyRange
-    state.queueSize = queueSize
-    state.toQueueIndex = toQueueIndex
+    state.lazyOffset = lazyOffset
     state.onMove = onMove
     with(LocalDensity.current) {
         state.edgeZone = QUEUE_EDGE_SCROLL_ZONE.toPx()
         state.edgeSpeed = QUEUE_EDGE_SCROLL_SPEED.toPx()
     }
 
+    // Held near either end of the list, the row scrolls it. A track can be
+    // moved across a queue many screens long without letting go, where before
+    // the only way down was to drop the row at the edge, scroll by hand and
+    // pick it up again, once per screenful.
+    //
+    // What the scroll moves is the list, not the finger, and
+    // [QueueDragState.onScrolled] says exactly that: the held position stays
+    // where it is and the new layout is read back against it. The row sits
+    // still on screen while the rows above or below slide past it, and swaps
+    // through them on the same terms it would if the finger had covered the
+    // distance itself.
     val direction = state.autoScrollDir
     LaunchedEffect(state, direction) {
         if (direction == 0) return@LaunchedEffect
@@ -3683,9 +3708,16 @@ private fun rememberQueueDragState(
             var previous = withFrameNanos { it }
             while (true) {
                 val now = withFrameNanos { it }
+                // A frame the system dropped, paid back in full, lands as a
+                // lurch — so it isn't.
                 val seconds = ((now - previous) / 1_000_000_000f).coerceAtMost(1f / 30f)
                 previous = now
                 val scrolled = scrollBy(state.autoScrollSpeed * seconds)
+                // Nowhere left to scroll, or the row has left the edge and the
+                // speed has gone to nothing. Let the list's scroll go rather
+                // than spin on it holding the lock: the row can still be
+                // dragged the rest of the way by hand, and coming back to an
+                // edge starts this over.
                 if (scrolled == 0f) break
                 state.onScrolled()
             }
@@ -3694,13 +3726,33 @@ private fun rememberQueueDragState(
     return state
 }
 
+/**
+ * Where a held row is being held, what it may do from there, and the moves it
+ * has sent to the player on the way.
+ *
+ * The whole thing turns on one number: [heldCenter], where the row's centre is
+ * being held, in the LazyColumn's own viewport pixels. The finger moves it and
+ * nothing else does — not a scroll, not a swap, not a relayout. Everything
+ * drawn or decided is then read back off the live layout against it: the row
+ * is drawn at whatever its slot currently is plus the distance to
+ * [heldCenter], and it trades places with whichever neighbour's slot
+ * [heldCenter] has reached into.
+ *
+ * Tracking where the row is rather than how far it has come is what lets the
+ * drag survive the list moving underneath it. The offset this replaces was
+ * kept by hand — corrected on every scrolled pixel and again on every swap —
+ * and held together only for as long as it was told about every last thing
+ * that moved the list. It wasn't: LazyColumn re-anchors its own scroll
+ * position when the row it measures from is reordered elsewhere (see
+ * [swapTarget]), and one such jump left the offset a full row wrong, the row
+ * drawn a row off the finger and its slot pushed clean out of the viewport.
+ * Read fresh off the layout there is nothing left to be wrong — wherever the
+ * list has ended up, the row is still under the finger.
+ */
 private class QueueDragState(private val listState: LazyListState) {
     var lazyRange: IntRange = IntRange.EMPTY
-    var queueSize: Int = 0
-    var toQueueIndex: (Int) -> Int = { it }
+    var lazyOffset: Int = 0
     var onMove: (Int, Int) -> Unit = { _, _ -> }
-
-    val isDragging: Boolean get() = draggedKey != null
 
     /** [QUEUE_EDGE_SCROLL_ZONE] and [QUEUE_EDGE_SCROLL_SPEED], in pixels. */
     var edgeZone: Float = 0f
@@ -3710,47 +3762,81 @@ private class QueueDragState(private val listState: LazyListState) {
     var draggedKey by mutableStateOf<Any?>(null)
         private set
 
+    /**
+     * How far from its own slot to draw the held row, in pixels.
+     *
+     * Not simply the distance to [heldCenter]: a queue longer than the screen
+     * has nowhere to show a row above its first slot or below its last, so a
+     * finger held past either end was drawing the row off the list into
+     * nothing. Kept inside the viewport it sits at whichever edge it reached
+     * and stays visible there while the auto-scroll carries the list under it.
+     */
     var renderOffset by mutableFloatStateOf(0f)
         private set
 
+    /**
+     * Which way the list is scrolling itself under the held row: -1 towards the
+     * start of the queue, 1 towards its end, 0 not at all. State, because this
+     * is what starts and stops the loop that does the scrolling.
+     */
     var autoScrollDir by mutableIntStateOf(0)
         private set
 
+    /**
+     * How fast it is doing so, signed, in pixels a second — and deliberately
+     * *not* state. It changes with every pixel of drag travel, and only the
+     * loop reads it, once a frame; as state it would recompose the whole queue
+     * on every touch event to tell the composition something it has no use for.
+     */
     var autoScrollSpeed: Float = 0f
         private set
 
+    /**
+     * Where the finger is holding the row's centre, in viewport pixels. NaN
+     * until the first drag event, which takes it from the row's own slot — a
+     * drag begins with the row exactly where it already was.
+     */
     private var heldCenter: Float = Float.NaN
-    private var pendingTargetKey: Any? = null
-    private var pendingFromIndex: Int = -1
-    private var pendingMoveTime: Long = 0L
+
+    /** Where the last swap put the row, until the list is laid out with it. */
+    private var awaiting: Int? = null
 
     fun onDragStart(key: Any) {
         draggedKey = key
         heldCenter = Float.NaN
         renderOffset = 0f
-        pendingTargetKey = null
-        pendingFromIndex = -1
-        pendingMoveTime = 0L
+        awaiting = null
         setAutoScroll(0f)
     }
 
+    /** The finger moved [deltaY] pixels and the list stayed put. */
     fun onDrag(deltaY: Float) = settle(deltaY)
 
+    /** The list moved under the finger and the finger stayed put. */
     fun onScrolled() = settle(0f)
 
     fun onDragEnd() {
         draggedKey = null
         heldCenter = Float.NaN
         renderOffset = 0f
-        pendingTargetKey = null
-        pendingFromIndex = -1
-        pendingMoveTime = 0L
+        awaiting = null
         setAutoScroll(0f)
     }
 
+    /**
+     * Takes the drag in [deltaY] pixels further, then reads the list back to
+     * see where that leaves the row: where to draw it, whether it has reached
+     * an edge, and whether it has reached a neighbour worth trading with.
+     */
     private fun settle(deltaY: Float) {
         val key = draggedKey ?: return
         val items = listState.layoutInfo.visibleItemsInfo
+        // The row's own slot is off screen. There is nothing to measure an
+        // edge or a swap against and nothing to draw against either, so the
+        // way back is to stand still and let the swap already sent land and
+        // bring the slot into view. If the row has been disposed outright
+        // rather than merely scrolled past, it ends the drag itself on the
+        // way out — see the disposal guard in [InlineQueueRow].
         val dragged = items.find { it.key == key } ?: run {
             setAutoScroll(0f)
             return
@@ -3761,46 +3847,80 @@ private class QueueDragState(private val listState: LazyListState) {
         holdToSection(items, dragged)
 
         val top = heldCenter - half
+        // Aimed before the guard below, not after: a swap in flight is a frame
+        // or two of the list not having caught up yet, and the scroll should
+        // carry on evenly through those rather than stutter once per row.
         aimAutoScroll(top, dragged)
         renderOffset = insideViewport(top, dragged.size) - dragged.offset
 
-        pendingTargetKey?.let { targetKey ->
-            val elapsed = System.currentTimeMillis() - pendingMoveTime
-            val moved = dragged.index != pendingFromIndex
-            val targetItem = items.find { it.key == targetKey }
-            val completed = moved || targetItem == null || elapsed > 300L
-            if (!completed) return
-            pendingTargetKey = null
-            pendingFromIndex = -1
+        // A swap already sent but not yet laid out: deciding the next one off
+        // a position the list has moved on from would send a second move for
+        // a swap that has already happened, and the two would fight.
+        awaiting?.let {
+            if (dragged.index != it) return
+            awaiting = null
         }
-
         val target = swapTarget(items, dragged) ?: return
-        val fromQueue = toQueueIndex(dragged.index)
-        val toQueue = toQueueIndex(target.index)
-        val maxIndex = queueSize - 1
-        if (maxIndex > 0 && fromQueue in 0..maxIndex && toQueue in 0..maxIndex && fromQueue != toQueue) {
-            onMove(fromQueue, toQueue)
-            pendingTargetKey = target.key
-            pendingFromIndex = dragged.index
-            pendingMoveTime = System.currentTimeMillis()
-        }
+        onMove(dragged.index - lazyOffset, target.index - lazyOffset)
+        awaiting = target.index
     }
 
+    /**
+     * The neighbour [heldCenter] has reached far enough into to trade places
+     * with, or null while there is none to trade with yet.
+     */
     private fun swapTarget(
         items: List<LazyListItemInfo>,
         dragged: LazyListItemInfo,
     ): LazyListItemInfo? {
+        // Only rows of this section are fair targets — the heading and the
+        // other section's rows share the LazyColumn but not this range.
         val target = items
-            .filter { it.index in lazyRange && it.index != dragged.index && it.contentType == "queue_song" && it.key != "autoplay-heading" }
+            .filter { it.index in lazyRange && it.index != dragged.index }
             .minByOrNull { abs((it.offset + it.size / 2f) - heldCenter) }
             ?: return null
+        // Held short of halfway the rows would swap back and forth over a
+        // single pixel of travel; a full half-height of overlap is what makes
+        // one swap per row crossed.
         if (abs(heldCenter - (target.offset + target.size / 2f)) > target.size / 2f) return null
+        // Never with the row the list is keeping its own place by, while there
+        // is still list above it to scroll.
+        //
+        // LazyColumn remembers where it is scrolled to as the *key* of its
+        // first visible row plus an offset into it. Reorder that particular
+        // row and it follows the key to wherever the row went, which slides
+        // the entire list along by a row — and the held row, which has just
+        // moved into the slot that row left, goes off the top of the viewport
+        // with it. LazyColumn then disposes it, and disposal cancels the drag
+        // gesture outright: neither onDragEnd nor onDragCancel runs, so the
+        // row was left highlighted and offset with nothing dragging it,
+        // stranded a row above where it was picked up. Dragging *down* never
+        // met this, because the row traded with is the one below and the list
+        // anchors on the one at the top; dragging up, the row traded with is
+        // precisely the one the edge scroll is drawing in at the top, which is
+        // why one direction worked and the other did not.
+        //
+        // Declining to swap this frame is the whole fix. The scroll that
+        // brought the row here carries on, the next row up becomes the one the
+        // list is anchored by, and the trade goes through a few frames later —
+        // by which time it moves nothing the list is holding on to. With no
+        // list left above to scroll there is no jump to decline in the first
+        // place, so a row can still be dropped into the first slot of its
+        // section.
         if (target.index == listState.firstVisibleItemIndex && listState.canScrollBackward) {
             return null
         }
         return target
     }
 
+    /**
+     * Points the auto-scroll at whichever edge the row now spanning [top] has
+     * reached, if either — but only while there is both a row that way for it
+     * to swap with and list left to scroll. Held past the last row of its own
+     * section it would otherwise keep the list moving with no move left to
+     * make, carrying the row's slot away under a finger that has nothing left
+     * to answer with.
+     */
     private fun aimAutoScroll(top: Float, dragged: LazyListItemInfo) {
         val info = listState.layoutInfo
         val speed = edgeScrollSpeed(
@@ -3812,7 +3932,6 @@ private class QueueDragState(private val listState: LazyListState) {
             speed = edgeSpeed,
         )
         val blocked = when {
-            lazyRange.isEmpty() -> true
             speed < 0f -> dragged.index <= lazyRange.first || !listState.canScrollBackward
             speed > 0f -> dragged.index >= lazyRange.last || !listState.canScrollForward
             else -> true
@@ -3820,8 +3939,26 @@ private class QueueDragState(private val listState: LazyListState) {
         setAutoScroll(if (blocked) 0f else speed)
     }
 
+    /**
+     * Holds the drag inside the section it started in.
+     *
+     * A row can only be dropped between the first and last slots of its own
+     * section — the playing track and the history above it are not the user's
+     * to reorder, and neither is the far side of the AutoPlay heading. The
+     * swap loop already respects that, by having no target to offer past
+     * either end; what it does not do is stop [heldCenter] running on past the
+     * boundary, and a finger a screen beyond it then has that whole distance
+     * to travel back before the row answers again. Held at the boundary it
+     * stops there under the finger, which is what "this is as far as it goes"
+     * ought to look like.
+     *
+     * Only the ends actually on screen bound anything. A section that runs off
+     * the viewport has more of itself that way for the auto-scroll to bring
+     * in, and holding to whichever of its rows happens to be measured would
+     * stop the drag at the edge of the screen instead of at the edge of the
+     * section.
+     */
     private fun holdToSection(items: List<LazyListItemInfo>, dragged: LazyListItemInfo) {
-        if (lazyRange.isEmpty()) return
         val half = dragged.size / 2f
         items.firstOrNull { it.index == lazyRange.first }?.let {
             heldCenter = heldCenter.coerceAtLeast(it.offset + half)
@@ -3831,6 +3968,7 @@ private class QueueDragState(private val listState: LazyListState) {
         }
     }
 
+    /** [top], kept where a row of [size] can still be seen — see [renderOffset]. */
     private fun insideViewport(top: Float, size: Int): Float {
         val info = listState.layoutInfo
         val minTop = info.viewportStartOffset.toFloat()

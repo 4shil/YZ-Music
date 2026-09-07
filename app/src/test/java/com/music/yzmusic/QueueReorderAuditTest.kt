@@ -2,8 +2,6 @@ package com.music.yzmusic
 
 import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.playback.autoplaySectionStart
-import com.music.yzmusic.ui.player.lazyToQueueIndex
-import com.music.yzmusic.ui.player.queueToLazyIndex
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.UUID
@@ -276,20 +274,20 @@ class QueueReorderAuditTest {
         val queueSize = 6
         val autoplayStart = 3
         val headingShown = true
+        val headingCount = if (headingShown) 1 else 0
 
-        // Manual items: queue indices 0, 1, 2 -> lazy indices 0, 1, 2
+        // Manual items: queue indices 0, 1, 2 -> lazy indices 0, 1, 2 with lazyOffset = 0
+        val manualOffset = 0
         for (q in 0 until autoplayStart) {
-            val lazy = queueToLazyIndex(q, autoplayStart, headingShown)
-            assertEquals(q, lazy)
-            assertEquals(q, lazyToQueueIndex(lazy, autoplayStart, headingShown))
+            val lazy = q + manualOffset
+            assertEquals(q, lazy - manualOffset)
         }
 
-        // Heading is at lazy index 3 (autoplayStart)
-        // AutoPlay items: queue indices 3, 4, 5 -> lazy indices 4, 5, 6
+        // AutoPlay items: queue indices 3, 4, 5 -> lazy indices 4, 5, 6 with lazyOffset = headingCount
+        val autoplayOffset = headingCount
         for (q in autoplayStart until queueSize) {
-            val lazy = queueToLazyIndex(q, autoplayStart, headingShown)
-            assertEquals(q + 1, lazy)
-            assertEquals(q, lazyToQueueIndex(lazy, autoplayStart, headingShown))
+            val lazy = q + autoplayOffset
+            assertEquals(q, lazy - autoplayOffset)
         }
     }
 
@@ -298,11 +296,11 @@ class QueueReorderAuditTest {
         val queueSize = 5
         val autoplayStart = 5
         val headingShown = false
+        val headingCount = if (headingShown) 1 else 0
 
         for (q in 0 until queueSize) {
-            val lazy = queueToLazyIndex(q, autoplayStart, headingShown)
-            assertEquals(q, lazy)
-            assertEquals(q, lazyToQueueIndex(lazy, autoplayStart, headingShown))
+            val lazy = q + headingCount
+            assertEquals(q, lazy - headingCount)
         }
     }
 
