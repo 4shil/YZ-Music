@@ -3491,16 +3491,7 @@ private fun InlineQueue(
                 .fillMaxWidth()
                 .bleedHorizontally(PLAYER_GUTTER)
                 .fadingEdges()
-                .nestedScroll(swallowDownOverscroll)
-                .queueSwipeDown(
-                    enabled = true,
-                    listState = listState,
-                    scope = coroutineScope,
-                    isReordering = holding,
-                    allowScrollToTop = false,
-                    consumeDownDeltas = false,
-                    onClose = onClose,
-                ),
+                .nestedScroll(swallowDownOverscroll),
             contentPadding = PaddingValues(horizontal = PLAYER_GUTTER),
         ) {
             // What was asked for: the album, playlist or station the queue was
@@ -4015,10 +4006,13 @@ private fun InlineQueueRow(
     // the viewport in the first place; this is here because "the gesture ended
     // and nothing was told" should not be a state the queue can be left in at
     // all, whatever put it there.
-    if (dragging) {
-        val endDrag by rememberUpdatedState(onDragEnd)
-        DisposableEffect(Unit) {
-            onDispose { endDrag() }
+    val heldOnDispose by rememberUpdatedState(dragging)
+    val endDrag by rememberUpdatedState(onDragEnd)
+    DisposableEffect(Unit) {
+        onDispose {
+            if (heldOnDispose) {
+                endDrag()
+            }
         }
     }
     val currentOnDragStart by rememberUpdatedState(onDragStart)

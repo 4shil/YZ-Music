@@ -117,8 +117,8 @@ object SmartAudioModelManager {
      * If models were bundled in assets (e.g. debug builds), they will be extracted.
      * Interrupted temporary files are cleaned up.
      */
-    fun checkStatus(context: Context): DownloadState {
-        if (isDownloading) return _downloadState.value
+    suspend fun checkStatus(context: Context): DownloadState = withContext(Dispatchers.IO) {
+        if (isDownloading) return@withContext _downloadState.value
 
         // Clean up any stale temporary files from interrupted downloads
         cleanupTempFiles(context)
@@ -130,7 +130,7 @@ object SmartAudioModelManager {
 
         val newState = if (allReady) DownloadState.Ready else DownloadState.NotDownloaded
         _downloadState.value = newState
-        return newState
+        newState
     }
 
     /**

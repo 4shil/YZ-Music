@@ -5,6 +5,9 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import com.music.yzmusic.data.DebugLog as Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
@@ -28,7 +31,21 @@ object DeviceCodecs {
      * Whether an E-AC-3 (JOC) stream has a hardware/platform decoder on this device.
      */
     val playsDolbyAtmos: Boolean
-        get() = forced ?: probed ?: probe().also { probed = it }
+        get() {
+            forced?.let { return it }
+            probed?.let { return it }
+            probeAsync()
+            return true
+        }
+
+    fun probeAsync() {
+        if (probed != null) return
+        CoroutineScope(Dispatchers.IO).launch {
+            if (probed == null) {
+                probed = probe()
+            }
+        }
+    }
 
     private fun probe(): Boolean {
         val viaMedia3 = media3Decoders()

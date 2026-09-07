@@ -19,6 +19,7 @@ import com.music.yzmusic.data.innertube.Innertube
 import com.music.yzmusic.data.scrobbling.LastFM
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.data.settings.SearchHistory
+import com.music.yzmusic.data.sources.DeviceCodecs
 import com.music.yzmusic.data.sources.SourceRegistry
 import com.music.yzmusic.data.stats.ArtistFacts
 import com.music.yzmusic.data.stats.ListeningStats
@@ -100,6 +101,8 @@ class YZMusicApplication : Application(), SingletonImageLoader.Factory {
         }
         // Initialize LastFM with saved settings if available
         initLastfm()
+        // Probe Dolby Atmos hardware capabilities asynchronously on IO thread
+        DeviceCodecs.probeAsync()
     }
 
     /**
