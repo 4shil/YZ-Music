@@ -39,6 +39,11 @@ val lastfmSecret: String = (
         ?: System.getenv("LASTFM_SECRET")
         ?: ""
     ).trim()
+val listenTogetherServer: String = (
+    localProps.getProperty("LISTEN_TOGETHER_SERVER")
+        ?: System.getenv("LISTEN_TOGETHER_SERVER")
+        ?: ""
+    ).trim().trimEnd('/')
 
 android {
     namespace = "com.music.yzmusic"
@@ -50,8 +55,8 @@ android {
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.6.0"
+        versionCode = 12
+        versionName = "1.6.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -61,6 +66,7 @@ android {
         // Last.fm credentials are supplied locally and never committed.
         buildConfigField("String", "LASTFM_API_KEY", "\"${lastfmApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "LASTFM_SECRET", "\"${lastfmSecret.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "LISTEN_TOGETHER_SERVER", "\"${listenTogetherServer.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
 
         // Automix's DSP analyzer (native/analyzer). 64-bit only.
     }
@@ -252,6 +258,7 @@ dependencies {
     implementation("io.ktor:ktor-client-okhttp:3.0.3")
     implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
+    implementation("io.ktor:ktor-client-websockets:3.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // ---- Stream resolution: NewPipe solves YouTube's signature + `n` throttling ----
