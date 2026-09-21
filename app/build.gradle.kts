@@ -42,8 +42,8 @@ val lastfmSecret: String = (
 val listenTogetherServer: String = (
     localProps.getProperty("LISTEN_TOGETHER_SERVER")
         ?: System.getenv("LISTEN_TOGETHER_SERVER")
-        ?: ""
-    ).trim().trimEnd('/')
+        ?: "https://yz-music-party.onrender.com"
+    ).trim().trimEnd('/').ifBlank { "https://yz-music-party.onrender.com" }
 
 android {
     namespace = "com.music.yzmusic"

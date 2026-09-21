@@ -168,7 +168,13 @@ object ListenTogether {
 
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        _customServer.value = prefs.getString(KEY_SERVER, null)?.trim().orEmpty()
+        val savedServer = prefs.getString(KEY_SERVER, null)?.trim().orEmpty()
+        if (savedServer.contains("bitchord", ignoreCase = true)) {
+            prefs.edit().remove(KEY_SERVER).apply()
+            _customServer.value = ""
+        } else {
+            _customServer.value = savedServer
+        }
 
         val code = prefs.getString(KEY_CODE, null)
         val saved = prefs.getString(KEY_TOKEN, null)
@@ -582,7 +588,7 @@ object ListenTogether {
     private const val KEY_TOKEN = "party_token"
     private const val KEY_DEVICE = "device_id"
 
-    private val DEFAULT_SERVER: String = BuildConfig.LISTEN_TOGETHER_SERVER
+    private val DEFAULT_SERVER: String = BuildConfig.LISTEN_TOGETHER_SERVER.ifBlank { "https://yz-music-party.onrender.com" }
     private const val PING_INTERVAL_MS = 15_000L
     private const val REPORT_INTERVAL_MS = 10_000L
     private const val HEALTH_TIMEOUT_MS = 45_000L

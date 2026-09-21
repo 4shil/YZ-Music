@@ -9,10 +9,10 @@ import java.net.URI
 /** Relays a Listen Together web invite from MainActivity to Compose. */
 object JamInviteLink {
 
-    const val ORIGIN = "https://bitchord.kushagrasingh.in"
+    const val ORIGIN = "https://yz-music-party.onrender.com"
 
     private const val EXTRA_CONSUMED = "yzmusic.jamInviteConsumed"
-    private const val HOST = "bitchord.kushagrasingh.in"
+    private const val HOST = "yz-music-party.onrender.com"
 
     private val _pending = MutableStateFlow<String?>(null)
     val pending: StateFlow<String?> = _pending.asStateFlow()

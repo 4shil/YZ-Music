@@ -170,7 +170,20 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="http" />
                 <data android:scheme="https" />
-                <data android:host="youtu.be" />
+            </intent-filter>
+
+            <!--
+              Listen Together party invites: links clicked in chat apps or
+              on the web open directly into MainActivity to join the jam.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="yz-music-party.onrender.com" />
+                <data android:pathPrefix="/invite" />
             </intent-filter>
 
             <!--

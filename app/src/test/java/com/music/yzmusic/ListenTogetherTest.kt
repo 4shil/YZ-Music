@@ -115,6 +115,7 @@ class ListenTogetherTest {
 
         // Invalid urls
         assertNull(JamInviteLink.parse("https://google.com"))
+        assertNull(JamInviteLink.parse("https://yz-music-party.onrender.com/wrong/ABC123"))
         assertNull(JamInviteLink.parse("https://bitchord.kushagrasingh.in/wrong/ABC123"))
         assertNull(JamInviteLink.parse(null))
         assertNull(JamInviteLink.parse(""))

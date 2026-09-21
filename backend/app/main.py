@@ -25,7 +25,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import codes, config, protocol
 from .clock import now_ms
@@ -87,6 +87,37 @@ async def root() -> dict[str, Any]:
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
     return {"ok": True, "serverMs": now_ms()}
+
+
+@app.get("/invite/{code}", response_class=HTMLResponse)
+async def invite_landing(code: str) -> str:
+    clean_code = codes.clean(code)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Join Party {clean_code} - YZ Music</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0c0d10; color: #fff; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }}
+        .card {{ background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 24px; padding: 32px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.5); backdrop-filter: blur(20px); }}
+        h1 {{ font-size: 24px; margin: 0 0 8px; font-weight: 700; }}
+        p {{ color: rgba(255,255,255,0.7); font-size: 14px; line-height: 1.5; margin: 0 0 24px; }}
+        .code {{ font-size: 36px; font-weight: 800; letter-spacing: 6px; color: #3b82f6; margin-bottom: 24px; font-family: monospace; }}
+        .btn {{ display: block; width: 100%; padding: 14px 0; background: #3b82f6; color: #fff; font-weight: 600; text-decoration: none; border-radius: 14px; font-size: 16px; margin-bottom: 12px; }}
+        .btn-sub {{ background: rgba(255,255,255,0.1); color: #fff; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🎵 YZ Music Party</h1>
+        <p>You've been invited to Listen Together!</p>
+        <div class="code">{clean_code}</div>
+        <a class="btn" href="intent://yz-music-party.onrender.com/invite/{clean_code}#Intent;scheme=https;package=com.music.yzmusic;end">Open in YZ Music</a>
+        <a class="btn btn-sub" href="https://github.com/4shil/YZ-Music/releases/latest">Download YZ Music APK</a>
+    </div>
+</body>
+</html>"""
 
 
 @app.get("/api/time")
