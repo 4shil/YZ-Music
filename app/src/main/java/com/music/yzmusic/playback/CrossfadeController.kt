@@ -1,4 +1,4 @@
-﻿package com.music.yzmusic.playback
+package com.music.yzmusic.playback
 
 import android.os.SystemClock
 import android.util.Log
@@ -10,9 +10,11 @@ import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.AutomixPerformanceMode
 import com.music.yzmusic.data.settings.SmartAnalysis
 import com.music.yzmusic.data.settings.TrackAnalysisState
 import com.music.yzmusic.data.settings.TransitionWindow
+import com.music.yzmusic.playback.smart.AutomixDurationPolicy
 import com.music.yzmusic.playback.smart.CrossfadeMode
 import com.music.yzmusic.playback.smart.TrackAnalysis
 import com.music.yzmusic.playback.smart.TransitionStyle
@@ -524,6 +526,7 @@ class CrossfadeController(
         // don't fight; falls back to a fixed length when it's at "Off".
         val fallbackSeconds = configuredFadeMs().takeIf { it > 0L }
             ?.div(1000.0)
+            ?.coerceIn(AutomixDurationPolicy.SAFE_MIN_SECONDS, AutomixDurationPolicy.ABSOLUTE_MAX_SECONDS)
             ?: DEFAULT_SMART_FALLBACK_SECONDS
 
         // Resolved once and reused: [analysisFor] was being called five separate
@@ -601,8 +604,8 @@ class CrossfadeController(
 
         if (plan.blocked) return
 
-        val fade = plan.fadeMs
-        if (fade <= 0L) return
+        val safeFadeMs = AutomixDurationPolicy.clampFadeMs(plan.fadeMs, duration, nextDuration)
+        if (safeFadeMs <= 0L) return
 
         val transitionStartMs = (plan.transitionStart * 1000).roundToLong()
         val remaining = transitionStartMs - player.currentPosition
@@ -612,9 +615,11 @@ class CrossfadeController(
         // file actually ends.
         if (remaining > ARM_LEAD_MS) return
 
+        val safeEndMs = transitionStartMs + safeFadeMs
+
         begin(
-            fade,
-            endMs = (plan.transitionEnd * 1000).roundToLong(),
+            safeFadeMs,
+            endMs = safeEndMs,
             smart = true,
             cueTimeMs = (plan.incomingCueTime * 1000).roundToLong(),
             playbackRate = plan.incomingPlaybackRate,
@@ -647,6 +652,15 @@ class CrossfadeController(
         val nextItem = player.getMediaItemAt(nextIndex)
         requestAnalysis(currentItem, duration)
         requestAnalysis(nextItem, nextItemDurationMs(nextIndex, nextItem))
+
+        // Predictive Lookahead: in PERFORMANCE mode, look ahead one more track if available
+        if (AppSettings.automixPerformance.value == AutomixPerformanceMode.PERFORMANCE) {
+            val nextNextIndex = nextIndex + 1
+            if (nextNextIndex < player.mediaItemCount) {
+                val nextNextItem = player.getMediaItemAt(nextNextIndex)
+                requestAnalysis(nextNextItem, nextItemDurationMs(nextNextIndex, nextNextItem))
+            }
+        }
     }
 
     /**
@@ -777,7 +791,12 @@ class CrossfadeController(
         val nextIndex = out.nextMediaItemIndex
         if (nextIndex == C.INDEX_UNSET) return false
 
-        fadeMs = fade
+        val clampedFade = if (smart) {
+            fade.coerceIn(1L, AutomixDurationPolicy.ABSOLUTE_MAX_MS)
+        } else {
+            fade
+        }
+        fadeMs = clampedFade
         fadeEndMs = endMs
         smartFadeActive = smart
         incomingCueTimeMs = cueTimeMs.coerceAtLeast(0L)
@@ -793,7 +812,7 @@ class CrossfadeController(
 
         Log.d(
             TAG,
-            "arm ${if (smart) "smart" else "standard"} fade=${fade}ms end=${endMs}ms " +
+            "arm ${if (smart) "smart" else "standard"} fade=${clampedFade}ms end=${endMs}ms " +
                 "cue=${incomingCueTimeMs}ms rate=$incomingPlaybackRate at=${out.currentPosition}ms " +
                 "style=${render.style} bassSwap=${render.bassSwap}@${render.bassSwapFraction} " +
                 "sweep=${render.filterSweep}",
@@ -1379,7 +1398,7 @@ class CrossfadeController(
          * Once real analysis lands, the overlap is sized from tempo and
          * structure instead and this is never read.
          */
-        const val DEFAULT_SMART_FALLBACK_SECONDS = 6.0
+        const val DEFAULT_SMART_FALLBACK_SECONDS = AutomixDurationPolicy.DEFAULT_FALLBACK_SECONDS
 
         /** Ramp used when a fade is interrupted. */
         const val BAIL_MS = 120L

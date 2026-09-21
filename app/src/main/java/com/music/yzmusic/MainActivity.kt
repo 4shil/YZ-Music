@@ -46,7 +46,10 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Person
@@ -87,8 +90,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.semantics.Role
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
+import dev.chrisbanes.haze.materials.HazeMaterials
 import com.music.yzmusic.auth.YtMusicLoginScreen
 import com.music.yzmusic.data.AppUpdateChecker
 import com.music.yzmusic.data.LocalMediaRepository
@@ -106,14 +113,19 @@ import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.durationMillis
 import com.music.yzmusic.data.scrobbling.LastFM
 import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.SongSort
 import com.music.yzmusic.data.settings.ThemeMode
 import com.music.yzmusic.ui.screens.AccountAndScrobblingScreen
+import com.music.yzmusic.ui.screens.EqualizerScreen
 import com.music.yzmusic.ui.screens.ExploreScreen
 import com.music.yzmusic.ui.screens.HistoryScreen
+import com.music.yzmusic.ui.screens.ListenTogetherScreen
 import com.music.yzmusic.ui.screens.LiquidGlassScreen
 import com.music.yzmusic.ui.screens.SettingsScreen
 import com.music.yzmusic.ui.screens.SourcesScreen
 import com.music.yzmusic.ui.screens.SpotifyCanvasAuthScreen
+import com.music.yzmusic.data.listentogether.JamInviteLink
+import com.music.yzmusic.data.listentogether.ListenTogether
 import com.music.yzmusic.playback.LinkRequest
 import com.music.yzmusic.playback.MusicLink
 import com.music.yzmusic.playback.PlayerDeepLink
@@ -207,6 +219,7 @@ class MainActivity : AppCompatActivity() {
         PlayerDeepLink.consume(intent)
         // Likewise for a link tapped or shared from another app — see [MusicLink].
         MusicLink.consume(intent)
+        JamInviteLink.consume(intent)
         setContent {
             val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
             val highPerformance by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
@@ -283,6 +296,7 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         PlayerDeepLink.consume(intent)
         MusicLink.consume(intent)
+        JamInviteLink.consume(intent)
     }
 }
 
@@ -349,6 +363,16 @@ private fun YZMusicApp(
     var showSources by remember { mutableStateOf(false) }
     var showLiquidGlass by remember { mutableStateOf(false) }
     var showSpotifyCanvasAuth by remember { mutableStateOf(false) }
+    var showEqualizer by remember { mutableStateOf(false) }
+    var showListenTogether by remember { mutableStateOf(false) }
+    var songSortMenuOpen by remember { mutableStateOf(false) }
+
+    val pendingInvite by JamInviteLink.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingInvite) {
+        if (pendingInvite != null) {
+            showListenTogether = true
+        }
+    }
     
     // Hosted here rather than inside SourcesScreen so its scrim covers the tab
     // bar and mini player, like every other alert in the app.
@@ -1421,6 +1445,9 @@ private fun YZMusicApp(
             enabled = detail != null && !showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass &&
                 !showReplay,
         ) { viewModel.closeDetail() }
+        BackHandler(enabled = songSortMenuOpen) { songSortMenuOpen = false }
+        BackHandler(enabled = showEqualizer) { showEqualizer = false }
+        BackHandler(enabled = showListenTogether) { showListenTogether = false }
         BackHandler(enabled = showAccountScrobbling) {
             showAccountScrobbling = false
         }
@@ -1433,7 +1460,7 @@ private fun YZMusicApp(
         // One back step out of Settings, or out of any tab but Home, lands on
         // Home rather than exiting — only Home itself hands back to the system,
         // which is what actually closes/minimizes the app.
-        BackHandler(enabled = showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass) {
+        BackHandler(enabled = showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass && !showEqualizer && !showListenTogether) {
             showSettings = false
             // Only when Settings was the whole of what was on screen. Opened
             // over Replay or over a release page, closing it reveals that again
@@ -1476,10 +1503,8 @@ private fun YZMusicApp(
                         showAccountScrobbling -> "account_scrobbling"
                         showSources -> "sources"
                         showLiquidGlass -> "liquid_glass"
-                        // Above Replay, not below it. The top bar's account
-                        // button sets `showSettings` from every page including
-                        // this one, so with Replay winning the tie the button
-                        // was live, hit, and changed nothing on screen.
+                        showEqualizer -> "equalizer"
+                        showListenTogether -> "listen_together"
                         showSettings -> "settings"
                         showReplay -> "replay"
                         detail != null -> detail.browseId
@@ -1549,7 +1574,8 @@ private fun YZMusicApp(
                     // the identical copy fading in behind it.
                     val live = detailStack.lastOrNull()?.takeIf {
                         it.browseId == key && key != "settings" && key != "account_scrobbling" &&
-                            key != "replay" && key != "history" &&
+                            key != "replay" && key != "history" && key != "equalizer" &&
+                            key != "listen_together" && key != "sources" && key != "liquid_glass" &&
                             key != "library_show_all"
                     }
                     // Held for the same reason, one step further on: a popped
@@ -1639,6 +1665,21 @@ private fun YZMusicApp(
                         LiquidGlassScreen(
                             contentPadding = listPadding,
                         )
+                    } else if (key == "equalizer") {
+                        EqualizerScreen(
+                            contentPadding = listPadding,
+                        )
+                    } else if (key == "listen_together") {
+                        ListenTogetherScreen(
+                            signedIn = signedIn,
+                            inviteCode = pendingInvite,
+                            onInviteJoined = { JamInviteLink.handled() },
+                            onSignIn = {
+                                showListenTogether = false
+                                showLogin = true
+                            },
+                            contentPadding = listPadding,
+                        )
                     } else if (key == "settings") {
                         SettingsScreen(
                             windowWidth = windowWidth,
@@ -1659,6 +1700,8 @@ private fun YZMusicApp(
                             onSpotifyCanvasAuth = { showSpotifyCanvasAuth = true },
                             onAppLanguage = { showAppLanguage = true },
                             onLiquidGlass = { showLiquidGlass = true },
+                            onEqualizer = { showEqualizer = true },
+                            onListenTogether = { showListenTogether = true },
                             contentPadding = listPadding,
                         )
                     } else if (page != null && page.browseId.isDeviceFolder()) {
@@ -1740,8 +1783,11 @@ private fun YZMusicApp(
                                 song
                             }
                         }
+                        val detailSorts by AppSettings.detailSongSorts.collectAsStateWithLifecycle()
+                        val currentSongSort = detailSorts[page.browseId] ?: SongSort.DEFAULT
                         DetailScreen(
                             page = page,
+                            songSort = currentSongSort,
                             listState = detailListState,
                             onSongClick = play,
                             onSongLongPress = { openSongMenu(withAlbum(it)) },
@@ -1944,14 +1990,13 @@ private fun YZMusicApp(
                             },
                             history = searchHistory,
                             suggestions = searchSuggestions,
+                            typeaheadResults = viewModel.typeaheadResults.collectAsStateWithLifecycle().value,
                             onSubmit = viewModel::submitSearch,
-                            // A suggestion and a recent search are the same act — a
-                            // term picked out of a list rather than typed — so they run
-                            // through the same path and both land in the history.
                             onSuggestionClick = viewModel::searchFor,
                             onHistoryClick = viewModel::searchFor,
                             onHistoryRemove = viewModel::removeSearch,
                             onHistoryClear = viewModel::clearSearchHistory,
+                            onTypeaheadLongPress = openSongMenu,
                             contentPadding = listPadding,
                         )
                         else -> LibraryScreen(
@@ -2002,11 +2047,13 @@ private fun YZMusicApp(
 
                 FrostedTopBar(
                     title = when {
+                        showEqualizer -> stringResource(R.string.equalizer)
+                        showListenTogether -> stringResource(R.string.listen_together)
                         showHistory -> "History"
                         libraryShowAll != null && detail == null -> libraryShowAll?.title.orEmpty()
-                        showAccountScrobbling -> "Account & scrobbling"
+                        showAccountScrobbling -> stringResource(R.string.account_integrations)
                         showSources -> "Sources"
-                        showLiquidGlass -> stringResource(R.string.liquid_glass)
+                        showLiquidGlass -> "Liquid Glass"
                         showSettings -> "Settings"
                         showReplay -> "Replay"
                         detail != null -> detail.title
@@ -2018,6 +2065,7 @@ private fun YZMusicApp(
                     // the field takes that space — so its bar title is always up.
                     scrolled = when {
                         showSettings || showAccountScrobbling || showSources || showLiquidGlass || showHistory ||
+                            showEqualizer || showListenTogether ||
                             (libraryShowAll != null && detail == null) -> true
                         // The page leads with its own large "Replay", so the bar
                         // stays out of the way until that has been scrolled off.
@@ -2028,6 +2076,8 @@ private fun YZMusicApp(
                     refreshing = currentFeed != null && currentFeed in refreshing,
                     pullFraction = { currentPull?.distanceFraction ?: 0f },
                     onBack = when {
+                        showEqualizer -> ({ showEqualizer = false })
+                        showListenTogether -> ({ showListenTogether = false })
                         showHistory -> ({ showHistory = false })
                         libraryShowAll != null && detail == null -> ({ libraryShowAll = null })
                         showAccountScrobbling -> ({ showAccountScrobbling = false })
@@ -2042,7 +2092,9 @@ private fun YZMusicApp(
                     actions = {
                         // Only worth surfacing where there's room for it and it won't
                         // be mistaken for a per-page action — Home, at rest.
-                        if (!showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass && detail == null && selectedTab == TAB_HOME) {
+                        if (!showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass &&
+                            !showEqualizer && !showListenTogether && detail == null && selectedTab == TAB_HOME
+                        ) {
                             updateNotice?.let { update ->
                                 IconButton(onClick = { showUpdateDialog = true }) {
                                     Icon(
@@ -2053,7 +2105,16 @@ private fun YZMusicApp(
                                 }
                             }
                         }
-                        if (!showSettings && !showAccountScrobbling && !showLiquidGlass) {
+                        if (!showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass && !showEqualizer && !showListenTogether) {
+                            if (detail != null) {
+                                IconButton(onClick = { songSortMenuOpen = true }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.Sort,
+                                        contentDescription = stringResource(R.string.sort_library),
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
                             // Left of the account photo, and only on Library itself:
                             // a history is a record of what was played, which reads
                             // as that tab's business rather than every tab's.
@@ -2108,6 +2169,8 @@ private fun YZMusicApp(
                         }
                         viewModel.clearDetail()
                         showSettings = false
+                        showEqualizer = false
+                        showListenTogether = false
                         showAccountScrobbling = false
                         showSources = false
                         showLiquidGlass = false
@@ -2416,6 +2479,20 @@ private fun YZMusicApp(
                     },
                 )
             }
+        }
+
+        if (songSortMenuOpen) {
+            val detailSorts by AppSettings.detailSongSorts.collectAsStateWithLifecycle()
+            val currentSongSort = detail?.browseId?.let { detailSorts[it] } ?: SongSort.DEFAULT
+            FrostedSortMenu(
+                hazeState = hazeState,
+                selected = currentSongSort,
+                onSelect = { option ->
+                    detail?.browseId?.let { AppSettings.setDetailSongSort(it, option) }
+                    songSortMenuOpen = false
+                },
+                onDismiss = { songSortMenuOpen = false },
+            )
         }
 
         // ---- Album / playlist actions ----
@@ -2863,3 +2940,78 @@ private const val TAB_SEARCH = 3
  * prefix has to be the one thing both the writing and the reading agree on.
  */
 private const val TAB_KEY = "tab:"
+
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+private fun FrostedSortMenu(
+    hazeState: HazeState,
+    selected: SongSort,
+    onSelect: (SongSort) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val shape = MaterialTheme.shapes.extraLarge
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = .48f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.TopEnd,
+    ) {
+        Surface(
+            color = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shape = shape,
+            modifier = Modifier
+                .padding(top = 56.dp, end = 20.dp)
+                .widthIn(min = 240.dp)
+                .clip(shape)
+                .then(
+                    if (reduceDynamicBlur) {
+                        Modifier.background(MaterialTheme.colorScheme.surface)
+                    } else {
+                        Modifier.hazeEffect(
+                            state = hazeState,
+                            style = HazeMaterials.thin(MaterialTheme.colorScheme.surface),
+                        )
+                    },
+                )
+                .clickable(onClick = {}),
+        ) {
+            Column(Modifier.padding(vertical = 8.dp)) {
+                SongSort.entries.forEach { option ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 44.dp)
+                            .clickable(role = Role.Button) { onSelect(option) }
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            option.localizedLabel(),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (option == selected) {
+                            Icon(
+                                Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SongSort.localizedLabel(): String = when (this) {
+    SongSort.DEFAULT -> stringResource(R.string.sort_default)
+    SongSort.TITLE_ASC -> stringResource(R.string.sort_title_ascending)
+    SongSort.TITLE_DESC -> stringResource(R.string.sort_title_descending)
+    SongSort.DATE_ADDED_ASC -> stringResource(R.string.sort_date_added_oldest)
+    SongSort.DATE_ADDED_DESC -> stringResource(R.string.sort_date_added)
+}

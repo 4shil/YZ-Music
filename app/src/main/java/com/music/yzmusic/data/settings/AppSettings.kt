@@ -8,8 +8,37 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import com.music.yzmusic.BuildConfig
 import com.music.yzmusic.data.lyrics.LyricsSource
+import com.music.yzmusic.playback.EqLayout
+import com.music.yzmusic.playback.EqualizerPreset
 import com.music.yzmusic.ui.components.isGlassSupported
 import kotlinx.coroutines.flow.MutableStateFlow
+
+/**
+ * Which of the equaliser's two tabs is driving the sound.
+ */
+enum class EqualizerMode {
+    /** The tone pad: tilt, contour, and how wide each is. */
+    DYNAMIC,
+
+    /** Seven sliders and a preset list. */
+    MANUAL,
+}
+
+/**
+ * Ordering for the track list on an album or playlist page — the same idea as
+ * the Downloads folder's sort, with a date option for the one thing a
+ * catalogue row can still be dated by: the position it sits at. A playlist's
+ * running order is the order songs were added in — YouTube Music appends each
+ * addition at the foot — so read backwards it *is* a date order, newest first.
+ * DetailScreen.kt holds the sort itself.
+ */
+enum class SongSort {
+    DEFAULT,
+    TITLE_ASC,
+    TITLE_DESC,
+    DATE_ADDED_ASC,
+    DATE_ADDED_DESC,
+}
 
 /**
  * Stream bitrate ceiling. HIGH means "whatever the best available format is".
@@ -451,6 +480,22 @@ object AppSettings {
     val persistedRepeatMode = MutableStateFlow(0)
     val persistedShuffleMode = MutableStateFlow(false)
 
+    val equalizerEnabled = MutableStateFlow(false)
+    val equalizerMode = MutableStateFlow(EqualizerMode.DYNAMIC)
+    val equalizerToneX = MutableStateFlow(0)
+    val equalizerToneY = MutableStateFlow(0)
+    val equalizerFocused = MutableStateFlow(false)
+    val equalizerBalance = MutableStateFlow(0f)
+    val equalizerBands = MutableStateFlow(EqualizerPreset.FLAT.bands)
+    val equalizerPreset = MutableStateFlow(EqualizerPreset.FLAT)
+
+    /**
+     * Each album/playlist page's track-list order, keyed by browse id —
+     * Spotify-style, every page keeps its own. A page never touched reads as
+     * [SongSort.DEFAULT].
+     */
+    val detailSongSorts = MutableStateFlow<Map<String, SongSort>>(emptyMap())
+
     /**
      * Whether a download may start on the connection in hand.
      *
@@ -586,6 +631,17 @@ object AppSettings {
         listenbrainzPrimaryArtistOnly.value = prefs.getBoolean(KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY, false)
         persistedRepeatMode.value = prefs.getInt(KEY_REPEAT_MODE, 0)
         persistedShuffleMode.value = prefs.getBoolean(KEY_SHUFFLE_MODE, false)
+        equalizerEnabled.value = prefs.getBoolean(KEY_EQ_ENABLED, false)
+        equalizerMode.value = runCatching {
+            EqualizerMode.valueOf(prefs.getString(KEY_EQ_MODE, null) ?: EqualizerMode.DYNAMIC.name)
+        }.getOrDefault(EqualizerMode.DYNAMIC)
+        equalizerToneX.value = prefs.getInt(KEY_EQ_TONE_X, 0).coerceIn(-EqLayout.TONE_STEPS, EqLayout.TONE_STEPS)
+        equalizerToneY.value = prefs.getInt(KEY_EQ_TONE_Y, 0).coerceIn(-EqLayout.TONE_STEPS, EqLayout.TONE_STEPS)
+        equalizerFocused.value = prefs.getBoolean(KEY_EQ_FOCUSED, false)
+        equalizerBalance.value = prefs.getFloat(KEY_EQ_BALANCE, 0f).coerceIn(-1f, 1f)
+        equalizerBands.value = readEqualizerBands()
+        equalizerPreset.value = EqualizerPreset.matching(equalizerBands.value)
+        detailSongSorts.value = readDetailSongSorts()
     }
 
     /**
@@ -1169,6 +1225,79 @@ object AppSettings {
         }
     }
 
+    fun setEqualizerEnabled(value: Boolean) {
+        equalizerEnabled.value = value
+        prefs.edit().putBoolean(KEY_EQ_ENABLED, value).apply()
+    }
+
+    fun setEqualizerMode(value: EqualizerMode) {
+        equalizerMode.value = value
+        prefs.edit().putString(KEY_EQ_MODE, value.name).apply()
+    }
+
+    fun setEqualizerTone(x: Int, y: Int) {
+        val steps = EqLayout.TONE_STEPS
+        val clampedX = x.coerceIn(-steps, steps)
+        val clampedY = y.coerceIn(-steps, steps)
+        equalizerToneX.value = clampedX
+        equalizerToneY.value = clampedY
+        prefs.edit().putInt(KEY_EQ_TONE_X, clampedX).putInt(KEY_EQ_TONE_Y, clampedY).apply()
+    }
+
+    fun setEqualizerFocused(value: Boolean) {
+        equalizerFocused.value = value
+        prefs.edit().putBoolean(KEY_EQ_FOCUSED, value).apply()
+    }
+
+    fun setEqualizerBalance(value: Float) {
+        val clamped = value.coerceIn(-1f, 1f)
+        equalizerBalance.value = clamped
+        prefs.edit().putFloat(KEY_EQ_BALANCE, clamped).apply()
+    }
+
+    fun setEqualizerBands(values: List<Float>) {
+        val clamped = List(EqLayout.MANUAL_COUNT) {
+            values.getOrElse(it) { 0f }.coerceIn(-EqLayout.MANUAL_RANGE_DB, EqLayout.MANUAL_RANGE_DB)
+        }
+        equalizerBands.value = clamped
+        equalizerPreset.value = EqualizerPreset.matching(clamped)
+        prefs.edit().putString(KEY_EQ_BANDS, clamped.joinToString(",")).apply()
+    }
+
+    fun setEqualizerPreset(preset: EqualizerPreset) {
+        if (preset == EqualizerPreset.CUSTOM) return
+        setEqualizerBands(preset.bands)
+    }
+
+    private fun readEqualizerBands(): List<Float> {
+        val stored = prefs.getString(KEY_EQ_BANDS, null)
+            ?.split(",")
+            ?.mapNotNull { it.trim().toFloatOrNull() }
+            .orEmpty()
+        return List(EqLayout.MANUAL_COUNT) {
+            stored.getOrElse(it) { 0f }.coerceIn(-EqLayout.MANUAL_RANGE_DB, EqLayout.MANUAL_RANGE_DB)
+        }
+    }
+
+    fun setDetailSongSort(browseId: String, value: SongSort) {
+        detailSongSorts.value = detailSongSorts.value + (browseId to value)
+        prefs.edit().putString(
+            KEY_DETAIL_SONG_SORTS,
+            detailSongSorts.value.entries.joinToString(",") { (id, sort) -> "$id=${sort.name}" },
+        ).apply()
+    }
+
+    private fun readDetailSongSorts(): Map<String, SongSort> =
+        prefs.getString(KEY_DETAIL_SONG_SORTS, null)
+            ?.split(",")
+            ?.mapNotNull { entry ->
+                val id = entry.substringBefore('=', "")
+                val sort = SongSort.entries.firstOrNull { it.name == entry.substringAfter('=', "") }
+                if (id.isBlank() || sort == null) null else id to sort
+            }
+            ?.toMap()
+            ?: emptyMap()
+
     // ── Backup ──────────────────────────────────────────────────────────────
 
     /**
@@ -1331,6 +1460,14 @@ object AppSettings {
     private const val KEY_LISTENBRAINZ_PRIMARY_ARTIST_ONLY = "listenbrainz_primary_artist_only"
     private const val KEY_REPEAT_MODE = "repeat_mode"
     private const val KEY_SHUFFLE_MODE = "shuffle_mode"
+    private const val KEY_EQ_ENABLED = "equalizer_enabled"
+    private const val KEY_EQ_MODE = "equalizer_mode"
+    private const val KEY_EQ_TONE_X = "equalizer_tone_x"
+    private const val KEY_EQ_TONE_Y = "equalizer_tone_y"
+    private const val KEY_EQ_FOCUSED = "equalizer_focused"
+    private const val KEY_EQ_BALANCE = "equalizer_balance"
+    private const val KEY_EQ_BANDS = "equalizer_bands"
+    private const val KEY_DETAIL_SONG_SORTS = "detail_song_sorts"
 
     const val DEFAULT_PERFORMANCE_REFRESH_RATE = 120
     fun normalizePerformanceRefreshRate(value: Int): Int =

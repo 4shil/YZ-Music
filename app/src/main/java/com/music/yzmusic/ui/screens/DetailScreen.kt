@@ -208,8 +208,10 @@ fun DetailScreen(
      * wouldn't just be refused.
      */
     onToggleLibrary: (() -> Unit)? = null,
+    songSort: com.music.yzmusic.data.settings.SongSort = com.music.yzmusic.data.settings.SongSort.DEFAULT,
 ) {
-    val songs = (page.songs as? UiState.Success)?.data.orEmpty()
+    val rawSongs = (page.songs as? UiState.Success)?.data.orEmpty()
+    val songs = remember(rawSongs, songSort) { rawSongs.sortedForDetail(songSort) }
     val isArtist = page.type == BrowseType.ARTIST
     val palette = rememberArtworkPalette(page.thumbnailUrl)
 
@@ -2078,4 +2080,24 @@ private fun String?.toSeconds(): Int {
         3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
         else -> 0
     }
+}
+
+internal fun List<Song>.sortedForDetail(sort: com.music.yzmusic.data.settings.SongSort): List<Song> = when (sort) {
+    com.music.yzmusic.data.settings.SongSort.DEFAULT -> this
+    com.music.yzmusic.data.settings.SongSort.TITLE_ASC -> sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+    com.music.yzmusic.data.settings.SongSort.TITLE_DESC -> sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.title })
+    com.music.yzmusic.data.settings.SongSort.DATE_ADDED_ASC -> withIndex()
+        .sortedWith(
+            compareBy<IndexedValue<Song>> { (_, song) ->
+                song.localDateAddedSeconds ?: Long.MAX_VALUE
+            }.thenBy { (position, _) -> position },
+        )
+        .map { it.value }
+    com.music.yzmusic.data.settings.SongSort.DATE_ADDED_DESC -> withIndex()
+        .sortedWith(
+            compareByDescending<IndexedValue<Song>> { (_, song) ->
+                song.localDateAddedSeconds ?: Long.MIN_VALUE
+            }.thenByDescending { (position, _) -> position },
+        )
+        .map { it.value }
 }

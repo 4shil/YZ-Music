@@ -103,6 +103,8 @@ class YZMusicApplication : Application(), SingletonImageLoader.Factory {
         initLastfm()
         // Probe Dolby Atmos hardware capabilities asynchronously on IO thread
         DeviceCodecs.probeAsync()
+        // Listen Together party connection manager
+        com.music.yzmusic.data.listentogether.ListenTogether.init(this)
     }
 
     /**

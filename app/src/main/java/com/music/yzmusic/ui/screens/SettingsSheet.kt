@@ -54,6 +54,7 @@ import androidx.compose.material.icons.rounded.LocalOffer
 import androidx.compose.material.icons.rounded.MusicOff
 import androidx.compose.material.icons.rounded.MotionPhotosOff
 import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.SignalCellularAlt
@@ -184,6 +185,8 @@ fun SettingsScreen(
     onSpotifyCanvasAuth: () -> Unit,
     onAppLanguage: () -> Unit,
     onLiquidGlass: () -> Unit = {},
+    onEqualizer: () -> Unit = {},
+    onListenTogether: () -> Unit = {},
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -349,6 +352,13 @@ fun SettingsScreen(
                 subtitle = account?.email?.takeIf { it.isNotBlank() }
                     ?: if (signedIn) stringResource(R.string.signed_in) else stringResource(R.string.not_signed_in),
                 onClick = onAccountScrobbling,
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.Groups,
+                title = stringResource(R.string.listen_together),
+                subtitle = stringResource(R.string.listen_together_subtitle),
+                onClick = onListenTogether,
             )
         }
 
@@ -757,7 +767,7 @@ fun SettingsScreen(
                 icon = Icons.Rounded.Tune,
                 title = stringResource(R.string.equalizer),
                 subtitle = stringResource(R.string.equalizer_subtitle),
-                onClick = { openEqualizer(context, sessionId) },
+                onClick = onEqualizer,
             )
         }
 
@@ -1593,7 +1603,7 @@ private fun ThemeMode.localizedLabel(): String = stringResource(
     },
 )
 
-private fun openEqualizer(context: Context, sessionId: Int) {
+internal fun openEqualizer(context: Context, sessionId: Int) {
     val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
         putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
         putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
@@ -2358,6 +2368,7 @@ internal val TEXT_INSET = ROW_INSET + ICON_SIZE + ICON_GAP
 internal fun SettingsGroup(
     header: String? = null,
     footer: String? = null,
+    topSpacing: Dp = 26.dp,
     content: @Composable () -> Unit,
 ) {
     if (header != null) {
@@ -2368,12 +2379,12 @@ internal fun SettingsGroup(
             modifier = Modifier.padding(
                 start = GROUP_INSET + 4.dp,
                 end = GROUP_INSET,
-                top = 26.dp,
+                top = topSpacing,
                 bottom = 8.dp,
             ),
         )
     } else {
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(topSpacing))
     }
     Column(
         modifier = Modifier
@@ -2670,7 +2681,7 @@ internal fun DestructiveRow(label: String, onClick: () -> Unit) {
 
 /** Sliding pill selector, for the handful of settings with two or three states. */
 @Composable
-private fun SegmentedControl(
+internal fun SegmentedControl(
     options: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,

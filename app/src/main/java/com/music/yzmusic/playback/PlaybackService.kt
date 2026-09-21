@@ -165,6 +165,9 @@ class PlaybackService : MediaLibraryService() {
      */
     private val spatialAudioProcessorA = SpatialAudioProcessor()
     private val spatialAudioProcessorB = SpatialAudioProcessor()
+    private val equalizerProcessorA = EqualizerProcessor()
+    private val equalizerProcessorB = EqualizerProcessor()
+    private var partySync: PartySync? = null
     @Volatile
     private var currentIsAtmos: Boolean = false
 
@@ -383,6 +386,7 @@ class PlaybackService : MediaLibraryService() {
          */
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             publishWidgetState(playing = playWhenReady)
+            partySync?.onPlayWhenReadyChanged(playWhenReady, reason)
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -418,6 +422,9 @@ class PlaybackService : MediaLibraryService() {
                     reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT,
                 reason = reason,
             )
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                partySync?.onLocalIntent()
+            }
             autoplayLoadJob?.cancel()
             autoplayLoadJob = null
             autoplaySeed = null
@@ -853,8 +860,8 @@ class PlaybackService : MediaLibraryService() {
         mediaSourceFactory = DefaultMediaSourceFactory(AudioCache.playbackFactory(defaultDataSourceFactory))
             .setLoadErrorHandlingPolicy(PermanentAwareLoadErrorPolicy())
 
-        val exoPlayer = buildPlayer(spatialAudioProcessorA, transitionFilterA, ownsSession = true)
-        val sparePlayer = buildPlayer(spatialAudioProcessorB, transitionFilterB, ownsSession = false)
+        val exoPlayer = buildPlayer(spatialAudioProcessorA, equalizerProcessorA, transitionFilterA, ownsSession = true)
+        val sparePlayer = buildPlayer(spatialAudioProcessorB, equalizerProcessorB, transitionFilterB, ownsSession = false)
         player = exoPlayer
         spare = sparePlayer
         // Both sinks feed the same session id, so the system equalizer and any
@@ -868,6 +875,7 @@ class PlaybackService : MediaLibraryService() {
         AppSettings.audioSessionId.value = exoPlayer.audioSessionId
         applySettings(exoPlayer)
         applySettings(sparePlayer)
+        applyEqualizer()
         observeSettings()
         observeScrobbling()
         watchSleepTimer()
@@ -922,9 +930,18 @@ class PlaybackService : MediaLibraryService() {
         crossfade = controller
         controller.start()
 
+        val sync = PartySync(scope) { player }
+        partySync = sync
+        sync.start()
+
         mediaSession = MediaLibraryService.MediaLibrarySession.Builder(
             this,
-            SessionPlayer(exoPlayer, controller),
+            SessionPlayer(
+                exoPlayer,
+                controller,
+                onUserIntent = { partySync?.onLocalIntent() },
+                deferPlayToParty = { partySync?.shouldDeferPlay() == true },
+            ),
             MediaLibraryCallback(),
         )
             .setId(SESSION_ID)
@@ -1148,10 +1165,11 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun buildPlayer(
         spatial: SpatialAudioProcessor,
+        equalizer: EqualizerProcessor,
         filter: TransitionFilterProcessor,
         ownsSession: Boolean,
     ): ExoPlayer = ExoPlayer.Builder(this)
-        .setRenderersFactory(silenceSkippingRenderers(spatial, filter))
+        .setRenderersFactory(silenceSkippingRenderers(spatial, equalizer, filter))
         .setMediaSourceFactory(requireNotNull(mediaSourceFactory))
         .setLoadControl(farBufferingLoadControl())
         .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
@@ -1186,7 +1204,13 @@ class PlaybackService : MediaLibraryService() {
         incoming.addListener(playbackListener)
         incoming.addAnalyticsListener(formatListener)
 
-        mediaSession?.player = SessionPlayer(incoming, requireNotNull(crossfade))
+        mediaSession?.player = SessionPlayer(
+            incoming,
+            requireNotNull(crossfade),
+            onUserIntent = { partySync?.onLocalIntent() },
+            deferPlayToParty = { partySync?.shouldDeferPlay() == true },
+        )
+        partySync?.onLocalIntent()
 
         // The queue moving on used to arrive here as an item transition on the
         // one player that owned the queue. It cannot any more — the incoming
@@ -3014,6 +3038,7 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun silenceSkippingRenderers(
         spatial: SpatialAudioProcessor,
+        equalizer: EqualizerProcessor,
         transition: TransitionFilterProcessor,
     ) = object : DefaultRenderersFactory(this) {
         override fun buildAudioRenderers(
@@ -3060,7 +3085,7 @@ class PlaybackService : MediaLibraryService() {
                         // Transition filtering last of the two: widening is a
                         // property of the track, and a bass swap that ran before it
                         // would have its own low end fed back in by the crossfeed.
-                        arrayOf(spatial, transition),
+                        arrayOf(spatial, equalizer, transition),
                         SilenceSkippingAudioProcessor(
                             MIN_SILENCE_US,
                             SilenceSkippingAudioProcessor.DEFAULT_SILENCE_RETENTION_RATIO,
@@ -3162,6 +3187,45 @@ class PlaybackService : MediaLibraryService() {
                 trackAnalyzer.applyPerformanceMode(mode)
             }
         }
+        scope.launch {
+            combine(
+                AppSettings.equalizerEnabled,
+                AppSettings.equalizerMode,
+                AppSettings.equalizerPreset,
+                AppSettings.equalizerToneX,
+                AppSettings.equalizerToneY,
+                AppSettings.equalizerFocused,
+                AppSettings.equalizerBalance,
+                AppSettings.equalizerBands,
+            ) { _ -> }.collectLatest {
+                applyEqualizer()
+            }
+        }
+    }
+
+    private fun applyEqualizer() {
+        val enabled = AppSettings.equalizerEnabled.value
+        val balance = AppSettings.equalizerBalance.value
+        val curve = if (enabled) {
+            when (AppSettings.equalizerMode.value) {
+                com.music.yzmusic.data.settings.EqualizerMode.DYNAMIC -> {
+                    toneCurve(
+                        x = AppSettings.equalizerToneX.value,
+                        y = AppSettings.equalizerToneY.value,
+                        focused = AppSettings.equalizerFocused.value,
+                    )
+                }
+                com.music.yzmusic.data.settings.EqualizerMode.MANUAL -> {
+                    manualCurve(
+                        bandsDb = AppSettings.equalizerBands.value,
+                    )
+                }
+            }
+        } else {
+            EqCurve.FLAT
+        }
+        equalizerProcessorA.setTuning(enabled = enabled, curve = curve, balance = balance)
+        equalizerProcessorB.setTuning(enabled = enabled, curve = curve, balance = balance)
     }
 
     private fun observeScrobbling() {
@@ -3831,6 +3895,8 @@ class PlaybackService : MediaLibraryService() {
 
 
     override fun onDestroy() {
+        partySync?.stop()
+        partySync = null
         audioManager?.unregisterAudioDeviceCallback(outputDeviceCallback)
         player?.let(::savePlaybackState)
         // And to leave the widgets showing a play button. Nothing else reports a
@@ -3918,9 +3984,23 @@ class PlaybackService : MediaLibraryService() {
     private class SessionPlayer(
         player: Player,
         private val crossfade: CrossfadeController,
+        private val onUserIntent: () -> Unit = {},
+        private val deferPlayToParty: () -> Boolean = { false },
     ) : ForwardingPlayer(player) {
 
+        override fun play() {
+            onUserIntent()
+            if (deferPlayToParty()) return
+            super.play()
+        }
+
+        override fun pause() {
+            onUserIntent()
+            super.pause()
+        }
+
         override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+            onUserIntent()
             crossfade.onSkipRequested()
             val skipped = skippedByQueueJump(currentMediaItemIndex, mediaItemIndex)
             if (skipped == null) {
@@ -3936,19 +4016,33 @@ class PlaybackService : MediaLibraryService() {
             wrappedPlayer.seekTo(skipped.first, positionMs)
         }
 
+        override fun seekTo(positionMs: Long) {
+            onUserIntent()
+            super.seekTo(positionMs)
+        }
+
         override fun seekToPreviousMediaItem() {
+            onUserIntent()
             crossfade.onSkipRequested()
             wrappedPlayer.seekToPrevious()
         }
 
         override fun seekToNextMediaItem() {
+            onUserIntent()
             crossfade.onSkipRequested()
             wrappedPlayer.seekToNextMediaItem()
         }
 
         override fun seekToNext() {
+            onUserIntent()
             crossfade.onSkipRequested()
             wrappedPlayer.seekToNext()
+        }
+
+        override fun seekToPrevious() {
+            onUserIntent()
+            crossfade.onSkipRequested()
+            wrappedPlayer.seekToPrevious()
         }
     }
 

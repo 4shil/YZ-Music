@@ -618,3 +618,53 @@ fun MessageState(
         }
     }
 }
+
+/**
+ * A compact, pill-shaped text field that sits cleanly in cards and dialogs.
+ */
+@Composable
+fun PillTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    isPassword: Boolean = false,
+    container: Color = MaterialTheme.colorScheme.surfaceVariant,
+    keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .background(container, androidx.compose.foundation.shape.RoundedCornerShape(11.dp))
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (value.isEmpty()) {
+            Text(
+                text = placeholder,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        androidx.compose.foundation.text.BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            enabled = enabled,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+            ),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+            visualTransformation = if (isPassword) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}

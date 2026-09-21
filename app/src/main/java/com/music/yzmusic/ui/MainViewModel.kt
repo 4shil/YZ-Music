@@ -131,6 +131,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _suggestions = MutableStateFlow<List<String>>(emptyList())
     val suggestions: StateFlow<List<String>> = _suggestions.asStateFlow()
 
+    private val _typeaheadResults = MutableStateFlow<List<SearchResult>>(emptyList())
+    val typeaheadResults: StateFlow<List<SearchResult>> = _typeaheadResults.asStateFlow()
+
     // The search pipeline's own state. Declared here, above [init], because
     // that is where the collector is started from and a property declared
     // below it would still be null when it runs. See [startSearchPipeline].
@@ -958,6 +961,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         startSearchPipeline()
         startSuggestPipeline()
+        startTypeaheadMediaPipeline()
         loadHome()
         loadExplore()
         if (_signedIn.value) {
@@ -1184,6 +1188,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _searchLoadingMore.value = false
             _results.value = null
             _suggestions.value = emptyList()
+            _typeaheadResults.value = emptyList()
             return
         }
         // The previous keystroke's completions are left up beneath the new
@@ -1220,6 +1225,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun submitSearch() {
         recordSearch()
         _suggestions.value = emptyList()
+        _typeaheadResults.value = emptyList()
         runSearch()
     }
 
@@ -1232,6 +1238,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun searchFor(term: String) {
         _query.value = term
         _suggestions.value = emptyList()
+        _typeaheadResults.value = emptyList()
         SearchHistory.record(term)
         runSearch()
     }
@@ -1357,16 +1364,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_searchLoadingMore.value) return
         _searchLoadingMore.value = true
         viewModelScope.launch {
-            val next = YtMusicRepository.searchContinuation(token, session.filter)
-            val stillCurrent = searchSession == session && session.requestId == newestRequestId.get()
-            if (stillCurrent) {
-                next.onSuccess { page ->
-                    val current = (_results.value as? UiState.Success)?.data.orEmpty()
-                    val merged = (current + page.rows).distinctBy(::searchResultKey)
-                    searchCache.put(session.key, SearchCacheEntry(merged, page.continuation))
-                    searchSession = session.copy(continuation = page.continuation)
-                    _results.value = UiState.Success(merged)
+            try {
+                val next = YtMusicRepository.searchContinuation(token, session.filter)
+                val stillCurrent = searchSession == session && session.requestId == newestRequestId.get()
+                if (stillCurrent) {
+                    next.onSuccess { page ->
+                        val current = (_results.value as? UiState.Success)?.data.orEmpty()
+                        val merged = (current + page.rows).distinctBy(::searchResultKey)
+                        searchCache.put(session.key, SearchCacheEntry(merged, page.continuation))
+                        searchSession = session.copy(continuation = page.continuation)
+                        _results.value = UiState.Success(merged)
+                    }
                 }
+            } finally {
                 _searchLoadingMore.value = false
             }
         }
@@ -1411,6 +1421,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (!stillWanted(input)) return@collectLatest
                 _suggestions.value = listOf(input) +
                     fetched.filterNot { it.equals(input, ignoreCase = true) }
+            }
+    }
+
+    /**
+     * Parallel pipeline that fetches live media results (tracks, artists,
+     * albums) for the current query text. Runs alongside [startSuggestPipeline]
+     * with its own debounce so a fast typist doesn't saturate the network.
+     */
+    @OptIn(FlowPreview::class)
+    private fun startTypeaheadMediaPipeline() = viewModelScope.launch {
+        suggestRequests
+            .debounce(TYPEAHEAD_MEDIA_DEBOUNCE_MS)
+            .collectLatest { input ->
+                if (input.isBlank()) {
+                    _typeaheadResults.value = emptyList()
+                    return@collectLatest
+                }
+                // Only show media results while the user is still typing — not
+                // reading committed search results.
+                if (_suggestions.value.isEmpty()) {
+                    _typeaheadResults.value = emptyList()
+                    return@collectLatest
+                }
+                val result = YtMusicRepository.searchTypeahead(input).getOrNull()
+                // If the field moved on, drop the result silently.
+                if (_query.value != input) {
+                    _typeaheadResults.value = emptyList()
+                    return@collectLatest
+                }
+                // Cap results so the dropdown doesn't grow unbounded.
+                _typeaheadResults.value = result?.rows.orEmpty().take(TYPEAHEAD_MAX_RESULTS)
             }
     }
 
@@ -1537,6 +1578,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
          * list is up by the time the thumb has left the key.
          */
         const val SUGGEST_DEBOUNCE_MS = 180L
+
+        /**
+         * Debounce for the parallel media-search pipeline. Slightly longer than
+         * text suggestions so it doesn't fire on every single keystroke.
+         */
+        const val TYPEAHEAD_MEDIA_DEBOUNCE_MS = 350L
+
+        /**
+         * Maximum number of live media results shown in the typeahead dropdown.
+         */
+        const val TYPEAHEAD_MAX_RESULTS = 8
 
         const val SEARCH_CACHE_ENTRIES = 100
 

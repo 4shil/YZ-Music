@@ -117,11 +117,13 @@ fun SearchScreen(
     onBrowseLongPress: ((BrowseItem) -> Unit)? = null,
     history: List<String>,
     suggestions: List<String>,
+    typeaheadResults: List<SearchResult> = emptyList(),
     onSubmit: () -> Unit,
     onSuggestionClick: (String) -> Unit,
     onHistoryClick: (String) -> Unit,
     onHistoryRemove: (String) -> Unit,
     onHistoryClear: () -> Unit,
+    onTypeaheadLongPress: ((Song) -> Unit)? = null,
     isLoadingMore: Boolean = loadingMore,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues,
@@ -146,6 +148,7 @@ fun SearchScreen(
     // up: the results are for whatever was searched before this edit began,
     // and so are the filter tabs above them.
     val suggesting = suggestions.isNotEmpty()
+    val showTypeahead = typeaheadResults.isNotEmpty() && suggesting
     LaunchedEffect(listState, results, isCurrentlyLoadingMore) {
         if (results !is UiState.Success) return@LaunchedEffect
         snapshotFlow {
@@ -184,16 +187,33 @@ fun SearchScreen(
             contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
         ) {
             when {
-                suggesting -> searchSuggestions(
-                    suggestions = suggestions,
-                    // Picking one is done typing, so the keyboard comes down
-                    // with it and the results get the whole screen.
-                    onClick = { term ->
-                        onSuggestionClick(term)
-                        focusManager.clearFocus()
-                    },
-                    onFill = onQueryChange,
-                )
+                suggesting -> {
+                    searchSuggestions(
+                        suggestions = suggestions,
+                        // Picking one is done typing, so the keyboard comes down
+                        // with it and the results get the whole screen.
+                        onClick = { term ->
+                            onSuggestionClick(term)
+                            focusManager.clearFocus()
+                        },
+                        onFill = onQueryChange,
+                    )
+                    if (showTypeahead) {
+                        searchTypeaheadDropdown(
+                            typeaheadResults = typeaheadResults,
+                            onSongClick = { song ->
+                                onTopResultPlay(song)
+                                focusManager.clearFocus()
+                            },
+                            onSongLongPress = onTypeaheadLongPress,
+                            onBrowseClick = { browse ->
+                                onBrowseClick(browse)
+                                focusManager.clearFocus()
+                            },
+                            onBrowseLongPress = onBrowseLongPress,
+                        )
+                    }
+                }
                 results == null -> if (history.isEmpty()) {
                     item { MessageState(stringResource(R.string.search_empty)) }
                 } else {
@@ -436,6 +456,100 @@ private fun SuggestionRow(term: String, onFill: (() -> Unit)?, onClick: () -> Un
             // Keeps the text column the same width as the rows below, so the
             // lead row doesn't sit a touch wider than its completions.
             Spacer(Modifier.width(40.dp))
+        }
+    }
+}
+
+/**
+ * Hybrid dropdown shown beneath text suggestions while typing: a horizontal
+ * divider, then live media rows (cover art + title + subtitle) that play on
+ * tap and open the song menu on long-press.
+ */
+private fun LazyListScope.searchTypeaheadDropdown(
+    typeaheadResults: List<SearchResult>,
+    onSongClick: (Song) -> Unit,
+    onSongLongPress: ((Song) -> Unit)?,
+    onBrowseClick: (BrowseItem) -> Unit,
+    onBrowseLongPress: ((BrowseItem) -> Unit)?,
+) {
+    item(key = "typeahead:divider") {
+        HorizontalDivider(
+            modifier = Modifier.padding(start = PAGE_GUTTER, end = PAGE_GUTTER),
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+        )
+    }
+    items(typeaheadResults, key = { result ->
+        when (result) {
+            is SearchResult.Track -> "ta:track:${result.song.videoId}"
+            is SearchResult.Browse -> "ta:browse:${result.item.browseId}"
+            is SearchResult.TopTrack -> "ta:top:${result.song.videoId}"
+        }
+    }) { result ->
+        when (result) {
+            is SearchResult.Track -> TypeaheadSongRow(
+                song = result.song,
+                onClick = { onSongClick(result.song) },
+                onLongPress = onSongLongPress?.let { { it(result.song) } },
+            )
+            is SearchResult.Browse -> BrowseRow(
+                item = result.item,
+                onClick = { onBrowseClick(result.item) },
+                onLongPress = onBrowseLongPress?.let { { it(result.item) } },
+            )
+            is SearchResult.TopTrack -> TypeaheadSongRow(
+                song = result.song,
+                onClick = { onSongClick(result.song) },
+                onLongPress = onSongLongPress?.let { { it(result.song) } },
+            )
+        }
+    }
+}
+
+/**
+ * A single media row inside the typeahead dropdown: 52dp cover art, title,
+ * and artist/album subtitle. Tap plays the track; long-press opens the menu.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TypeaheadSongRow(
+    song: Song,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = PAGE_GUTTER, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = song.artworkAt(ROW_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .thumbnailBorder(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = listOfNotNull(song.artist).joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

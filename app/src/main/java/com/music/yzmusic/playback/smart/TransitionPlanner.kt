@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Ported from Orchard (https://github.com/SFG5453/Orchard), merging its
  * TransitionPlanner.kt and WsolaPlanner.kt into one file.
  *
@@ -70,11 +70,11 @@ data class TransitionTrackInfo(
  * automatic-DJ literature reports for stable dance material, and less for
  * dense pop.
  */
-private const val AUTO_TRANSITION_MAX_BEATS = 16.0
-private const val AUTO_MIN_SECONDS = 4.0
+private const val AUTO_TRANSITION_MAX_BEATS = 32.0
+private const val AUTO_MIN_SECONDS = AutomixDurationPolicy.SAFE_MIN_SECONDS
 private const val AUTO_FAST_TRACK_MIN_SECONDS = 6.0
-private const val AUTO_TRANSITION_MAX_SECONDS = 12.0
-private const val AUTO_FALLBACK_SECONDS = 8.0
+private const val AUTO_TRANSITION_MAX_SECONDS = AutomixDurationPolicy.EXTENDED_MAX_SECONDS
+private const val AUTO_FALLBACK_SECONDS = AutomixDurationPolicy.DEFAULT_FALLBACK_SECONDS
 
 /** Below this a track would spend too much of itself transitioning to be worth planning. */
 private const val MIN_SMART_DURATION_SECONDS = 45.0
@@ -327,10 +327,10 @@ private fun incomingStartPoint(analysis: TrackAnalysis): Double =
 // bars is the ceiling and one bar the floor, the latter for tracks whose
 // intro cannot cover more.
 private const val MIN_FADE_BEATS = 4
-private const val MAX_FADE_BEATS = 16
+private const val MAX_FADE_BEATS = 48
 
 // A ceiling on the whole overlap regardless of how long the incoming intro is.
-private const val MAX_OVERLAP_SECONDS = 16.0
+private const val MAX_OVERLAP_SECONDS = AutomixDurationPolicy.EXTENDED_MAX_SECONDS
 
 /**
  * Moving both decks by the same musical amount preserves the beat grid and
@@ -611,111 +611,118 @@ fun planWsolaTransition(
     val overlapEndTarget = max(MIN_CLEARANCE_SECONDS, unshiftedOverlapEnd - outgoingArrangementOverlap)
 
     val audibleStart = incomingAudibleStart(nextAnalysis)
-    val availableFadeBeats = max(0.0, incomingDropTime - audibleStart) / incomingBeatSeconds
-    val cappedByOverlap = floor(floor(MAX_OVERLAP_SECONDS / incomingBeatSeconds) / 4).toInt() * 4
-    if (cappedByOverlap < MIN_FADE_BEATS) return WsolaPlanResult.Refused("overlap-too-long")
-    var fadeBeats = minOf(
-        MAX_FADE_BEATS,
-        cappedByOverlap,
-        floor(availableFadeBeats / 4).toInt() * 4,
+    val availableIncomingSeconds = max(0.0, incomingDropTime - audibleStart)
+    val maxCoverableBeats = floor(availableIncomingSeconds / incomingBeatSeconds).toInt()
+    if (maxCoverableBeats < MIN_FADE_BEATS) return WsolaPlanResult.Refused("incoming-no-intro")
+
+    val maxOutgoingDuration = AutomixDurationPolicy.clampDuration(
+        AutomixDurationPolicy.ABSOLUTE_MAX_SECONDS,
+        outgoingLength,
+        incomingLength,
     )
-    if (fadeBeats < MIN_FADE_BEATS) fadeBeats = MIN_FADE_BEATS
+    val maxBeatsByDuration = floor(maxOutgoingDuration / outgoingBeatSeconds).toInt()
+    val maxBeatsLimit = min(maxCoverableBeats, maxBeatsByDuration)
+    if (maxBeatsLimit < MIN_FADE_BEATS) return WsolaPlanResult.Refused("overlap-too-short")
 
-    fun clashOver(beats: Int): Boolean {
-        val outStart = overlapEndTarget - beats * outgoingBeatSeconds
-        val inStart = max(audibleStart, incomingDropTime - beats * incomingBeatSeconds)
-        val outVocal = vocalActivityBetween(analysis, outStart, overlapEndTarget)
-        val inVocal = vocalActivityBetween(nextAnalysis, inStart, incomingDropTime)
+    val candidateBeats = (MIN_FADE_BEATS..min(maxBeatsLimit, MAX_FADE_BEATS) step 4).toList()
+    if (candidateBeats.isEmpty()) return WsolaPlanResult.Refused("no-candidate-beats")
 
-        // Instant-by-instant first, because it is the question actually being
-        // asked. The mean-based test below only fires when *both* windows average
-        // vocal across their whole length, which a real clash routinely does not:
-        // an incoming track that starts singing a few seconds into the overlap
-        // averages clear and still puts its opening line under the outgoing
-        // vocal. This catches that, and it is what shrinks the overlap until the
-        // two voices stop landing together.
-        val simultaneous = simultaneousVocalFraction(
+    data class EvaluatedWsolaCandidate(
+        val beats: Int,
+        val transitionStart: Double,
+        val transitionEnd: Double,
+        val overlapSeconds: Double,
+        val incomingCueTime: Double,
+        val incomingHandoffTime: Double,
+        val incomingResumeTime: Double,
+        val vocalClash: Boolean,
+        val score: TransitionCandidateScore,
+    )
+
+    val candidates = candidateBeats.mapNotNull { beats ->
+        val outgoingOverlapSeconds = beats * outgoingBeatSeconds
+        val overlapSeconds = beats * incomingBeatSeconds
+        if (outgoingOverlapSeconds > maxOutgoingDuration) return@mapNotNull null
+
+        val requestedIncomingHandoff =
+            incomingDropTime + ARRANGEMENT_OVERLAP_BEATS * incomingBeatSeconds
+        val maxIncomingHandoff = incomingLength - MIN_CLEARANCE_SECONDS
+        if (maxIncomingHandoff < incomingDropTime) return@mapNotNull null
+        val incomingHandoffTime = min(requestedIncomingHandoff, maxIncomingHandoff)
+        val incomingCueTime = incomingHandoffTime - overlapSeconds
+        if (incomingCueTime < audibleStart - 0.05) return@mapNotNull null
+
+        val startTarget = overlapEndTarget - outgoingOverlapSeconds
+        val transitionStart = nearestAtOrBefore(analysis.downbeats, startTarget) ?: startTarget
+        if (transitionStart < MIN_CLEARANCE_SECONDS) return@mapNotNull null
+        val transitionEnd = transitionStart + outgoingOverlapSeconds
+        if (transitionEnd > outgoingLength + 0.05) return@mapNotNull null
+
+        val incomingResumeTime = incomingCueTime + overlapSeconds
+        if (incomingResumeTime + MIN_CLEARANCE_SECONDS > incomingLength) return@mapNotNull null
+
+        val score = scoreTransitionCandidate(
             outgoing = analysis,
             incoming = nextAnalysis,
-            outStart = outStart,
-            outEnd = overlapEndTarget,
-            inStart = inStart,
-            rate = if (outgoingBeatSeconds > 0) incomingBeatSeconds / outgoingBeatSeconds else 1.0,
+            transitionStart = transitionStart,
+            transitionEnd = transitionEnd,
+            incomingCueTime = incomingCueTime,
+            incomingPlaybackRate = stretchRatio,
+            beats = beats,
+            isHarmonicallyCompatible = harmonicallyCompatible(trustedKey(analysis), trustedKey(nextAnalysis)),
         )
-        if (simultaneous != null && simultaneous > VOCAL_CLASH_TOLERANCE) return true
+        if (score.totalScore <= -900.0) return@mapNotNull null
 
-        if (isVocalClash(outVocal, inVocal)) return true
+        val outVocal = vocalActivityBetween(analysis, transitionStart, transitionEnd)
+        val inVocal = vocalActivityBetween(nextAnalysis, incomingCueTime, incomingResumeTime)
+        val clash = isVocalClash(outVocal, inVocal) || score.vocalScore < -0.25
 
-        if (beats > 8 && outVocal != null && outVocal >= VOCAL_ACTIVE_THRESHOLD) {
-            val deepVocal = vocalActivityBetween(analysis, outStart, overlapEndTarget - 8 * outgoingBeatSeconds)
-            if (deepVocal != null && deepVocal >= VOCAL_ACTIVE_THRESHOLD) {
-                return true
-            }
-        }
-        return false
+        EvaluatedWsolaCandidate(
+            beats = beats,
+            transitionStart = transitionStart,
+            transitionEnd = transitionEnd,
+            overlapSeconds = overlapSeconds,
+            incomingCueTime = incomingCueTime,
+            incomingHandoffTime = incomingHandoffTime,
+            incomingResumeTime = incomingResumeTime,
+            vocalClash = clash,
+            score = score,
+        )
     }
-    var fadeVocalClash = clashOver(fadeBeats)
-    while (fadeVocalClash && fadeBeats > MIN_FADE_BEATS) {
-        fadeBeats -= 4
-        fadeVocalClash = clashOver(fadeBeats)
-    }
 
-    val coverableBeats = floor(max(0.0, incomingDropTime - audibleStart) / incomingBeatSeconds).toInt()
-    val overlapBeats = min(fadeBeats, coverableBeats)
-    if (overlapBeats < 1) return WsolaPlanResult.Refused("incoming-no-intro")
-
-    val outgoingOverlapSeconds = overlapBeats * outgoingBeatSeconds
-    val overlapSeconds = overlapBeats * incomingBeatSeconds
-
-    val requestedIncomingHandoff =
-        incomingDropTime + ARRANGEMENT_OVERLAP_BEATS * incomingBeatSeconds
-    val maxIncomingHandoff = incomingLength - MIN_CLEARANCE_SECONDS
-    if (maxIncomingHandoff < incomingDropTime) return WsolaPlanResult.Refused("incoming-too-short")
-    val incomingHandoffTime = min(requestedIncomingHandoff, maxIncomingHandoff)
-    val incomingCueTime = incomingHandoffTime - overlapSeconds
-    if (incomingCueTime < audibleStart - 0.05) return WsolaPlanResult.Refused("incoming-no-runway")
-
-    val startTarget = overlapEndTarget - outgoingOverlapSeconds
-    val transitionStart = nearestAtOrBefore(analysis.downbeats, startTarget) ?: startTarget
-    if (transitionStart < MIN_CLEARANCE_SECONDS) return WsolaPlanResult.Refused("outgoing-too-short")
-    val transitionEnd = transitionStart + outgoingOverlapSeconds
-    if (transitionEnd > outgoingLength + 0.05) return WsolaPlanResult.Refused("outgoing-overlap-overruns")
-
-    val incomingResumeTime = incomingCueTime + overlapSeconds
-    if (incomingResumeTime + MIN_CLEARANCE_SECONDS > incomingLength) {
-        return WsolaPlanResult.Refused("incoming-too-short")
-    }
+    val best = candidates.maxByOrNull { it.score.totalScore }
+        ?: return WsolaPlanResult.Refused("no-favorable-candidate")
 
     return WsolaPlanResult.Planned(
         tier = policy.tier,
         beatConfidence = policy.beatConfidence,
         mixOutType = mixOutAnchor.type,
-        vocalClash = fadeVocalClash,
-        transitionStart = transitionStart,
-        transitionEnd = transitionEnd,
-        overlapSeconds = overlapSeconds,
-        beats = overlapBeats,
-        fadeBeats = overlapBeats,
+        vocalClash = best.vocalClash,
+        transitionStart = best.transitionStart,
+        transitionEnd = best.transitionEnd,
+        overlapSeconds = best.overlapSeconds,
+        beats = best.beats,
+        fadeBeats = best.beats,
         handoffFraction = HANDOFF_FRACTION,
         bedPosition = BED_POSITION,
         bassSwapFraction = bassSwapFractionFor(
             analysis = analysis,
             nextAnalysis = nextAnalysis,
-            transitionStart = transitionStart,
-            incomingCueTime = incomingCueTime,
+            transitionStart = best.transitionStart,
+            incomingCueTime = best.incomingCueTime,
             outgoingBeatSeconds = outgoingBeatSeconds,
             incomingBeatSeconds = incomingBeatSeconds,
-            overlapSeconds = overlapSeconds,
-            overlapBeats = overlapBeats,
+            overlapSeconds = best.overlapSeconds,
+            overlapBeats = best.beats,
         ),
         filterSweep = FILTER_SWEEP,
         outgoingBpm = outgoingBpm,
         incomingBpm = incomingBpm,
         stretchRatio = stretchRatio,
-        incomingCueTime = incomingCueTime,
+        incomingCueTime = best.incomingCueTime,
         incomingDropTime = incomingDropTime,
-        incomingHandoffTime = incomingHandoffTime,
-        incomingResumeTime = incomingResumeTime,
+        incomingHandoffTime = best.incomingHandoffTime,
+        incomingResumeTime = best.incomingResumeTime,
     )
 }
 
@@ -740,14 +747,17 @@ private fun phraseSwitch(
         nextDuration = nextLength,
     ) as? WsolaPlanResult.Planned ?: return null
 
-    val overlap = planned.transitionEnd - planned.transitionStart
+    val rawOverlap = planned.transitionEnd - planned.transitionStart
+    val clampedFadeSeconds = AutomixDurationPolicy.clampDuration(rawOverlap, length, nextLength)
+    val finalTransitionStart = planned.transitionEnd - clampedFadeSeconds
+
     return TransitionPlan(
         markerVisible = true,
-        transitionStart = planned.transitionStart,
+        transitionStart = finalTransitionStart,
         transitionEnd = planned.transitionEnd,
-        fadeSeconds = overlap,
+        fadeSeconds = clampedFadeSeconds,
         handoffStartSeconds = 0.0,
-        handoffDuration = overlap,
+        handoffDuration = clampedFadeSeconds,
         incomingCueTime = planned.incomingCueTime,
         incomingHandoffTime = planned.incomingHandoffTime,
         incomingPlaybackRate = (planned.stretchRatio * 10000).roundToInt() / 10000.0,
@@ -773,7 +783,7 @@ private fun phraseSwitch(
         vocalOverlap = plannedVocalOverlap(
             analysis = analysis,
             nextAnalysis = nextAnalysis,
-            transitionStart = planned.transitionStart,
+            transitionStart = finalTransitionStart,
             transitionEnd = planned.transitionEnd,
             incomingCueTime = planned.incomingCueTime,
             incomingPlaybackRate = planned.stretchRatio,
@@ -791,24 +801,45 @@ private data class Overlap(
 )
 
 /** How long a mix should run when the tracks are related but not phrase-switchable. */
-private fun adaptiveOverlap(analysis: TrackAnalysis, nextAnalysis: TrackAnalysis): Overlap {
+private fun adaptiveOverlap(
+    analysis: TrackAnalysis,
+    nextAnalysis: TrackAnalysis,
+    length: Double = 0.0,
+    nextLength: Double = 0.0,
+): Overlap {
     val currentBpm = analysis.bpm.orZero()
     val nextBpm = nextAnalysis.bpm.orZero()
     if (currentBpm <= 0 || nextBpm <= 0) {
-        return Overlap(AUTO_FALLBACK_SECONDS, 0, 1.0)
+        val fallback = AutomixDurationPolicy.clampDuration(
+            AutomixDurationPolicy.DEFAULT_FALLBACK_SECONDS,
+            length,
+            nextLength,
+        )
+        return Overlap(fallback, 0, 1.0)
     }
 
     val ratio = normalizedTempoRatio(currentBpm, nextBpm)
     val distance = keyDistance(trustedKey(analysis), trustedKey(nextAnalysis))
     val vocalConflict = analysis.vocalProbability >= 0.62 && nextAnalysis.vocalProbability >= 0.62
-    val transitionBeats =
-        if (!vocalConflict && (abs(1 - ratio) > 0.07 || (distance != null && distance > 4))) 16 else 8
-    val beatSeconds = 60 / currentBpm
-    val minimumOverlap = if (currentBpm >= 140) AUTO_FAST_TRACK_MIN_SECONDS else AUTO_MIN_SECONDS
+    val beatSeconds = 60.0 / currentBpm
+
+    // Target duration:
+    // If vocal conflict or big tempo gap: prefer shorter near 10-12s
+    // If clean instrumental or good match: prefer 12-15s
+    val targetSeconds = if (vocalConflict || abs(1 - ratio) > 0.08) {
+        AutomixDurationPolicy.PREFERRED_MIN_SECONDS // ~10.0s
+    } else {
+        12.5 // within 10-15s
+    }
+
+    val candidateBeats = listOf(8, 12, 16, 20, 24, 28, 32, 36, 40)
+    val bestBeats = candidateBeats.minByOrNull { abs(it * beatSeconds - targetSeconds) } ?: 16
+    val rawOverlap = bestBeats * beatSeconds
+    val clampedOverlap = AutomixDurationPolicy.clampDuration(rawOverlap, length, nextLength)
 
     return Overlap(
-        overlap = clamp(transitionBeats * beatSeconds, minimumOverlap, AUTO_TRANSITION_MAX_SECONDS),
-        transitionBeats = transitionBeats,
+        overlap = clampedOverlap,
+        transitionBeats = bestBeats,
         incomingPlaybackRate = if (ratio in 0.9..1.1) {
             (clamp(1 / ratio, 0.9, 1.1) * 10000).roundToInt() / 10000.0
         } else {
@@ -823,8 +854,11 @@ private fun standardTransition(
     fadeSeconds: Double,
     minFadeSeconds: Double,
     reason: String = "standard",
+    nextLength: Double = 0.0,
 ): TransitionPlan {
-    val fade = clamp(fadeSeconds, minFadeSeconds, 12.0)
+    val clampedFade = AutomixDurationPolicy.clampDuration(fadeSeconds, length, nextLength)
+    val lowerBound = min(minFadeSeconds, clampedFade)
+    val fade = clamp(clampedFade, lowerBound, AutomixDurationPolicy.ABSOLUTE_MAX_SECONDS)
     val transitionStart = max(0.0, length - fade)
     val started = playbackTime >= transitionStart
     return TransitionPlan(
@@ -863,23 +897,29 @@ fun planTransition(
     nextTrack: TransitionTrackInfo? = null,
     currentTime: Double = 0.0,
     duration: Double = 0.0,
-    fadeSeconds: Double = 6.0,
+    fadeSeconds: Double = AutomixDurationPolicy.DEFAULT_FALLBACK_SECONDS,
     minFadeSeconds: Double = 1.0,
     mode: CrossfadeMode = CrossfadeMode.STANDARD,
     albumSequential: Boolean = false,
     preservation: AutomixPreservation = AutomixPreservation.BALANCED,
 ): TransitionPlan {
     val length = max(duration.orZero(), trackDurationSeconds(currentTrack))
+    val nextLength = max(nextAnalysis.duration.orZero(), trackDurationSeconds(nextTrack))
     val playbackTime = max(0.0, currentTime.orZero())
     if (length <= 0) return blocked("no-duration")
 
-    val standardFade = clamp(fadeSeconds, minFadeSeconds, 12.0)
+    val standardFade = AutomixDurationPolicy.clampDuration(fadeSeconds, length, nextLength)
     if (mode != CrossfadeMode.SMART) {
-        return standardTransition(length, playbackTime, standardFade, minFadeSeconds)
+        return standardTransition(length, playbackTime, standardFade, minFadeSeconds, nextLength = nextLength)
     }
 
-    if (length < MIN_SMART_DURATION_SECONDS) {
+    if (length < 4.0) {
         return blocked("short-duration-guard", transitionStart = length, transitionEnd = length)
+    }
+
+    if (length < MIN_SMART_DURATION_SECONDS || (nextLength > 0.0 && nextLength < MIN_SMART_DURATION_SECONDS)) {
+        val safeShortFade = AutomixDurationPolicy.clampDuration(standardFade, length, nextLength)
+        return standardTransition(length, playbackTime, safeShortFade, minFadeSeconds, "short-track-transition", nextLength = nextLength)
     }
 
     val analyzedContentEnd = analysis.contentEndTime.orZero().takeIf { it != 0.0 } ?: length
@@ -923,6 +963,7 @@ fun planTransition(
             standardFade,
             minFadeSeconds,
             "smart-analysis-fallback",
+            nextLength = nextLength,
         )
     }
 
@@ -936,7 +977,8 @@ fun planTransition(
 
     val policy = assessTransitionTier(analysis, nextAnalysis)
     if (policy.tier == TransitionTier.PLAIN_CROSSFADE) {
-        val transitionStart = max(0.0, mixAnchor - standardFade)
+        val safePlainFade = AutomixDurationPolicy.clampDuration(standardFade, length, nextLength)
+        val transitionStart = max(0.0, mixAnchor - safePlainFade)
         val started = playbackTime >= transitionStart
         return TransitionPlan(
             shouldStart = started,
@@ -951,8 +993,6 @@ fun planTransition(
         )
     }
 
-    val nextLength = max(nextAnalysis.duration.orZero(), trackDurationSeconds(nextTrack))
-
     phraseSwitch(analysis, nextAnalysis, length, nextLength)
         ?.takeIf { playbackTime < it.transitionEnd }
         ?.let { plan ->
@@ -964,7 +1004,7 @@ fun planTransition(
             )
         }
 
-    val (overlap, transitionBeats, incomingPlaybackRate) = adaptiveOverlap(analysis, nextAnalysis)
+    val (overlap, transitionBeats, incomingPlaybackRate) = adaptiveOverlap(analysis, nextAnalysis, length, nextLength)
     val currentBpm = analysis.bpm.orZero()
     val nextBpm = nextAnalysis.bpm.orZero()
     val handoffBpm = if (currentBpm > 0) currentBpm else nextBpm
@@ -979,10 +1019,14 @@ fun planTransition(
         }
     val mixEnd = max(0.0, mixAnchor - outgoingArrangementOverlap)
     val maximumOverlap = minOf(
-        if (handoffBpm > 0) (AUTO_TRANSITION_MAX_BEATS * 60) / handoffBpm else AUTO_TRANSITION_MAX_SECONDS,
-        AUTO_TRANSITION_MAX_SECONDS,
-        mixEnd * 0.4,
-        if (nextLength > 0) nextLength * 0.4 else AUTO_TRANSITION_MAX_SECONDS,
+        AutomixDurationPolicy.clampDuration(
+            if (handoffBpm > 0) (AUTO_TRANSITION_MAX_BEATS * 60) / handoffBpm else AutomixDurationPolicy.EXTENDED_MAX_SECONDS,
+            length,
+            nextLength,
+        ),
+        AutomixDurationPolicy.ABSOLUTE_MAX_SECONDS,
+        mixEnd * AutomixDurationPolicy.SHORT_TRACK_MAX_FRACTION,
+        if (nextLength > 0) nextLength * AutomixDurationPolicy.SHORT_TRACK_MAX_FRACTION else AutomixDurationPolicy.ABSOLUTE_MAX_SECONDS,
     )
     val handoffBeats = if (sameBeatBlend) 8 else 4
     val beatSeconds = if (handoffBpm > 0) 60 / handoffBpm else 0.5
@@ -1025,26 +1069,56 @@ fun planTransition(
 
     val finalIncomingCueTime: Double
     val transitionStart: Double
+    val maxSafeOverlap = AutomixDurationPolicy.clampDuration(maximumOverlap, length, nextLength)
 
     if (sameBeatBlend && beatSeconds > 0) {
         val introDropTime = incomingHandoffTime / max(0.8, incomingPlaybackRate)
-        val totalOverlap = clamp(introDropTime, min(12.0, maximumOverlap), maximumOverlap)
-        val targetStart = max(0.0, mixEnd - totalOverlap)
-        val earliestTransitionStart = max(0.0, mixEnd - maximumOverlap)
-        transitionStart = alignedTransitionStart(
+        val candidateOverlaps = listOf(
+            AutomixDurationPolicy.PREFERRED_MIN_SECONDS,
+            12.0,
+            AutomixDurationPolicy.PREFERRED_MAX_SECONDS,
+            introDropTime,
+        ).map { clamp(it, min(AutomixDurationPolicy.PREFERRED_MIN_SECONDS, maxSafeOverlap), maxSafeOverlap) }
+            .distinct()
+
+        val bestCandidate = candidateOverlaps.map { candOverlap ->
+            val targetStart = max(0.0, mixEnd - candOverlap)
+            val earliestTransitionStart = max(0.0, mixEnd - maxSafeOverlap)
+            val start = alignedTransitionStart(
+                analysis,
+                targetStart,
+                mixEnd - 0.05,
+                preferEarlier = true,
+                minimum = earliestTransitionStart,
+            )
+            val cue = max(0.0, incomingHandoffTime - (mixEnd - start) * incomingPlaybackRate)
+            val score = scoreTransitionCandidate(
+                outgoing = analysis,
+                incoming = nextAnalysis,
+                transitionStart = start,
+                transitionEnd = mixEnd,
+                incomingCueTime = cue,
+                incomingPlaybackRate = incomingPlaybackRate,
+                beats = ((mixEnd - start) / beatSeconds).roundToInt(),
+                isHarmonicallyCompatible = harmonicallyCompatible(trustedKey(analysis), trustedKey(nextAnalysis)),
+            )
+            Triple(start, cue, score)
+        }.maxByOrNull { it.third.totalScore }
+
+        transitionStart = bestCandidate?.first ?: alignedTransitionStart(
             analysis,
-            targetStart,
+            max(0.0, mixEnd - clamp(introDropTime, min(12.0, maxSafeOverlap), maxSafeOverlap)),
             mixEnd - 0.05,
             preferEarlier = true,
-            minimum = earliestTransitionStart,
+            minimum = max(0.0, mixEnd - maxSafeOverlap),
         )
-        finalIncomingCueTime =
+        finalIncomingCueTime = bestCandidate?.second ?:
             max(0.0, incomingHandoffTime - (mixEnd - transitionStart) * incomingPlaybackRate)
     } else {
         val desiredOverlap = max(overlap, introPreroll + handoffSeconds * 0.42)
-        val actualOverlap = clamp(desiredOverlap, min(handoffSeconds, maximumOverlap), maximumOverlap)
+        val actualOverlap = clamp(desiredOverlap, min(handoffSeconds, maxSafeOverlap), maxSafeOverlap)
         val targetStart = max(0.0, mixEnd - actualOverlap)
-        val earliestTransitionStart = max(0.0, mixEnd - maximumOverlap)
+        val earliestTransitionStart = max(0.0, mixEnd - maxSafeOverlap)
         transitionStart = alignedTransitionStart(
             analysis,
             targetStart,
@@ -1059,17 +1133,19 @@ fun planTransition(
         }
     }
 
-    val alignedOverlap = mixEnd - transitionStart
+    val rawAlignedOverlap = mixEnd - transitionStart
+    val finalFadeSeconds = AutomixDurationPolicy.clampDuration(rawAlignedOverlap, length, nextLength)
+    val finalTransitionStart = mixEnd - finalFadeSeconds
     val hasBassContent = analysis.lowEnergyCurve.isNotEmpty() || nextAnalysis.lowEnergyCurve.isNotEmpty()
-    val started = playbackTime >= transitionStart
+    val started = playbackTime >= finalTransitionStart
     return TransitionPlan(
         shouldStart = started,
         markerVisible = true,
-        transitionStart = transitionStart,
+        transitionStart = finalTransitionStart,
         transitionEnd = mixEnd,
-        fadeSeconds = alignedOverlap,
+        fadeSeconds = finalFadeSeconds,
         handoffStartSeconds = 0.0,
-        handoffDuration = alignedOverlap,
+        handoffDuration = finalFadeSeconds,
         incomingCueTime = finalIncomingCueTime,
         incomingHandoffTime = incomingHandoffTime,
         incomingPlaybackRate = incomingPlaybackRate,
@@ -1086,7 +1162,7 @@ fun planTransition(
         vocalOverlap = plannedVocalOverlap(
             analysis = analysis,
             nextAnalysis = nextAnalysis,
-            transitionStart = transitionStart,
+            transitionStart = finalTransitionStart,
             transitionEnd = mixEnd,
             incomingCueTime = finalIncomingCueTime,
             incomingPlaybackRate = incomingPlaybackRate,

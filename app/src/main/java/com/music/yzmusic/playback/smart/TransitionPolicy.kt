@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Ported from Orchard (https://github.com/SFG5453/Orchard).
  *
  * Copyright (C) 2026 SFG545 (original Orchard implementation)
@@ -464,3 +464,148 @@ fun assessTransitionTier(
         beatConfidence = floorConfidence,
     )
 }
+
+/**
+ * Scored transition candidate evaluation for Automix 2.0.
+ */
+data class TransitionCandidateScore(
+    val beats: Int,
+    val durationSeconds: Double,
+    val totalScore: Double,
+    val durationScore: Double,
+    val beatScore: Double,
+    val phraseScore: Double,
+    val vocalScore: Double,
+    val energyScore: Double,
+    val harmonicScore: Double,
+    val awkwardPenalty: Double,
+    val transitionStart: Double,
+    val transitionEnd: Double,
+    val incomingCueTime: Double,
+)
+
+/**
+ * Evaluates and scores a transition candidate window for musical quality and duration contract compliance.
+ *
+ * Preferred: 10–15s (+0.35 bonus)
+ * Extended: 15–20s (+0.10 if high harmonic/phrase alignment, else -0.15)
+ * Long: 20–30s (-0.50 penalty; only chosen if analysis strongly justifies)
+ * Over 30s: -999.0 (strictly forbidden)
+ */
+fun scoreTransitionCandidate(
+    outgoing: TrackAnalysis,
+    incoming: TrackAnalysis,
+    transitionStart: Double,
+    transitionEnd: Double,
+    incomingCueTime: Double,
+    incomingPlaybackRate: Double,
+    beats: Int = 0,
+    isHarmonicallyCompatible: Boolean = false,
+): TransitionCandidateScore {
+    val duration = transitionEnd - transitionStart
+
+    // 1. Duration Score
+    val durationScore: Double = when {
+        duration <= 0.0 || duration > AutomixDurationPolicy.ABSOLUTE_MAX_SECONDS -> -999.0
+        duration in AutomixDurationPolicy.PREFERRED_MIN_SECONDS..AutomixDurationPolicy.PREFERRED_MAX_SECONDS -> {
+            // Peak bonus at 11-13s
+            val centerDist = abs(duration - 12.0)
+            0.40 - (centerDist * 0.02)
+        }
+        duration > AutomixDurationPolicy.PREFERRED_MAX_SECONDS && duration <= AutomixDurationPolicy.EXTENDED_MAX_SECONDS -> {
+            if (isHarmonicallyCompatible) 0.10 else -0.15
+        }
+        duration > AutomixDurationPolicy.EXTENDED_MAX_SECONDS && duration <= AutomixDurationPolicy.ABSOLUTE_MAX_SECONDS -> {
+            -0.50
+        }
+        else -> {
+            // Less than preferred minimum (e.g. < 10s)
+            -0.20
+        }
+    }
+
+    // 2. Beat & Phrase Alignment
+    val beatInterval = outgoing.beatInterval.takeIf { it.isFinite() && it > 0 }
+        ?: outgoing.bpm.takeIf { it.isFinite() && it > 0 }?.let { 60.0 / it } ?: 0.5
+    val nearPhrase = outgoing.phraseBoundaries.any { abs(it - transitionStart) <= beatInterval * 2 }
+    val nearDownbeat = outgoing.downbeats.any { abs(it - transitionStart) <= beatInterval * 0.5 }
+    val phraseScore = if (nearPhrase) 0.25 else 0.0
+    val beatScore = if (nearDownbeat) 0.15 else 0.0
+
+    // 3. Vocal Activity & Clash
+    val simultaneousVocal = simultaneousVocalFraction(
+        outgoing = outgoing,
+        incoming = incoming,
+        outStart = transitionStart,
+        outEnd = transitionEnd,
+        inStart = incomingCueTime,
+        rate = incomingPlaybackRate,
+    ) ?: 0.0
+    val outgoingVocal = vocalActivityBetween(outgoing, transitionStart, transitionEnd)
+    val incomingVocal = vocalActivityBetween(incoming, incomingCueTime, incomingCueTime + duration * incomingPlaybackRate)
+    var vocalScore = 0.0
+    if (simultaneousVocal > VOCAL_CLASH_TOLERANCE) {
+        vocalScore -= (simultaneousVocal * 1.5).coerceAtMost(0.6)
+    }
+    if (isVocalClash(outgoingVocal, incomingVocal)) {
+        vocalScore -= 0.30
+    }
+    // Reward outgoing instrumental/low vocal with incoming vocal
+    if ((outgoingVocal == null || outgoingVocal < 0.3) && (incomingVocal != null && incomingVocal >= VOCAL_ACTIVE_THRESHOLD)) {
+        vocalScore += 0.20
+    }
+
+    // 4. Energy Compatibility
+    var energyScore = 0.0
+    val outEnergy = averageEnergyIn(outgoing.energyCurve, transitionStart, transitionEnd)
+    val inEnergy = averageEnergyIn(incoming.energyCurve, incomingCueTime, incomingCueTime + duration * incomingPlaybackRate)
+    if (outEnergy != null && inEnergy != null) {
+        val diff = abs(outEnergy - inEnergy)
+        if (diff < 0.3) energyScore += 0.20
+        else if (diff > 0.8) energyScore -= 0.25
+    }
+
+    // 5. Harmonic Compatibility
+    val harmonicScore = if (isHarmonicallyCompatible) 0.15 else 0.0
+
+    // 6. Awkward Cut Penalty (e.g. cutting through chorus or drop)
+    var awkwardPenalty = 0.0
+    for (section in outgoing.sections) {
+        if (transitionStart > section.start && transitionStart < section.end) {
+            if (section.type == MusicalSectionType.CHORUS || section.type == MusicalSectionType.DROP) {
+                awkwardPenalty += 0.50
+            }
+        }
+    }
+
+    val totalScore = durationScore + beatScore + phraseScore + vocalScore + energyScore + harmonicScore - awkwardPenalty
+
+    return TransitionCandidateScore(
+        beats = beats,
+        durationSeconds = duration,
+        totalScore = totalScore,
+        durationScore = durationScore,
+        beatScore = beatScore,
+        phraseScore = phraseScore,
+        vocalScore = vocalScore,
+        energyScore = energyScore,
+        harmonicScore = harmonicScore,
+        awkwardPenalty = awkwardPenalty,
+        transitionStart = transitionStart,
+        transitionEnd = transitionEnd,
+        incomingCueTime = incomingCueTime,
+    )
+}
+
+private fun averageEnergyIn(curve: List<EnergySample>, from: Double, until: Double): Double? {
+    if (until <= from || curve.isEmpty()) return null
+    var sum = 0.0
+    var count = 0
+    for (point in curve) {
+        if (!point.time.isFinite() || point.time < from || point.time > until) continue
+        sum += point.energy
+        count++
+    }
+    return if (count > 0) sum / count else null
+}
+
