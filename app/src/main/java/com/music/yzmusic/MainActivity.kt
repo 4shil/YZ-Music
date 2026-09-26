@@ -184,6 +184,7 @@ import com.music.yzmusic.ui.screens.HomeScreen
 import com.music.yzmusic.ui.screens.LibraryGridPage
 import com.music.yzmusic.ui.screens.LibraryScreen
 import com.music.yzmusic.ui.screens.SearchScreen
+import com.music.yzmusic.ui.search.RecentSearchAction
 import com.music.yzmusic.ui.replay.ReplayScreen
 import com.music.yzmusic.ui.replay.cards
 import com.music.yzmusic.ui.replay.ReplayShareSheet
@@ -429,8 +430,12 @@ private fun YZMusicApp(
     var browseActions by remember { mutableStateOf<BrowseTarget?>(null) }
     val autoplay by AppSettings.autoplay.collectAsStateWithLifecycle()
     val listenBrainzToken by AppSettings.listenBrainzToken.collectAsStateWithLifecycle()
-    // Incremented each time the search tab is re-tapped while already selected,
-    // which SearchScreen uses as a signal to focus the input field.
+    // Bumped when the search tab is entered, and again when it is re-tapped
+    // while already there; SearchScreen uses the change to focus the input
+    // field and raise the keyboard. Zeroed on the way out so that arriving
+    // always moves it — and deliberately not saved across a process restart,
+    // where taking the keyboard away from wherever the user has landed would
+    // be the wrong answer.
     var searchFocusTrigger by remember { mutableIntStateOf(0) }
 
     // The player fills the screen with dark artwork whichever theme is on, so
@@ -463,7 +468,7 @@ private fun YZMusicApp(
         }
     }
     val query by viewModel.query.collectAsStateWithLifecycle()
-    val results by viewModel.results.collectAsStateWithLifecycle()
+    val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()
     val libraryState by viewModel.library.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
@@ -1937,7 +1942,8 @@ private fun YZMusicApp(
                             onQueryChange = viewModel::onQueryChange,
                             filter = filter,
                             onFilterChange = viewModel::onFilterChange,
-                            results = results,
+                            results = searchState,
+                            onRetry = viewModel::retrySearch,
                             loadingMore = searchLoadingMore,
                             onLoadMore = viewModel::loadMoreSearchResults,
                             listState = searchListState,
@@ -1947,25 +1953,26 @@ private fun YZMusicApp(
                             // order — play the one tapped and build a station from it.
                             onSongClick = { songs, index ->
                                 songs.getOrNull(index)?.let {
-                                    // Acting on a hit is what makes the query worth
-                                    // keeping — see MainViewModel.recordSearch.
-                                    viewModel.recordSearch()
+                                    // Acting on a hit is what makes it worth keeping —
+                                    // recorded as the track it is, cover and all, so
+                                    // the recents can play it again without a search.
+                                    viewModel.recordTrack(it)
                                     playRadio(it)
                                 }
                             },
                             onSongLongPress = openSongMenu,
                             onSongSwipe = onSongSwipe,
                             onTopResultPlay = { song ->
-                                viewModel.recordSearch()
+                                viewModel.recordTrack(song)
                                 playRadio(song)
                             },
                             onTopResultPlaylist = { song ->
-                                viewModel.recordSearch()
+                                viewModel.recordTrack(song)
                                 viewModel.loadPlaylists()
                                 playlistTarget = song
                             },
                             onBrowseClick = { item ->
-                                viewModel.recordSearch()
+                                viewModel.recordBrowseItem(item)
                                 viewModel.openDetail(
                                     browseId = item.browseId,
                                     title = item.title,
@@ -1993,8 +2000,26 @@ private fun YZMusicApp(
                             typeaheadResults = viewModel.typeaheadResults.collectAsStateWithLifecycle().value,
                             onSubmit = viewModel::submitSearch,
                             onSuggestionClick = viewModel::searchFor,
-                            onHistoryClick = viewModel::searchFor,
-                            onHistoryRemove = viewModel::removeSearch,
+                            onHistoryClick = { entity ->
+                                // A recent is the thing it was found as, not the words
+                                // that found it: a track plays and a page opens from
+                                // what is stored, with no search and no connection
+                                // needed. A typed term has nothing else, and the
+                                // controller has already run it.
+                                when (val action = viewModel.openRecent(entity)) {
+                                    is RecentSearchAction.PlayTrack -> playRadio(action.song)
+                                    is RecentSearchAction.OpenDetail -> viewModel.openDetail(
+                                        browseId = action.item.browseId,
+                                        title = action.item.title,
+                                        subtitle = action.item.subtitle,
+                                        thumbnailUrl = action.item.thumbnailUrl,
+                                        type = action.item.type,
+                                    )
+                                    is RecentSearchAction.RunQuery -> Unit
+                                    null -> Unit
+                                }
+                            },
+                            onHistoryRemove = viewModel::removeRecent,
                             onHistoryClear = viewModel::clearSearchHistory,
                             onTypeaheadLongPress = openSongMenu,
                             contentPadding = listPadding,
@@ -2166,6 +2191,10 @@ private fun YZMusicApp(
                     } else {
                         if (index != TAB_SEARCH) {
                             searchFocusTrigger = 0
+                        } else {
+                            // Arriving at search is as much a request to search as
+                            // re-tapping it from here: the field takes the keyboard.
+                            searchFocusTrigger++
                         }
                         viewModel.clearDetail()
                         showSettings = false

@@ -22,6 +22,7 @@ import com.music.yzmusic.data.innertube.Innertube
 import com.music.yzmusic.data.innertube.PlaybackTracker
 import com.music.yzmusic.data.innertube.StreamResolver
 import com.music.yzmusic.data.model.Account
+import com.music.yzmusic.data.model.BrowseItem
 import com.music.yzmusic.data.model.BrowseType
 import com.music.yzmusic.data.model.DetailPage
 import com.music.yzmusic.data.model.HomeShelf
@@ -30,6 +31,7 @@ import com.music.yzmusic.data.model.LibraryState
 import com.music.yzmusic.data.model.LikeStatus
 import com.music.yzmusic.data.model.PlaylistPrivacy
 import com.music.yzmusic.data.model.SearchFilter
+import com.music.yzmusic.data.model.SearchHistoryEntity
 import com.music.yzmusic.data.model.SearchResult
 import com.music.yzmusic.data.model.ShelfItem
 import com.music.yzmusic.data.model.Song
@@ -38,21 +40,15 @@ import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.UserPlaylist
 import com.music.yzmusic.data.settings.SearchHistory
 import com.music.yzmusic.download.Downloads
-import android.util.LruCache
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -61,6 +57,10 @@ import com.music.yzmusic.data.sources.SourceRegistry
 import com.music.yzmusic.data.sources.SourceResolver
 import com.music.yzmusic.data.sources.TrackMatcher
 import com.music.yzmusic.playback.StreamChoice
+import com.music.yzmusic.ui.search.RecentSearchAction
+import com.music.yzmusic.ui.search.SearchController
+import com.music.yzmusic.ui.search.SearchPage
+import com.music.yzmusic.ui.search.SearchState
 import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
 
@@ -95,99 +95,63 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _explore = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
     val explore: StateFlow<UiState<List<HomeShelf>>> = _explore.asStateFlow()
 
-    private val _query = MutableStateFlow("")
-    val query: StateFlow<String> = _query.asStateFlow()
+    /**
+     * The search page: what it is showing, and the three pipelines that fill
+     * it. Everything about *when* something is wanted lives in
+     * [SearchController] rather than here — which request the user is still
+     * waiting for, which answer is too late to show, what an empty result
+     * says — so what is left of the search page in this class is the wiring:
+     * where the requests come from, and the one thing worth doing with a fresh
+     * page of results.
+     */
+    private val search = SearchController(
+        scope = viewModelScope,
+        history = SearchHistory,
+        searchPage = { query, filter ->
+            YtMusicRepository.searchPage(query, filter).map { SearchPage(it.rows, it.continuation) }
+        },
+        searchContinuation = { token, filter ->
+            YtMusicRepository.searchContinuation(token, filter)
+                .map { SearchPage(it.rows, it.continuation) }
+        },
+        fetchSuggestions = YtMusicRepository::searchSuggestions,
+        fetchTypeahead = { input -> YtMusicRepository.searchTypeahead(input).map { it.rows } },
+        friendlyError = { it.friendly() },
+        noResultsText = text(R.string.no_results),
+        onResultsLanded = { rows -> prefetchTopResult(rows) },
+    )
 
-    private val _results = MutableStateFlow<UiState<List<SearchResult>>?>(null)
-    val results: StateFlow<UiState<List<SearchResult>>?> = _results.asStateFlow()
+    val query: StateFlow<String> = search.query
 
-    private val _searchLoadingMore = MutableStateFlow(false)
-    val searchLoadingMore: StateFlow<Boolean> = _searchLoadingMore.asStateFlow()
-    val isLoadingMore: StateFlow<Boolean> = _searchLoadingMore.asStateFlow()
+    /**
+     * What the search page is showing.
+     *
+     * A type of its own rather than the app-wide [UiState] because a search has
+     * two very different nothings to say — nothing searched for, nothing
+     * matched, and the search could not be done — and one type for all three is
+     * what made the last two look alike. See [SearchState].
+     */
+    val searchState: StateFlow<SearchState> = search.state
 
-    /** Increments once per first-page request so the UI can reset its list. */
-    private val _searchScrollReset = MutableStateFlow(0)
-    val searchScrollReset: StateFlow<Int> = _searchScrollReset.asStateFlow()
+    val searchLoadingMore: StateFlow<Boolean> = search.loadingMore
+    val isLoadingMore: StateFlow<Boolean> = search.loadingMore
+
+    val searchScrollReset: StateFlow<Int> = search.scrollReset
 
     /** The mixed YouTube Music result page is the fast, useful default. */
-    private val _filter = MutableStateFlow(SearchFilter.ALL)
-    val filter: StateFlow<SearchFilter> = _filter.asStateFlow()
+    val filter: StateFlow<SearchFilter> = search.filter
 
     /**
      * What the search page offers while a query is being typed, led by the
      * query itself.
      *
-     * Non-empty *is* the signal that the field is mid-edit, so the screen
-     * needs no second flag: these rows are shown in place of the results
-     * whenever there are any, and cleared the moment a search is actually run
-     * — see [submitSearch], [searchFor].
-     *
-     * Element 0 is always the raw text as typed. It's put there by the
-     * keystroke itself rather than taken from the response, so the row the
-     * thumb is already heading for is correct before the network answers, and
-     * stays correct if it never does — YouTube's list never contains the
-     * half-typed text, only completions of it.
+     * Non-empty *is* the signal that the field is mid-edit, so the screen needs
+     * no second flag: these rows are shown in place of the results whenever
+     * there are any, and cleared the moment a search is actually run.
      */
-    private val _suggestions = MutableStateFlow<List<String>>(emptyList())
-    val suggestions: StateFlow<List<String>> = _suggestions.asStateFlow()
+    val suggestions: StateFlow<List<String>> = search.suggestions
 
-    private val _typeaheadResults = MutableStateFlow<List<SearchResult>>(emptyList())
-    val typeaheadResults: StateFlow<List<SearchResult>> = _typeaheadResults.asStateFlow()
-
-    // The search pipeline's own state. Declared here, above [init], because
-    // that is where the collector is started from and a property declared
-    // below it would still be null when it runs. See [startSearchPipeline].
-
-    /**
-     * Buffered so an emission is never lost to a collector that happens to be
-     * mid-search, and [BufferOverflow.DROP_OLDEST] because when two arrive
-     * together the later one is the one meant.
-     */
-    private val searchRequests = MutableSharedFlow<SearchRequest>(
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-
-    /**
-     * The same arrangement as [searchRequests], for the typeahead — where the
-     * drop policy earns its keep rather than just being safe: this one really
-     * does take a keystroke each, and a fast typist's backlog should collapse
-     * to the prefix they ended on instead of being worked through a letter at
-     * a time.
-     */
-    private val suggestRequests = MutableSharedFlow<String>(
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-
-    private val newestRequestId = AtomicLong(0L)
-
-    /**
-     * Results of recent searches, so a query searched before is answered
-     * without asking again. That covers the two ways a query is repeated most:
-     * a filter tab, which re-runs the same text against a different tab and
-     * then usually goes back, and a term tapped out of the recent searches.
-     *
-     * Its other half is [prefixMatch], which is what the typeahead makes worth
-     * keeping: picking "coldplay yellow" off a list is normally preceded by
-     * having searched "coldplay", and those results are close enough to leave
-     * up for the moment the narrower one takes rather than blanking the page
-     * to a spinner.
-     */
-    private data class SearchCacheEntry(
-        val rows: List<SearchResult>,
-        val continuation: String?,
-    )
-
-    private data class SearchSession(
-        val key: String,
-        val requestId: Long,
-        val filter: SearchFilter,
-        val continuation: String?,
-    )
-
-    private val searchCache = LruCache<String, SearchCacheEntry>(SEARCH_CACHE_ENTRIES)
-    private var searchSession: SearchSession? = null
+    val typeaheadResults: StateFlow<List<SearchResult>> = search.typeaheadResults
 
     /** Synced lyrics for whatever is playing; null while unknown or absent. */
     private val _lyrics = MutableStateFlow<List<LyricLine>?>(null)
@@ -959,9 +923,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
-        startSearchPipeline()
-        startSuggestPipeline()
-        startTypeaheadMediaPipeline()
         loadHome()
         loadExplore()
         if (_signedIn.value) {
@@ -1172,308 +1133,75 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Recent searches, kept on device. */
-    val searchHistory: StateFlow<List<String>> = SearchHistory.recent
+    /**
+     * Recent searches, kept on the device and read by the search screen. The
+     * list is the user's own, so it has to be worth having without a
+     * connection — which is why an entry carries the thing it was found as and
+     * not only the words that found it. See [SearchHistoryEntity].
+     */
+    val searchHistory: StateFlow<List<SearchHistoryEntity>> = SearchHistory.recent
 
-    fun onQueryChange(value: String) {
-        val previous = _query.value
-        _query.value = value
-        if (value.isBlank()) {
-            // Emptying the field is how the recent searches are got back to,
-            // so it takes down the suggestions and the results together.
-            // Nothing in flight can still be waiting to overwrite the latter:
-            // the id it would be checked against has already moved past it.
-            newestRequestId.incrementAndGet()
-            searchSession = null
-            _searchLoadingMore.value = false
-            _results.value = null
-            _suggestions.value = emptyList()
-            _typeaheadResults.value = emptyList()
-            return
-        }
-        // The previous keystroke's completions are left up beneath the new
-        // lead row while the fresh ones are fetched — the same reasoning as
-        // [prefixMatch]: they were right a letter ago, and a list that
-        // collapses to one row on every letter is what makes a typeahead feel
-        // broken. Text that isn't a continuation of what they were for (the
-        // whole field replaced at once, say) drops them instead of showing
-        // completions of a query that's gone.
-        val stale = if (value.startsWith(previous, true) || previous.startsWith(value, true)) {
-            _suggestions.value.drop(1)
-        } else {
-            emptyList()
-        }
-        _suggestions.value = listOf(value) + stale.filterNot { it.equals(value, true) }
-        suggestRequests.tryEmit(value)
-    }
+    fun onQueryChange(value: String) = search.onQueryChange(value)
 
     /**
-     * Commits the current query to the history. Called when the user acts on
-     * what they found — submitting from the keyboard, or opening a result —
-     * rather than on every keystroke, which would fill the list with the
-     * prefixes typed on the way to the real query.
+     * Records what the user acted on in a result row, with the metadata that
+     * row carries: the id, the kind, the name, the artist and the cover. See
+     * [SearchController.recordResult] for why that is not the same as
+     * recording the query that found it.
      */
-    fun recordSearch() = SearchHistory.record(_query.value)
+    fun recordResult(result: SearchResult) = search.recordResult(result)
+
+    fun recordTrack(song: Song) = search.recordTrack(song)
+
+    fun recordBrowseItem(item: BrowseItem) = search.recordBrowseItem(item)
 
     /**
      * The search button — the keyboard's search action, or the magnifier in
      * the field. The only thing that runs a search for text the user typed:
-     * keystrokes themselves ask for suggestions and nothing more, so a query
-     * is fetched once, when they say it's finished, instead of once per
-     * prefix on the way to it.
+     * keystrokes themselves ask for completions and nothing more.
      */
-    fun submitSearch() {
-        recordSearch()
-        _suggestions.value = emptyList()
-        _typeaheadResults.value = emptyList()
-        runSearch()
-    }
+    fun submitSearch() = search.submitSearch()
 
     /**
-     * Runs a term the user picked out of a list rather than typed — a recent
-     * search, or one of [suggestions] — and floats it to the top of the
-     * history. Picking is as deliberate as submitting, so it searches on the
-     * spot.
+     * Runs a term the user picked out of a list rather than typed — one of the
+     * completions, or a recent that was a term — and floats it to the top of
+     * the history. Picking is as deliberate as submitting, so it searches on
+     * the spot.
      */
-    fun searchFor(term: String) {
-        _query.value = term
-        _suggestions.value = emptyList()
-        _typeaheadResults.value = emptyList()
-        SearchHistory.record(term)
-        runSearch()
-    }
-
-    fun removeSearch(term: String) = SearchHistory.remove(term)
-
-    fun clearSearchHistory() = SearchHistory.clear()
-
-    fun onFilterChange(value: SearchFilter) {
-        if (_filter.value == value) return
-        _filter.value = value
-        runSearch()
-    }
+    fun searchFor(term: String) = search.searchFor(term)
 
     /**
-     * A search asked for, as a request the pipeline below decides what to do
-     * with.
+     * Opens a recent as the thing it was recorded as being.
      *
-     * [requestId] is what makes a late answer harmless: a response is only
-     * written to the screen if its id is still the newest one asked for.
+     * A track plays from what is stored and a page opens from what is stored,
+     * so neither needs a search — or a connection — to have been made first.
+     * Only a typed term is searched for, because a typed term is all it is.
      */
-    private data class SearchRequest(
-        val query: String,
-        val filter: SearchFilter,
-        val requestId: Long,
-    )
+    fun openRecent(entity: SearchHistoryEntity): RecentSearchAction? = search.openRecent(entity)
 
-    private fun cacheKey(query: String, filter: SearchFilter) = "${filter.name}:$query"
+    fun removeRecent(identity: String) = search.removeRecent(identity)
+
+    fun clearSearchHistory() = search.clearRecent()
+
+    fun onFilterChange(value: SearchFilter) = search.onFilterChange(value)
 
     /**
-     * The results of the longest earlier query this one starts with — near
-     * enough to leave up while the narrower search runs.
+     * Runs the search that failed again, exactly as it was. The field is not
+     * touched: the query is still what the user wants, and a retry that also
+     * retyped it would be a different search.
      */
-    private fun prefixMatch(query: String, filter: SearchFilter): List<SearchResult>? {
-        val prefix = "${filter.name}:"
-        return searchCache.snapshot()
-            .filterKeys { it.startsWith(prefix) && query.startsWith(it.removePrefix(prefix), true) }
-            .maxByOrNull { it.key.length }
-            ?.value
-            ?.rows
-    }
+    fun retrySearch() = search.retrySearch()
 
-    private fun runSearch() {
-        val query = _query.value
-        if (query.isBlank()) {
-            // Nothing in flight can still be waiting to overwrite this: the
-            // id it would be checked against has already moved past it.
-            newestRequestId.incrementAndGet()
-            searchSession = null
-            _searchLoadingMore.value = false
-            _results.value = null
-            return
-        }
-        val id = newestRequestId.incrementAndGet()
-        _searchScrollReset.value += 1
-        searchSession = null
-        _searchLoadingMore.value = false
-        searchRequests.tryEmit(SearchRequest(query, _filter.value, id))
-    }
-
-    /**
-     * The search pipeline, started once and left running for the lifetime of
-     * the view model.
-     *
-     * The point of it being one long-lived collector is that a new search no
-     * longer cancels the request before it out of a fresh coroutine.
-     * Cancelling a call mid-flight tears down its socket, and on a pooled HTTP
-     * client that is felt by whatever picks that connection up next — which is
-     * how one search could end in "Software caused connection abort" for a
-     * request that was never itself in any trouble.
-     *
-     * There is no debounce here any more, and nothing to absorb: a search is
-     * only ever asked for by a deliberate act — the search button, a
-     * suggestion or history row, a filter tab — so the request that arrives is
-     * already the one the user meant, and making them wait out a timer for it
-     * would be a delay with nothing behind it. Typing asks
-     * [startSuggestPipeline] for completions instead and leaves the results
-     * alone.
-     */
-    private fun startSearchPipeline() = viewModelScope.launch {
-        searchRequests
-            .collectLatest { request ->
-                val key = cacheKey(request.query, request.filter)
-                // Something to look at immediately: the exact answer if this
-                // query has been run before, otherwise the closest earlier
-                // one. Only fall back to a spinner with neither.
-                val exact = searchCache.get(key)
-                val cached = exact?.rows ?: prefixMatch(request.query, request.filter)
-                _results.value = cached?.let { UiState.Success(it) } ?: UiState.Loading
-                if (exact != null) {
-                    searchSession = SearchSession(key, request.requestId, request.filter, exact.continuation)
-                    return@collectLatest
-                }
-
-                // Search is YouTube's alone. A module is a *substitution*
-                // layer, not a catalogue to browse: it never has cover art,
-                // radio, related tracks or an album page, so its rows arrived
-                // in the results list looking like YouTube's and then behaved
-                // nothing like them. Every track found here takes the ordinary
-                // YouTube path and is handed to the module at playback time —
-                // see [SourceResolver.substituteForYouTube] — which upgrades
-                // the ones it holds without any of them having to be a
-                // separate row to pick between.
-                val result = YtMusicRepository.searchPage(request.query, request.filter)
-                // A search that has been superseded shouldn't land on screen,
-                // whether it succeeded or failed.
-                if (request.requestId != newestRequestId.get()) return@collectLatest
-                _results.value = result.fold(
-                    onSuccess = { page -> published(page, key, request.requestId) },
-                    onFailure = { failure -> UiState.Error(failure.friendly()) },
-                )
-            }
-    }
 
     /**
      * Continues the visible search only when the list reaches its end. This is
      * deliberately separate from the first-page request: waiting for every
      * continuation was the reason a search sat on a spinner for seconds.
      */
-    fun loadMoreSearchResults() {
-        val session = searchSession ?: return
-        val token = session.continuation ?: return
-        if (_searchLoadingMore.value) return
-        _searchLoadingMore.value = true
-        viewModelScope.launch {
-            try {
-                val next = YtMusicRepository.searchContinuation(token, session.filter)
-                val stillCurrent = searchSession == session && session.requestId == newestRequestId.get()
-                if (stillCurrent) {
-                    next.onSuccess { page ->
-                        val current = (_results.value as? UiState.Success)?.data.orEmpty()
-                        val merged = (current + page.rows).distinctBy(::searchResultKey)
-                        searchCache.put(session.key, SearchCacheEntry(merged, page.continuation))
-                        searchSession = session.copy(continuation = page.continuation)
-                        _results.value = UiState.Success(merged)
-                    }
-                }
-            } finally {
-                _searchLoadingMore.value = false
-            }
-        }
-    }
+    fun loadMoreSearchResults() = search.loadMore()
 
     fun loadMoreSearch() = loadMoreSearchResults()
 
-    /**
-     * The typeahead pipeline, alongside [startSearchPipeline] and for the same
-     * structural reason — one long-lived collector rather than a coroutine per
-     * keystroke, so a lookup the user has typed past doesn't take a pooled
-     * socket down with it.
-     *
-     * This one *does* debounce, and that isn't the timer that was taken off the
-     * search. It's two orders of magnitude shorter, and it's paid for by the
-     * request behind it being a few hundred bytes rather than a full page of
-     * results — a burst of keystrokes shouldn't each cost a round trip, but the
-     * gap has to be short enough that the list is up before the next letter is
-     * typed. Nothing is waiting on it either way: the row the user typed is
-     * already on screen from the keystroke itself.
-     *
-     * A failure is left on the floor. There is no worthwhile way to report
-     * "couldn't suggest anything" in a list of suggestions, and the typed text
-     * is standing there as a working first row regardless.
-     */
-    @OptIn(FlowPreview::class)
-    private fun startSuggestPipeline() = viewModelScope.launch {
-        // Whether a list for [input] is still wanted. False once the field has
-        // moved on: typed further, or searched — which empties [_suggestions],
-        // and a late answer writing to it would reopen the suggestions over
-        // the results the user is by then reading.
-        fun stillWanted(input: String) =
-            _query.value == input && _suggestions.value.isNotEmpty()
-
-        suggestRequests
-            .debounce(SUGGEST_DEBOUNCE_MS)
-            .collectLatest { input ->
-                if (!stillWanted(input)) return@collectLatest
-                val fetched = YtMusicRepository.searchSuggestions(input).getOrNull()
-                    ?: return@collectLatest
-                // Asked again on the way back; the field is live throughout.
-                if (!stillWanted(input)) return@collectLatest
-                _suggestions.value = listOf(input) +
-                    fetched.filterNot { it.equals(input, ignoreCase = true) }
-            }
-    }
-
-    /**
-     * Parallel pipeline that fetches live media results (tracks, artists,
-     * albums) for the current query text. Runs alongside [startSuggestPipeline]
-     * with its own debounce so a fast typist doesn't saturate the network.
-     */
-    @OptIn(FlowPreview::class)
-    private fun startTypeaheadMediaPipeline() = viewModelScope.launch {
-        suggestRequests
-            .debounce(TYPEAHEAD_MEDIA_DEBOUNCE_MS)
-            .collectLatest { input ->
-                if (input.isBlank()) {
-                    _typeaheadResults.value = emptyList()
-                    return@collectLatest
-                }
-                // Only show media results while the user is still typing — not
-                // reading committed search results.
-                if (_suggestions.value.isEmpty()) {
-                    _typeaheadResults.value = emptyList()
-                    return@collectLatest
-                }
-                val result = YtMusicRepository.searchTypeahead(input).getOrNull()
-                // If the field moved on, drop the result silently.
-                if (_query.value != input) {
-                    _typeaheadResults.value = emptyList()
-                    return@collectLatest
-                }
-                // Cap results so the dropdown doesn't grow unbounded.
-                _typeaheadResults.value = result?.rows.orEmpty().take(TYPEAHEAD_MAX_RESULTS)
-            }
-    }
-
-    /** Caches and publishes the initial result page without waiting for later pages. */
-    private fun published(
-        page: YtMusicRepository.SearchPage,
-        key: String,
-        requestId: Long,
-    ): UiState<List<SearchResult>> {
-        val rows = page.rows
-        if (rows.isEmpty()) return UiState.Error(text(R.string.no_results))
-        searchCache.put(key, SearchCacheEntry(rows, page.continuation))
-        searchSession = SearchSession(key, requestId, _filter.value, page.continuation)
-        prefetchTopResult(rows)
-        return UiState.Success(rows)
-    }
-
-    private fun searchResultKey(row: SearchResult): String = when (row) {
-        is SearchResult.TopTrack -> "v:${row.song.videoId}"
-        is SearchResult.Track -> "v:${row.song.videoId}"
-        is SearchResult.Browse -> "b:${row.item.browseId}"
-    }
 
     /**
      * The enabled non-YouTube sources, asked at the same time and returned
@@ -1568,30 +1296,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
-        /**
-         * How long a keystroke waits before the typeahead is asked about it.
-         *
-         * Not the search's timer — searches aren't on a timer any more. This
-         * one only stops a fast typist spending a round trip per letter, so it
-         * wants to be as short as it can be while still collapsing a burst:
-         * long enough that "cold" isn't four lookups, short enough that the
-         * list is up by the time the thumb has left the key.
-         */
-        const val SUGGEST_DEBOUNCE_MS = 180L
-
-        /**
-         * Debounce for the parallel media-search pipeline. Slightly longer than
-         * text suggestions so it doesn't fire on every single keystroke.
-         */
-        const val TYPEAHEAD_MEDIA_DEBOUNCE_MS = 350L
-
-        /**
-         * Maximum number of live media results shown in the typeahead dropdown.
-         */
-        const val TYPEAHEAD_MAX_RESULTS = 8
-
-        const val SEARCH_CACHE_ENTRIES = 100
-
         /**
          * How long any one source gets to answer a search.
          *

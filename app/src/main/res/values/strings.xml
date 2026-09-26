@@ -64,6 +64,15 @@
     <string name="search_hint">Artists, Songs, Lyrics and More</string>
     <string name="recent_search_edit">Edit “%1$s”</string>
     <string name="recent_search_remove">Remove “%1$s” from recent searches</string>
+    <!-- What a recent search was found as, for the row that has no artist
+         line of its own to name it. -->
+    <string name="search_type_song">Song</string>
+    <string name="search_type_video">Video</string>
+    <string name="search_type_album">Album</string>
+    <string name="search_type_artist">Artist</string>
+    <string name="search_type_playlist">Playlist</string>
+    <string name="search_type_other">Page</string>
+    <string name="search_type_query">Search</string>
     <string name="storage_required_save">Storage access is needed to save songs</string>
     <string name="storage_required_read">Storage permission is required to read local audio files</string>
     <string name="sharing_coming_soon">Sharing is coming soon</string>

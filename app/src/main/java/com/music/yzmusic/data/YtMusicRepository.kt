@@ -421,22 +421,32 @@ object YtMusicRepository {
      */
     suspend fun searchPage(query: String, filter: SearchFilter): Result<SearchPage> =
         call("search:${filter.name}") {
-            InnertubeParser.parseSearchPage(
-                Innertube.search(query, filter.params),
-                includeVideos = filter == SearchFilter.VIDEOS,
-            ).let { page ->
-                SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
-            }
+            val started = System.nanoTime()
+            val json = Innertube.search(query, filter.params)
+            val fetched = System.nanoTime()
+            val page = InnertubeParser.parseSearchPage(json, includeVideos = filter == SearchFilter.VIDEOS)
+            val rows = page.rows.distinctBy { it.identityKey() }
+            Log.d(
+                TAG,
+                "search:${filter.name} fetch=${elapsedMs(started, fetched)}ms " +
+                    "parse=${elapsedMs(fetched)}ms rows=${rows.size}",
+            )
+            SearchPage(rows, page.continuation)
         }
 
     /** Fetches the next page of a search only when the result list needs it. */
     suspend fun searchContinuation(token: String, filter: SearchFilter = SearchFilter.ALL): Result<SearchPage> = call("search:continuation") {
-        InnertubeParser.parseSearchPage(
-            Innertube.searchContinuation(token),
-            includeVideos = filter == SearchFilter.VIDEOS,
-        ).let { page ->
-            SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
-        }
+        val started = System.nanoTime()
+        val json = Innertube.searchContinuation(token)
+        val fetched = System.nanoTime()
+        val page = InnertubeParser.parseSearchPage(json, includeVideos = filter == SearchFilter.VIDEOS)
+        val rows = page.rows.distinctBy { it.identityKey() }
+        Log.d(
+            TAG,
+            "search:continuation fetch=${elapsedMs(started, fetched)}ms " +
+                "parse=${elapsedMs(fetched)}ms rows=${rows.size}",
+        )
+        SearchPage(rows, page.continuation)
     }
 
     /**
@@ -459,7 +469,16 @@ object YtMusicRepository {
      */
     suspend fun searchSuggestions(input: String): Result<List<String>> =
         call("suggest") {
-            InnertubeParser.parseSearchSuggestions(Innertube.searchSuggestions(input))
+            val started = System.nanoTime()
+            val json = Innertube.searchSuggestions(input)
+            val fetched = System.nanoTime()
+            val out = InnertubeParser.parseSearchSuggestions(json)
+            Log.d(
+                TAG,
+                "suggest fetch=${elapsedMs(started, fetched)}ms " +
+                    "parse=${elapsedMs(fetched)}ms n=${out.size}",
+            )
+            out
         }
 
     /**
@@ -477,12 +496,17 @@ object YtMusicRepository {
      */
     suspend fun searchTypeahead(input: String): Result<SearchPage> =
         call("typeahead:$input") {
-            InnertubeParser.parseSearchPage(
-                Innertube.searchTypeahead(input),
-                includeVideos = false,
-            ).let { page ->
-                SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
-            }
+            val started = System.nanoTime()
+            val json = Innertube.searchTypeahead(input)
+            val fetched = System.nanoTime()
+            val page = InnertubeParser.parseSearchPage(json, includeVideos = false)
+            val rows = page.rows.distinctBy { it.identityKey() }
+            Log.d(
+                TAG,
+                "typeahead fetch=${elapsedMs(started, fetched)}ms " +
+                    "parse=${elapsedMs(fetched)}ms rows=${rows.size}",
+            )
+            SearchPage(rows, page.continuation)
         }
 
     /**
@@ -930,8 +954,16 @@ object YtMusicRepository {
         if (!fullSongs.isNullOrEmpty()) page.copy(songs = fullSongs) else page
     }
 
+    /**
+     * Elapsed milliseconds on a monotonic clock, so a wall-clock change
+     * mid-request — an NTP correction, the user changing the time zone — can
+     * never make a call look slow or fast.
+     */
+    private fun elapsedMs(from: Long, to: Long = System.nanoTime()): Long = (to - from) / 1_000_000
+
     private suspend fun <T> call(label: String, block: suspend () -> T): Result<T> =
         withContext(Dispatchers.IO) {
+            val started = System.nanoTime()
             runCatching { block() }.recoverCatching { failure ->
                 // Context cookies can rotate while a process is alive. Refresh
                 // once and retry; never loop or silently sign the listener out.
@@ -948,7 +980,10 @@ object YtMusicRepository {
                 // Result and put the abandoned request's error on screen.
                 // Cancellation isn't this call's to answer for.
                 .onFailure { if (it is CancellationException) throw it }
-                .onSuccess { Log.d(TAG, "$label ok") }
-                .onFailure { Log.w(TAG, "$label failed: ${it.message}") }
+                // The total for the whole call, whatever the block decides to
+                // time internally. Pair it with a per-phase line (see
+                // [searchPage]) to tell a slow round trip from a slow parse.
+                .onSuccess { Log.d(TAG, "$label ok in ${elapsedMs(started)}ms") }
+                .onFailure { Log.w(TAG, "$label failed after ${elapsedMs(started)}ms: ${it.message}") }
         }
 }

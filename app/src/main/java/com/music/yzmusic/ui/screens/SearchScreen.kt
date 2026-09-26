@@ -65,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,11 +76,12 @@ import coil3.compose.AsyncImage
 import com.music.yzmusic.data.model.BrowseItem
 import com.music.yzmusic.data.model.BrowseType
 import com.music.yzmusic.data.model.ROW_ART_PX
+import com.music.yzmusic.data.model.SearchEntityType
+import com.music.yzmusic.data.model.SearchHistoryEntity
 import com.music.yzmusic.data.model.SearchFilter
 import com.music.yzmusic.data.model.artworkAt
 import com.music.yzmusic.data.model.SearchResult
 import com.music.yzmusic.data.model.Song
-import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.R
 import com.music.yzmusic.ui.components.MessageState
 import com.music.yzmusic.ui.components.PAGE_GUTTER
@@ -89,6 +91,8 @@ import com.music.yzmusic.ui.components.thumbnailBorder
 import com.music.yzmusic.ui.components.songListSkeleton
 import com.music.yzmusic.ui.haptics.Haptic
 import com.music.yzmusic.ui.haptics.rememberHaptics
+import com.music.yzmusic.ui.search.SearchState
+import com.music.yzmusic.ui.search.searchResultKey
 import java.util.Locale
 
 @Composable
@@ -97,7 +101,13 @@ fun SearchScreen(
     onQueryChange: (String) -> Unit,
     filter: SearchFilter,
     onFilterChange: (SearchFilter) -> Unit,
-    results: UiState<List<SearchResult>>?,
+    results: SearchState,
+    /**
+     * Runs the search that failed again, exactly as it was. Offered by a failed
+     * search and by nothing else — there is nothing to retry about a query that
+     * simply matched nothing.
+     */
+    onRetry: () -> Unit,
     loadingMore: Boolean = false,
     onLoadMore: () -> Unit = {},
     listState: LazyListState,
@@ -115,12 +125,19 @@ fun SearchScreen(
      * without a trip through its page.
      */
     onBrowseLongPress: ((BrowseItem) -> Unit)? = null,
-    history: List<String>,
+    /**
+     * What was looked at before, newest first, as the entries they are rather
+     * than as the words that found them: a recent that was a track plays and a
+     * recent that was a page opens, both from what is stored on the device.
+     * See [SearchHistoryEntity].
+     */
+    history: List<SearchHistoryEntity>,
     suggestions: List<String>,
     typeaheadResults: List<SearchResult> = emptyList(),
     onSubmit: () -> Unit,
     onSuggestionClick: (String) -> Unit,
-    onHistoryClick: (String) -> Unit,
+    onHistoryClick: (SearchHistoryEntity) -> Unit,
+    /** Takes an entry's identity, not its text: two entries can share a title. */
     onHistoryRemove: (String) -> Unit,
     onHistoryClear: () -> Unit,
     onTypeaheadLongPress: ((Song) -> Unit)? = null,
@@ -130,12 +147,19 @@ fun SearchScreen(
 ) {
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val isCurrentlyLoadingMore = loadingMore || isLoadingMore
 
-    // Re-tapping the search tab from the nav bar increments focusTrigger;
-    // respond by focusing the field and opening the keyboard.
+    // Entering the search tab, or re-tapping it from the nav bar, increments
+    // focusTrigger. Focusing alone is not enough to be useful: a field can hold
+    // focus with the keyboard dismissed — after a scroll, after the field was
+    // cleared, after a tab away and back — and the point of asking for search
+    // is to be able to type into it.
     LaunchedEffect(focusTrigger) {
-        if (focusTrigger > 0) focusRequester.requestFocus()
+        if (focusTrigger > 0) {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
     }
     // Search keeps one list state while its contents change. Reset it for each
     // new request so choosing a recent search cannot inherit the history's
@@ -144,13 +168,14 @@ fun SearchScreen(
         if (scrollResetTrigger > 0) listState.scrollToItem(0)
     }
     // A non-empty suggestion list means the field is mid-edit — see
-    // MainViewModel.suggestions. Nothing below it is worth showing while it is
-    // up: the results are for whatever was searched before this edit began,
-    // and so are the filter tabs above them.
+    // `SearchController.onQueryChange`, which is what puts the lead row there
+    // and takes it away on committing. Nothing below it is worth showing while
+    // it is up: the results are for whatever was searched before this edit
+    // began, and so are the filter tabs above them.
     val suggesting = suggestions.isNotEmpty()
     val showTypeahead = typeaheadResults.isNotEmpty() && suggesting
     LaunchedEffect(listState, results, isCurrentlyLoadingMore) {
-        if (results !is UiState.Success) return@LaunchedEffect
+        if (results !is SearchState.Results) return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
             (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) to layout.totalItemsCount
@@ -173,7 +198,7 @@ fun SearchScreen(
             // The filters only mean something once there is a result set to narrow;
             // they stay up for an empty or failed search too, or picking a filter
             // that finds nothing would take away the control needed to leave it.
-            if (results != null && !suggesting) {
+            if (results !is SearchState.Idle && !suggesting) {
                 SearchFilterTabs(filter = filter, onFilterChange = onFilterChange)
             }
         }
@@ -214,21 +239,38 @@ fun SearchScreen(
                         )
                     }
                 }
-                results == null -> if (history.isEmpty()) {
+                // Nothing has been searched for, or the field was emptied. The
+                // list has been put back at the top for this, so the recents
+                // aren't shown at the scroll position of the result page that
+                // was just left.
+                results is SearchState.Idle -> if (history.isEmpty()) {
                     item { MessageState(stringResource(R.string.search_empty)) }
                 } else {
                     recentSearches(history, onHistoryClick, onHistoryRemove, onHistoryClear)
                 }
-                results is UiState.Loading -> songListSkeleton(circular = filter == SearchFilter.ARTISTS)
-                results is UiState.Error -> item { MessageState(results.message) }
-                results is UiState.Success -> {
-                    val tracks = results.data
+                results is SearchState.Loading -> songListSkeleton(circular = filter == SearchFilter.ARTISTS)
+                // The search ran and matched nothing: said as a fact, with
+                // nothing to retry. There is nothing wrong with the query, and
+                // offering to run it again would be asking the user to fix
+                // something that isn't broken.
+                results is SearchState.Empty -> item { MessageState(stringResource(R.string.no_results)) }
+                // The search could not be carried out — the one state that
+                // offers to try again, because here it might work.
+                results is SearchState.Failed -> item {
+                    MessageState(
+                        message = results.message,
+                        actionLabel = stringResource(R.string.retry),
+                        onAction = onRetry,
+                    )
+                }
+                results is SearchState.Results -> {
+                    val tracks = results.rows
                         .mapNotNull { row -> when (row) {
                             is SearchResult.TopTrack -> row.song
                             is SearchResult.Track -> row.song
                             is SearchResult.Browse -> null
                         } }
-                    val topResult = results.data.filterIsInstance<SearchResult.TopTrack>().firstOrNull()
+                    val topResult = results.rows.filterIsInstance<SearchResult.TopTrack>().firstOrNull()
                     if (filter == SearchFilter.ALL && topResult != null) {
                         item(key = "search:top-result:${topResult.song.videoId}") {
                             TopResultCard(
@@ -239,7 +281,7 @@ fun SearchScreen(
                             )
                         }
                     }
-                    searchSections(results.data, filter).forEach { section ->
+                    searchSections(results.rows, filter).forEach { section ->
                         section.title?.let { title ->
                             item(key = "search-section:$title") {
                                 Text(
@@ -255,7 +297,13 @@ fun SearchScreen(
                                 )
                             }
                         }
-                        itemsIndexed(section.rows) { index, row ->
+                        // Keyed by the entity, not by position: a result list is
+                        // rebuilt as pages arrive and a filter narrows it, and
+                        // with no key Compose matches the rows by slot, so a
+                        // row that arrives one place later is the old row with
+                        // new contents — a wrong title, or the wrong cover, on
+                        // a row the user is looking at.
+                        itemsIndexed(section.rows, key = { _, row -> searchResultKey(row) }) { index, row ->
                             when (row) {
                                 is SearchResult.TopTrack -> Unit
                                 is SearchResult.Track -> SongRow(
@@ -555,13 +603,18 @@ private fun TypeaheadSongRow(
 }
 
 /**
- * What was searched for before, shown in place of the results while the field
- * is empty — the same spot Spotify and Apple Music put it, and the reason the
+ * What was looked at before, shown in place of the results while the field is
+ * empty — the same spot Spotify and Apple Music put it, and the reason the
  * blank search page isn't just a sentence any more.
+ *
+ * A row is the thing that was looked at rather than the words that found it,
+ * so it shows the cover that was on screen at the time and says what kind of
+ * thing it was. A term is the one kind with no cover and nothing to open, and
+ * is drawn the way it always was.
  */
 private fun LazyListScope.recentSearches(
-    history: List<String>,
-    onClick: (String) -> Unit,
+    history: List<SearchHistoryEntity>,
+    onClick: (SearchHistoryEntity) -> Unit,
     onRemove: (String) -> Unit,
     onClear: () -> Unit,
 ) {
@@ -589,17 +642,32 @@ private fun LazyListScope.recentSearches(
             )
         }
     }
-    items(history, key = { "recent:$it" }) { term ->
+    items(history, key = { "recent:${it.identity}" }) { entry ->
         RecentSearchRow(
-            term = term,
-            onClick = { onClick(term) },
-            onRemove = { onRemove(term) },
+            entry = entry,
+            onClick = { onClick(entry) },
+            onRemove = { onRemove(entry.identity) },
         )
     }
 }
 
+/**
+ * One recent: the thing itself, what kind of thing it is, and how to take it
+ * off the list.
+ *
+ * The cover is the point of this being an entity rather than a string. Two
+ * recents can be the same words, and before this they were one row between
+ * them; now each is its own thing with its own cover, and the row is keyed on
+ * the entity so that re-recording one — which moves it to the top of the
+ * list — is a move rather than a rebuild of everything under it.
+ */
 @Composable
-private fun RecentSearchRow(term: String, onClick: () -> Unit, onRemove: () -> Unit) {
+private fun RecentSearchRow(
+    entry: SearchHistoryEntity,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val artwork = entry.artworkUrl.takeUnless { it.isNullOrBlank() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -607,20 +675,61 @@ private fun RecentSearchRow(term: String, onClick: () -> Unit, onRemove: () -> U
             .padding(start = PAGE_GUTTER, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Rounded.History,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp),
-        )
-        Spacer(Modifier.width(16.dp))
+        if (artwork != null) {
+            AsyncImage(
+                model = artwork.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .thumbnailBorder(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+            Spacer(Modifier.width(16.dp))
+        } else {
+            // A term has no cover, and neither has an entry whose cover has
+            // gone missing. The icon stands in so the rows stay the same height
+            // whatever the list happens to hold.
+            Icon(
+                Icons.Rounded.History,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(16.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = entry.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // What was on screen under the title when this was picked: who
+            // made the track, who is on the album. A term has no such line,
+            // and the tag beside it already says what it is.
+            val byline = entry.artist?.takeIf { it.isNotBlank() }
+            if (byline != null) {
+                Text(
+                    text = byline,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // The kind, on every row. The same words can have been searched to
+        // find a track, a page and nothing in particular, and a list of rows
+        // that all read the same is a list nobody can pick from: this is what
+        // distinguishes one from another, and what says what a tap will open.
         Text(
-            text = term,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
+            text = entityTypeLabel(entry.entityType),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.padding(end = 4.dp),
         )
         Box(
             modifier = Modifier
@@ -631,12 +740,24 @@ private fun RecentSearchRow(term: String, onClick: () -> Unit, onRemove: () -> U
         ) {
             Icon(
                 Icons.Rounded.Close,
-                contentDescription = stringResource(R.string.recent_search_remove, term),
+                contentDescription = stringResource(R.string.recent_search_remove, entry.title),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
         }
     }
+}
+
+/** What kind of thing a recent was, in the user's language. */
+@Composable
+private fun entityTypeLabel(type: SearchEntityType): String = when (type) {
+    SearchEntityType.SONG -> stringResource(R.string.search_type_song)
+    SearchEntityType.VIDEO -> stringResource(R.string.search_type_video)
+    SearchEntityType.ALBUM -> stringResource(R.string.search_type_album)
+    SearchEntityType.ARTIST -> stringResource(R.string.search_type_artist)
+    SearchEntityType.PLAYLIST -> stringResource(R.string.search_type_playlist)
+    SearchEntityType.OTHER -> stringResource(R.string.search_type_other)
+    SearchEntityType.QUERY -> stringResource(R.string.search_type_query)
 }
 
 @OptIn(ExperimentalFoundationApi::class)
