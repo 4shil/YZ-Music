@@ -152,6 +152,25 @@ const val HERO_CARD_RATIO = 0.92f
  */
 fun heroCardWidth(available: Dp): Dp = minOf(available * HERO_CARD_FRACTION, HERO_CARD_MAX_WIDTH)
 
+/** Share of the row a Recents column takes, so the next one peeks in past it. */
+private const val TRACK_COLUMN_FRACTION = 0.72f
+
+/**
+ * How wide a Recents shelf's track column should be in a row [available] wide.
+ *
+ * Measured off the row the way [heroCardWidth] is, and for the same reason: a
+ * fixed 310dp — which is what the artist page's top-tracks pager has always
+ * used, and what this is sized to agree with — runs off a small phone and
+ * wastes the middle of a tablet.
+ *
+ * Narrower share than a hero card, because a column is four compact track rows
+ * rather than one piece of artwork: it reads at two columns on a phone with the
+ * third showing, which is the same "there is more this way" the card rows give.
+ */
+private val TRACK_COLUMN_MAX_WIDTH = 310.dp
+
+fun trackColumnWidth(available: Dp): Dp = minOf(available * TRACK_COLUMN_FRACTION, TRACK_COLUMN_MAX_WIDTH)
+
 /** How many cards sit across a library grid row, and how wide each lands. */
 data class LibraryGridSpec(val columns: Int, val cardWidth: Dp)
 

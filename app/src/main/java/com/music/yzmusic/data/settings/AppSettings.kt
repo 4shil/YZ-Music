@@ -472,6 +472,7 @@ object AppSettings {
     val lyricsBlur = MutableStateFlow(true)
     val libraryViewType = MutableStateFlow(LibraryViewType.LIST)
     val downloadedMusicViewType = MutableStateFlow(LibraryViewType.LIST)
+    val homeRecentsViewType = MutableStateFlow(LibraryViewType.LIST)
     val localMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
     val downloadedMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
     val allowDolbyAtmos = MutableStateFlow(true)
@@ -623,6 +624,9 @@ object AppSettings {
         }.getOrDefault(LibraryViewType.LIST)
         downloadedMusicViewType.value = runCatching {
             LibraryViewType.valueOf(prefs.getString(KEY_DOWNLOADED_MUSIC_VIEW_TYPE, LibraryViewType.LIST.name) ?: LibraryViewType.LIST.name)
+        }.getOrDefault(LibraryViewType.LIST)
+        homeRecentsViewType.value = runCatching {
+            LibraryViewType.valueOf(prefs.getString(KEY_HOME_RECENTS_VIEW_TYPE, LibraryViewType.LIST.name) ?: LibraryViewType.LIST.name)
         }.getOrDefault(LibraryViewType.LIST)
         localMusicSort.value = readLocalMusicSort(KEY_LOCAL_MUSIC_SORT)
         downloadedMusicSort.value = readLocalMusicSort(KEY_DOWNLOADED_MUSIC_SORT)
@@ -1167,6 +1171,26 @@ object AppSettings {
         }
     }
 
+    fun setHomeRecentsViewType(value: LibraryViewType) {
+        homeRecentsViewType.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_HOME_RECENTS_VIEW_TYPE, value.name).apply()
+        }
+    }
+
+    /**
+     * Swaps the Home screen's Recents shelf to its other layout.
+     *
+     * A toggle rather than a setter the caller reads the pairing off: what the
+     * header offers is always "the other one", and leaving that arithmetic at
+     * the call site is one more place for the icon and the tap to disagree.
+     */
+    fun toggleHomeRecentsViewType() {
+        setHomeRecentsViewType(
+            if (homeRecentsViewType.value == LibraryViewType.LIST) LibraryViewType.GRID else LibraryViewType.LIST
+        )
+    }
+
     fun setLocalMusicSort(value: LocalMusicSort) {
         localMusicSort.value = value
         if (::prefs.isInitialized) {
@@ -1453,6 +1477,7 @@ object AppSettings {
     private const val KEY_SHOW_LYRICS_LOGS = "show_lyrics_logs"
     private const val KEY_LIBRARY_VIEW_TYPE = "library_view_type"
     private const val KEY_DOWNLOADED_MUSIC_VIEW_TYPE = "downloaded_music_view_type"
+    private const val KEY_HOME_RECENTS_VIEW_TYPE = "home_recents_view_type"
     private const val KEY_LOCAL_MUSIC_SORT = "local_music_sort"
     private const val KEY_DOWNLOADED_MUSIC_SORT = "downloaded_music_sort"
     private const val KEY_ALLOW_DOLBY_ATMOS = "allow_dolby_atmos"
