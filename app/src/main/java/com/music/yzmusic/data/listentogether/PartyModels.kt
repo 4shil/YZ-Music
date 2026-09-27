@@ -27,6 +27,11 @@ data class PartyTrack(
     val artist: String = "",
     val thumbnailUrl: String? = null,
     val durationMs: Long? = null,
+    /** Preserves the queue's shared manual/AutoPlay section boundary. */
+    val fromAutoplay: Boolean = false,
+    val addedBy: String? = null,
+    val addedByName: String? = null,
+    val queueId: String? = null,
 )
 
 /** One signed-in device in the party, as every other device sees it. */
@@ -75,6 +80,8 @@ data class PartyPlayback(
     val startedBy: String? = null,
     /** Snapshot of their name so attribution survives that member leaving. */
     val startedByName: String? = null,
+    /** Party-wide setting so a connected listener can refill AutoPlay on host loss. */
+    val autoplayEnabled: Boolean = false,
     val updatedAtMs: Long = 0,
 )
 
@@ -93,10 +100,32 @@ data class PartySnapshot(
     val code: String = "",
     val createdAtMs: Long = 0,
     val maxMembers: Int = 5,
+    /** Whether only the host may drive the music here. */
+    val hostOnlyControl: Boolean = false,
     val members: List<PartyMember> = emptyList(),
     val playback: PartyPlayback = PartyPlayback(),
     val queue: PartyQueue = PartyQueue(),
     val serverMs: Long = 0,
+)
+
+/**
+ * Who is in a party, to somebody who has not joined it.
+ */
+@Serializable
+data class PartyPreview(
+    val code: String = "",
+    val hostName: String = "",
+    val memberCount: Int = 0,
+    val maxMembers: Int = 5,
+    val isFull: Boolean = false,
+    val members: List<PartyPreviewMember> = emptyList(),
+)
+
+@Serializable
+data class PartyPreviewMember(
+    val displayName: String = "",
+    val avatarUrl: String? = null,
+    val isHost: Boolean = false,
 )
 
 /** The answer to a create or a join: the code, and this device's key to it. */
@@ -109,12 +138,24 @@ data class PartyMembership(
     val serverMs: Long = 0,
 )
 
+/** A compact record of a live party action. */
+@Serializable
+data class PartyActivity(
+    val action: String,
+    val by: String,
+    val atMs: Long,
+    val detail: String = "",
+)
+
 @Serializable
 internal data class JoinRequest(
     val userId: String,
     val deviceId: String,
     val displayName: String,
     val avatarUrl: String? = null,
+    val maxMembers: Int? = null,
+    val autoplayEnabled: Boolean? = null,
+    val hostOnlyControl: Boolean? = null,
 )
 
 @Serializable

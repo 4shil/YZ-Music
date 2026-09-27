@@ -1,16 +1,18 @@
-# Render blueprint for the Listen Together server.
+# Render blueprint for YZ Music Play Together (Realtime Party Server)
 #
-# Blueprints are read from the *repository root*, so deploying this file as-is
-# means either copying it up a level or — simpler, and what the README
-# describes — creating the service by hand in the dashboard with Root Directory
-# set to `backend`. The values below are the same either way.
-#
-# One instance, no autoscaling, on purpose: a party lives in the memory of the
-# instance holding its WebSockets, so a second instance would be a second,
-# disjoint set of parties. See app/party.py, PartyStore.
+# Deploy this service on Render Dashboard:
+# - New -> Web Service, connect repo
+# - Root Directory: backend
+# - Runtime: Python
+# - Build Command: pip install -r requirements.txt
+# - Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT --ws websockets
+# - Health Check Path: /healthz
+# - Plan: Free / Starter
+# - Instances: 1
+
 services:
   - type: web
-    name: bitchord-listen-together
+    name: yz-music-play-together
     runtime: python
     plan: free
     rootDir: backend
@@ -21,10 +23,27 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.6
-      # Everything below is optional — app/config.py has the same defaults.
+      - key: DATABASE_URL
+        value: ""
+      - key: PUBLIC_BASE_URL
+        value: "https://yz-music.vercel.app"
+      - key: WEBSOCKET_PUBLIC_URL
+        value: "wss://yz-music-party.onrender.com/ws/parties"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: INVITE_SECRET
+        generateValue: true
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://yz-music.vercel.app,http://localhost:3000,http://127.0.0.1:3000"
       - key: JAM_MAX_MEMBERS
         value: "5"
+      - key: JAM_MAX_UPCOMING_QUEUE
+        value: "25"
+      - key: JAM_MAX_PARTIES
+        value: "100"
       - key: JAM_STATE_HEARTBEAT_MS
         value: "5000"
       - key: JAM_PLAY_LEAD_MS
         value: "350"
+      - key: JAM_TRUST_PROXY
+        value: "true"

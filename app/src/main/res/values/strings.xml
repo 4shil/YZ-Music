@@ -1,4 +1,6 @@
 <resources>
+    <string name="lyrics_translation_language">Lyrics language</string>
+    <string name="lyrics_language_automatic">Automatic</string>
     <string name="app_name">YZ Music</string>
     <string name="playback_channel_name">Now playing</string>
     <string name="download_channel_name">Downloads</string>
@@ -238,14 +240,22 @@
 
     <!-- Lyrics Translation -->
     <string name="lyrics_translate">Translate lyrics</string>
-    <string name="lyrics_show_original">Show original lyrics</string>
     <string name="lyrics_translation_preparing">Detecting lyric language…</string>
     <string name="lyrics_translation_downloading">Downloading %1$s translation…</string>
     <string name="lyrics_translation_translating">Translating to %1$s…</string>
-    <string name="lyrics_translated_to">Translated to %1$s</string>
     <string name="lyrics_already_in_language">Lyrics are already in %1$s</string>
     <string name="lyrics_translation_unavailable">Translation unavailable</string>
-    <string name="lyrics_translation_metered_blocked">Model download requires Wi-Fi</string>
+    <string name="lyrics_translation_blocked">Needs a connection — tap to retry</string>
+    <string name="lyrics_show_original">Show original only</string>
+    <string name="lyrics_mode_romanized">Romanized</string>
+    <string name="lyrics_romanizing">Romanizing…</string>
+    <string name="lyrics_already_romanized">Already in Roman script</string>
+    <string name="lyrics_romanization_unavailable">Can\'t romanize this script</string>
+    <string name="lyrics_offset">Lyrics offset</string>
+    <string name="lyrics_offset_none">In time with the music</string>
+    <string name="lyrics_offset_value">Drawn %1$s from the music. Tap to reset.</string>
+    <string name="lyrics_offset_earlier">Show lyrics earlier</string>
+    <string name="lyrics_offset_later">Show lyrics later</string>
 
     <!-- Double-Tap Seek -->
     <string name="double_tap_seek">Double-tap to seek</string>

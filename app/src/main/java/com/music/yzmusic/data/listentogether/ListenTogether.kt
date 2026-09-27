@@ -45,9 +45,55 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.net.URI
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+
+sealed interface ServerUrlError {
+    data object Blank : ServerUrlError
+    data object UnsupportedScheme : ServerUrlError
+    data object InvalidHost : ServerUrlError
+    data object InvalidPort : ServerUrlError
+}
+
+sealed interface ServerUrlValidationResult {
+    data class Valid(val normalizedUrl: String) : ServerUrlValidationResult
+    data class Invalid(val error: ServerUrlError) : ServerUrlValidationResult
+}
+
+fun parseAndNormalizeServerUrl(rawUrl: String): ServerUrlValidationResult {
+    val trimmed = rawUrl.trim()
+    if (trimmed.isEmpty()) return ServerUrlValidationResult.Invalid(ServerUrlError.Blank)
+
+    val withScheme = if (!trimmed.startsWith("http://", ignoreCase = true) &&
+        !trimmed.startsWith("https://", ignoreCase = true)
+    ) {
+        "https://$trimmed"
+    } else {
+        trimmed
+    }
+
+    val uri = runCatching { URI(withScheme) }.getOrNull()
+        ?: return ServerUrlValidationResult.Invalid(ServerUrlError.InvalidHost)
+
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "http" && scheme != "https") {
+        return ServerUrlValidationResult.Invalid(ServerUrlError.UnsupportedScheme)
+    }
+
+    val port = uri.port
+    if (port != -1 && port !in 1..65535) {
+        return ServerUrlValidationResult.Invalid(ServerUrlError.InvalidPort)
+    }
+
+    val rawHost = uri.host ?: return ServerUrlValidationResult.Invalid(ServerUrlError.InvalidHost)
+    if (rawHost.isEmpty()) return ServerUrlValidationResult.Invalid(ServerUrlError.InvalidHost)
+
+    val portSuffix = if (port != -1) ":$port" else ""
+    val canonicalPath = uri.rawPath?.trimEnd('/') ?: ""
+    return ServerUrlValidationResult.Valid("$scheme://${rawHost.lowercase()}$portSuffix$canonicalPath")
+}
 
 /**
  * Listen together: one party, shared by up to five signed-in devices.
@@ -68,6 +114,7 @@ object ListenTogether {
         val you: PartyMember? = null,
         val members: List<PartyMember> = emptyList(),
         val maxMembers: Int = 5,
+        val hostOnlyControl: Boolean = false,
         val playback: PartyPlayback = PartyPlayback(),
         /**
          * Held separately from [playback] because it arrives separately: the
@@ -84,10 +131,12 @@ object ListenTogether {
     ) {
         val inParty: Boolean get() = code != null
         val isFull: Boolean get() = members.size >= maxMembers
+        val controlsLocked: Boolean
+            get() = inParty && hostOnlyControl && you?.isHost != true
     }
 
     /** A refusal from the server, carrying the machine-readable half. */
-    class PartyException(val code: String, message: String) : Exception(message)
+    class PartyException(val code: String, message: String, val statusCode: Int? = null) : Exception(message)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -115,6 +164,22 @@ object ListenTogether {
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
+
+    private val _awaitingStart = MutableStateFlow(false)
+    val awaitingStart: StateFlow<Boolean> = _awaitingStart.asStateFlow()
+
+    fun setAwaitingStart(value: Boolean) {
+        _awaitingStart.value = value
+    }
+
+    private val _activities = MutableStateFlow<List<PartyActivity>>(emptyList())
+    val activities: StateFlow<List<PartyActivity>> = _activities.asStateFlow()
+
+    private fun recordActivity(activity: PartyActivity) {
+        _activities.update { current ->
+            (listOf(activity) + current).take(MAX_ACTIVITIES)
+        }
+    }
 
     /**
      * A server the user has pointed this install at instead of the default one.
@@ -169,11 +234,9 @@ object ListenTogether {
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val savedServer = prefs.getString(KEY_SERVER, null)?.trim().orEmpty()
-        if (savedServer.contains("bitchord", ignoreCase = true)) {
-            prefs.edit().remove(KEY_SERVER).apply()
-            _customServer.value = ""
-        } else {
-            _customServer.value = savedServer
+        when (val res = parseAndNormalizeServerUrl(savedServer)) {
+            is ServerUrlValidationResult.Valid -> _customServer.value = res.normalizedUrl
+            is ServerUrlValidationResult.Invalid -> _customServer.value = ""
         }
 
         val code = prefs.getString(KEY_CODE, null)
@@ -198,9 +261,21 @@ object ListenTogether {
 
     /** Points this install at another server, or back at the default one if blank. */
     fun setCustomServerUrl(value: String) {
-        val cleaned = value.trim().trimEnd('/')
-        _customServer.value = cleaned
-        prefs.edit().putString(KEY_SERVER, cleaned).apply()
+        val trimmed = value.trim()
+        if (trimmed.isBlank()) {
+            _customServer.value = ""
+            prefs.edit().remove(KEY_SERVER).apply()
+            return
+        }
+        when (val res = parseAndNormalizeServerUrl(trimmed)) {
+            is ServerUrlValidationResult.Valid -> {
+                _customServer.value = res.normalizedUrl
+                prefs.edit().putString(KEY_SERVER, res.normalizedUrl).apply()
+            }
+            is ServerUrlValidationResult.Invalid -> {
+                Log.w(TAG, "ignoring invalid custom server URL: $trimmed")
+            }
+        }
     }
 
     /** Whether this device has an account it can jam as. */
@@ -214,11 +289,14 @@ object ListenTogether {
 
     // ------------------------------------------------------------ joining --
 
-    suspend fun createParty(): Result<String> = enter { who ->
-        post("${httpBase()}/api/parties", JoinRequest(who.userId, who.deviceId, who.name, who.avatar))
+    suspend fun createParty(maxMembers: Int = 5): Result<String> = enter { who ->
+        post(
+            "${httpBase()}/api/parties",
+            JoinRequest(who.userId, who.deviceId, who.name, who.avatar, maxMembers = maxMembers),
+        )
     }
 
-    suspend fun joinParty(code: String): Result<String> {
+    suspend fun joinParty(code: String, server: String? = null): Result<String> {
         val previousCode = _state.value.code
         val previousToken = token
         val result = enter { who ->
@@ -226,7 +304,17 @@ object ListenTogether {
             if (cleaned.length != CODE_LENGTH) {
                 throw PartyException("bad_code", "A party code is six letters or digits.")
             }
-            post("${httpBase()}/api/parties/$cleaned/join", JoinRequest(who.userId, who.deviceId, who.name, who.avatar))
+            refuseIfRecentlyKicked(cleaned)
+            val base = server?.let {
+                when (val res = parseAndNormalizeServerUrl(it)) {
+                    is ServerUrlValidationResult.Valid -> res.normalizedUrl
+                    is ServerUrlValidationResult.Invalid -> null
+                }
+            } ?: httpBase()
+            post(
+                "$base/api/parties/$cleaned/join",
+                JoinRequest(who.userId, who.deviceId, who.name, who.avatar),
+            )
         }
 
         val joinedCode = result.getOrNull()
@@ -239,6 +327,36 @@ object ListenTogether {
             releaseStaleSlot(previousCode, previousToken)
         }
         return result
+    }
+
+    suspend fun previewParty(code: String, server: String? = null): Result<PartyPreview> = withContext(Dispatchers.IO) {
+        val cleaned = code.filter { it.isLetterOrDigit() }.uppercase()
+        if (cleaned.length != CODE_LENGTH) {
+            return@withContext Result.failure(PartyException("bad_code", "A party code is six letters or digits."))
+        }
+        runCatching {
+            refuseIfRecentlyKicked(cleaned)
+            val base = (server?.let {
+                when (val res = parseAndNormalizeServerUrl(it)) {
+                    is ServerUrlValidationResult.Valid -> res.normalizedUrl
+                    is ServerUrlValidationResult.Invalid -> null
+                }
+            } ?: httpBase()).ifBlank { throw PartyException("no_server", "Set the party server address first.") }
+
+            val response = http.get("$base/api/parties/$cleaned/preview") {
+                timeout { requestTimeoutMillis = 15_000L }
+            }
+            if (!response.status.isSuccess()) {
+                val problem = response.toPartyException()
+                if (problem.code == "http_404") {
+                    return@runCatching PartyPreview(code = cleaned)
+                }
+                throw problem
+            }
+            response.body<PartyPreview>()
+        }.onFailure {
+            Log.w(TAG, "could not look up a party: ${redact(it.message)}")
+        }
     }
 
     private suspend fun enter(request: suspend (Identity) -> PartyMembership): Result<String> =
@@ -265,7 +383,9 @@ object ListenTogether {
                         you = membership.you,
                         members = membership.party.members,
                         maxMembers = membership.party.maxMembers,
+                        hostOnlyControl = membership.party.hostOnlyControl,
                         playback = membership.party.playback,
+                        queue = membership.party.queue,
                         connection = Connection.CONNECTING,
                     )
                     connect()
@@ -286,6 +406,8 @@ object ListenTogether {
         session = null
         clock.reset()
         token = null
+        _awaitingStart.value = false
+        _activities.value = emptyList()
         prefs.edit().remove(KEY_CODE).remove(KEY_TOKEN).apply()
         _state.value = State()
         if (code != null && held != null) {
@@ -320,6 +442,31 @@ object ListenTogether {
         put("queue", json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(PartyTrack.serializer()), queue))
         put("queueIndex", index)
     }
+
+    fun queueAdd(tracks: List<PartyTrack>, playNext: Boolean = false) = control("queueAdd") {
+        put("tracks", json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(PartyTrack.serializer()), tracks))
+        put("playNext", playNext)
+    }
+
+    fun queueRemove(videoId: String) = control("queueRemove") {
+        put("videoId", videoId)
+    }
+
+    fun queueClear() = control("queueClear") {}
+
+    fun queueMove(fromIndex: Int, toIndex: Int, videoId: String? = null) = control("queueMove") {
+        put("fromIndex", fromIndex)
+        put("toIndex", toIndex)
+        if (videoId != null) put("videoId", videoId)
+    }
+
+    fun setMaxMembers(value: Int) = control("setMaxMembers") { put("maxMembers", value) }
+
+    fun kick(memberId: String) = control("kick") { put("memberId", memberId) }
+
+    fun setAutoplay(enabled: Boolean) = control("setAutoplay") { put("enabled", enabled) }
+
+    fun setHostOnlyControl(enabled: Boolean) = control("setHostOnlyControl") { put("enabled", enabled) }
 
     private fun control(action: String, body: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit) {
         val frame = buildJsonObject {
@@ -396,7 +543,7 @@ object ListenTogether {
             }
 
             delay(backoffMs)
-            backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
+            backoffMs = (backoffMs * 2).coerceAtMost(20_000L)
         }
     }
 
@@ -421,7 +568,7 @@ object ListenTogether {
             delay(REPORT_INTERVAL_MS)
             val pos = partyPositionMs() ?: continue
             val frame = buildJsonObject {
-                put("type", "progress")
+                put("type", "report")
                 put("positionMs", pos)
                 put("clientMs", ServerClock.localNowMs())
             }
@@ -433,6 +580,26 @@ object ListenTogether {
         val received = ServerClock.localNowMs()
         val frame = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
         when (frame["type"]?.jsonPrimitive?.content) {
+            "welcome" -> {
+                val party = frame["party"]?.let {
+                    runCatching { json.decodeFromJsonElement(PartySnapshot.serializer(), it) }.getOrNull()
+                } ?: return
+                val you = frame["you"]?.let {
+                    runCatching { json.decodeFromJsonElement(PartyMember.serializer(), it) }.getOrNull()
+                }
+                _state.update { it.copy(
+                    code = party.code,
+                    you = you ?: it.you,
+                    members = party.members,
+                    maxMembers = party.maxMembers,
+                    hostOnlyControl = party.hostOnlyControl,
+                    playback = party.playback,
+                    queue = party.queue,
+                    connection = Connection.LIVE,
+                    error = null,
+                ) }
+            }
+
             "pong" -> {
                 val sentAt = frame["clientMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: return
                 val serverMs = frame["serverMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: return
@@ -474,6 +641,14 @@ object ListenTogether {
                 _state.update { it.copy(members = members) }
             }
 
+            "activity" -> {
+                val action = frame["action"]?.jsonPrimitive?.content ?: return
+                val by = frame["by"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return
+                val atMs = frame["atMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: received
+                val detail = frame["detail"]?.jsonPrimitive?.content.orEmpty()
+                recordActivity(PartyActivity(action, by, atMs, detail))
+            }
+
             "error" -> {
                 val reason = frame["error"]?.jsonPrimitive?.content
                 val message = frame["message"]?.jsonPrimitive?.content
@@ -485,8 +660,51 @@ object ListenTogether {
             }
 
             "bye" -> {
+                if (frame["reason"]?.jsonPrimitive?.content == "kicked") {
+                    _state.value.code?.let(::recordKick)
+                }
                 scope.launch { leaveParty() }
             }
+        }
+    }
+
+    // ------------------------------------------------------------- kick cooldown --
+
+    private const val KICK_COOLDOWN_MS = 5 * 60 * 1000L
+
+    private fun recordKick(code: String) {
+        val now = ServerClock.localNowMs()
+        val current = prefs.getString(KEY_KICKED, null).orEmpty()
+        val updated = current.split(";")
+            .filter { it.isNotBlank() }
+            .mapNotNull {
+                val parts = it.split(":")
+                if (parts.size == 2) parts[0] to parts[1].toLongOrNull() else null
+            }
+            .filter { (_, time) -> time != null && now - time < KICK_COOLDOWN_MS }
+            .toMap()
+            .toMutableMap()
+        updated[code.uppercase()] = now
+        val serialized = updated.entries.joinToString(";") { "${it.key}:${it.value}" }
+        prefs.edit().putString(KEY_KICKED, serialized).apply()
+    }
+
+    private fun refuseIfRecentlyKicked(code: String) {
+        val now = ServerClock.localNowMs()
+        val current = prefs.getString(KEY_KICKED, null).orEmpty()
+        val kicked = current.split(";")
+            .filter { it.isNotBlank() }
+            .mapNotNull {
+                val parts = it.split(":")
+                if (parts.size == 2) parts[0] to parts[1].toLongOrNull() else null
+            }
+            .filter { (_, time) -> time != null && now - time < KICK_COOLDOWN_MS }
+            .toMap()
+        if (kicked.containsKey(code.uppercase())) {
+            throw PartyException(
+                "recently_kicked",
+                "Couldn’t let you in — you’ve recently been kicked out of this party.",
+            )
         }
     }
 
@@ -541,6 +759,7 @@ object ListenTogether {
             message = parsed?.message?.takeIf { it.isNotBlank() }
                 ?: if (status.value == 422) "This account can't be used to jam."
                 else "The party server said ${status.value}.",
+            statusCode = status.value,
         )
     }
 
@@ -575,10 +794,12 @@ object ListenTogether {
         .joinToString("") { "%02x".format(it) }
 
     const val CODE_LENGTH = 6
+    private const val MAX_ACTIVITIES = 30
 
     private const val TAG = "ListenTogether"
     private const val PREFS = "yzmusic_listen_together"
     private const val KEY_SERVER = "server_url"
+    private const val KEY_KICKED = "recent_kicks"
 
     private const val SERVER_PLACEHOLDER = "<party server>"
     private const val UNREACHABLE = "Couldn’t reach the party server."

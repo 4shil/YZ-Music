@@ -478,6 +478,12 @@ private fun YZMusicApp(
     val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
     val lyricsSource by viewModel.lyricsSource.collectAsStateWithLifecycle()
     val lyricsChecked by viewModel.lyricsChecked.collectAsStateWithLifecycle()
+    val displayRows by viewModel.displayRows.collectAsStateWithLifecycle()
+    val lyricsDisplayMode by viewModel.lyricsDisplayMode.collectAsStateWithLifecycle()
+    val availableLyricsModes by viewModel.availableLyricsModes.collectAsStateWithLifecycle()
+    val lyricsOffsetMs by AppSettings.lyricsOffsetMs.collectAsStateWithLifecycle()
+    val lyricsTranslation by viewModel.lyricsTranslation.collectAsStateWithLifecycle()
+    val lyricsRomanization by viewModel.lyricsRomanization.collectAsStateWithLifecycle()
     val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
     val searchSuggestions by viewModel.suggestions.collectAsStateWithLifecycle()
     val searchLoadingMore by viewModel.searchLoadingMore.collectAsStateWithLifecycle()
@@ -1418,6 +1424,17 @@ private fun YZMusicApp(
             lyrics = lyrics,
             lyricsSource = lyricsSource,
             lyricsUnavailable = lyricsChecked && lyrics.isNullOrEmpty(),
+            displayRows = displayRows,
+            lyricsDisplayMode = lyricsDisplayMode,
+            availableLyricsModes = availableLyricsModes,
+            onLyricsLayerToggle = viewModel::toggleLyricsSubLayer,
+            lyricsOffsetMs = lyricsOffsetMs.toLong(),
+            lyricsTranslation = lyricsTranslation,
+            lyricsRomanization = lyricsRomanization,
+            // The engine only has something to offer once there are words to
+            // translate, so the button appears with them rather than before.
+            canTranslateLyrics = !lyrics.isNullOrEmpty(),
+            translateLyrics = viewModel::translateLyrics,
             docked = docked,
             onClearQueue = {
                 // Keep what's playing; drop everything queued after it.

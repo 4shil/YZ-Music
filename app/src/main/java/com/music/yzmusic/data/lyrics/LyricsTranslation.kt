@@ -8,8 +8,11 @@ import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
+import com.music.yzmusic.data.DebugLog as Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeout
 import java.security.MessageDigest
 import java.text.BreakIterator
 import java.util.Locale
@@ -43,6 +46,22 @@ sealed interface LyricsTranslationState {
     data class Unavailable(
         val targetLanguageTag: String,
     ) : LyricsTranslationState
+
+    /**
+     * The model could not be fetched right now, but nothing is wrong with the
+     * song and the same tap is worth making again later.
+     *
+     * This is its own state rather than a flavour of [Unavailable] because the
+     * two want opposite things from the button. Unavailable means the engine
+     * cannot do this translation at all, so offering the disc again would only
+     * fail identically. Blocked means the network said no *this time* — the
+     * commonest cause being the WiFi-only rule on a metered connection — so
+     * the disc stays lit and tappable, because the reader moving to WiFi and
+     * tapping again is exactly the action that resolves it.
+     */
+    data class Blocked(
+        val targetLanguageTag: String,
+    ) : LyricsTranslationState
 }
 
 private sealed interface TranslationResult {
@@ -61,16 +80,41 @@ private sealed interface TranslationResult {
  *
  * Translation models are downloaded by ML Kit on first use. Only the current
  * source and system-language models are retained; older language models are
- * removed before a new pair downloads, which places a hard bound on the disk
- * cost even after translating songs in many languages. Results are kept in a
- * small process cache so reopening the player does not repeat a whole song's
- * inference. No lyric text is sent to an application server.
+ * removed once a new pair is safely on the device, which places a hard bound
+ * on the disk cost even after translating songs in many languages. Results are
+ * kept in a small process cache so reopening the player does not repeat a
+ * whole song's inference. No lyric text is sent to an application server.
+ *
+ * The reader's data rule is honoured here, as a decision, rather than handed
+ * to ML Kit as a condition. [networkAllowsDownload] is the call the caller has
+ * already made, and a download that cannot run is refused in a millisecond
+ * instead of waited on indefinitely.
  */
 object LyricsTranslation {
     private const val LANGUAGE_SAMPLE_CHARS = 4_000
     private const val CACHE_ENTRIES = 6
     private const val MAX_BATCH_CHARS = 3_200
     private const val BATCH_SEPARATOR = "\n___YZMUSIC_TRANS_DELIM___\n"
+    private const val TAG = "LyricsTranslation"
+
+    /**
+     * How long a model fetch may stall before it is called a failure. A model
+     * is a few megabytes, so anything past this is a dead network, not a slow
+     * one, and the reader deserves a retry button rather than a spinner.
+     */
+    private const val MODEL_DOWNLOAD_TIMEOUT_MS = 60_000L
+
+    /**
+     * The bound on the two stages that run entirely on the device.
+     *
+     * The download is not the only thing that can park. Language detection and
+     * inference both come back as a task that never completes if the model
+     * fails to load, and the player treats a running job as proof that the
+     * "Downloading…" disc is still honest — so an unbounded stage here is a
+     * disc that can never be tapped free. Generous, because this is a whole
+     * song's inference and there is no network to blame when it overruns.
+     */
+    private const val LOCAL_STAGE_TIMEOUT_MS = 45_000L
 
     private data class CacheKey(
         val targetLanguageTag: String,
@@ -90,7 +134,7 @@ object LyricsTranslation {
     suspend fun translate(
         lines: List<LyricLine>,
         targetLanguageTag: String,
-        requireWifi: Boolean = false,
+        networkAllowsDownload: Boolean = true,
         onStage: (LyricsTranslationStage) -> Unit,
     ): LyricsTranslationState {
         val target = supportedTag(targetLanguageTag)
@@ -110,10 +154,11 @@ object LyricsTranslation {
         onStage(LyricsTranslationStage.IDENTIFYING)
         val identifier = LanguageIdentification.getClient()
         val detected = try {
-            identifier.identifyLanguage(sample).await()
+            withTimeout(LOCAL_STAGE_TIMEOUT_MS) { identifier.identifyLanguage(sample).await() }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.w(TAG, "Language identification did not finish", error)
             return LyricsTranslationState.Unavailable(target)
         } finally {
             identifier.close()
@@ -122,6 +167,9 @@ object LyricsTranslation {
             ?: return LyricsTranslationState.Unavailable(target)
         if (source == target) {
             return LyricsTranslationState.AlreadyInTargetLanguage(target)
+        }
+        if (!networkAllowsDownload) {
+            return LyricsTranslationState.Blocked(target)
         }
 
         val translator = Translation.getClient(
@@ -132,12 +180,32 @@ object LyricsTranslation {
         )
         return try {
             onStage(LyricsTranslationStage.DOWNLOADING_MODEL)
-            trimDownloadedModels(setOf(source, target))
-            val conditionsBuilder = DownloadConditions.Builder()
-            if (requireWifi) {
-                conditionsBuilder.requireWifi()
+            // ML Kit's own requireWifi() is a wait, not a refusal: hand it a
+            // metered connection and downloadModelIfNeeded neither completes nor
+            // fails, it just parks — which is how this screen came to sit on
+            // "Downloading…" with no way out. The app already knows what the
+            // reader's data rule permits, so that call is made above and the
+            // network is left to do the one thing it can do.
+            val fetchError = try {
+                withTimeout(MODEL_DOWNLOAD_TIMEOUT_MS) {
+                    translator.downloadModelIfNeeded(DownloadConditions.Builder().build()).await()
+                }
+                null
+            } catch (timeout: TimeoutCancellationException) {
+                timeout
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                error
             }
-            translator.downloadModelIfNeeded(conditionsBuilder.build()).await()
+            if (fetchError != null) {
+                Log.w(TAG, "Translation model download did not finish", fetchError)
+                return LyricsTranslationState.Blocked(target)
+            }
+            // Only now that the pair is on the device is anything worth
+            // deleting. Trimming first meant a download that could not start
+            // took the working models down with it on its way to failing.
+            trimDownloadedModels(setOf(source, target))
             onStage(LyricsTranslationStage.TRANSLATING)
             val sourceTexts = lines.asSequence()
                 .filterNot { it.isGap }
@@ -146,7 +214,14 @@ object LyricsTranslation {
                 .filter { it.isNotBlank() }
                 .distinct()
                 .toList()
-            val translatedTexts = translateBatched(translator, sourceTexts)
+            val translatedTexts = try {
+                withTimeout(LOCAL_STAGE_TIMEOUT_MS) { translateBatched(translator, sourceTexts) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "Translation inference did not finish", error)
+                return LyricsTranslationState.Blocked(target)
+            }
             val translated = lines.map { line ->
                 if (line.isGap) {
                     line
@@ -251,6 +326,17 @@ object LyricsTranslation {
         val base = Locale.forLanguageTag(tag).language.takeIf { it.isNotBlank() } ?: return null
         return TranslateLanguage.fromLanguageTag(base)
     }
+
+    /**
+     * Every language this translator can produce, for the settings picker.
+     *
+     * Asked of ML Kit rather than written out here, so the list cannot drift
+     * away from what the engine would actually accept — a picker offering a
+     * language the model set lacks is a promise the translator cannot keep,
+     * and the reader only finds out after waiting for a download.
+     */
+    val supportedTargetLanguages: List<String>
+        get() = TranslateLanguage.getAllLanguages().sorted()
 }
 
 /**

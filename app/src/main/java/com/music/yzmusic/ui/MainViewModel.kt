@@ -10,12 +10,16 @@ import com.music.yzmusic.data.LocalMediaRepository
 import com.music.yzmusic.data.LikeState
 import com.music.yzmusic.data.YtMusicRepository
 import com.music.yzmusic.data.lyrics.EmbeddedLyrics
+import com.music.yzmusic.data.lyrics.LyricDisplayRow
 import com.music.yzmusic.data.lyrics.LyricLine
 import com.music.yzmusic.data.lyrics.LyricsRepository
 import com.music.yzmusic.data.lyrics.LyricsSource
 import com.music.yzmusic.data.lyrics.LyricsTranslation
 import com.music.yzmusic.data.lyrics.LyricsTranslationStage
 import com.music.yzmusic.data.lyrics.LyricsTranslationState
+import com.music.yzmusic.data.lyrics.LyricsRomanization
+import com.music.yzmusic.data.lyrics.RomanizationResult
+import com.music.yzmusic.data.lyrics.pairLyricLayers
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.data.DebugLog as Log
 import com.music.yzmusic.data.innertube.Innertube
@@ -40,6 +44,7 @@ import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.UserPlaylist
 import com.music.yzmusic.data.settings.SearchHistory
 import com.music.yzmusic.download.Downloads
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -65,7 +70,6 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
-
     private val authStore = AuthStore(app)
 
     private val _signedIn = MutableStateFlow(authStore.isSignedIn)
@@ -174,10 +178,223 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _lyricsTranslation = MutableStateFlow<LyricsTranslationState>(LyricsTranslationState.Idle)
     val lyricsTranslation: StateFlow<LyricsTranslationState> = _lyricsTranslation.asStateFlow()
 
+    /**
+     * Which rendering of the lyrics is on screen.
+     *
+     * Not a preference for its own sake: [availableLyricsModes] is what the
+     * player reads to decide whether a mode is worth offering, and a mode
+     * whose layer never arrived is not offered. Falling back silently would be
+     * worse than not offering it — the reader would ask for a translation and
+     * be handed the original with no way to tell the difference.
+     */
+    enum class LyricsDisplayMode { ORIGINAL, TRANSLATED, ROMANIZED }
+
+    /** The alternate renderings the source brought with the words. */
+    data class LyricsAlternates(
+        val translation: List<LyricLine>? = null,
+        val romanization: List<LyricLine>? = null,
+    ) {
+        fun forMode(mode: LyricsDisplayMode): List<LyricLine>? = when (mode) {
+            LyricsDisplayMode.ORIGINAL -> null
+            LyricsDisplayMode.TRANSLATED -> translation
+            LyricsDisplayMode.ROMANIZED -> romanization
+        }
+
+        val isEmpty: Boolean get() = translation == null && romanization == null
+    }
+
+    private val _lyricsAlternates = MutableStateFlow(LyricsAlternates())
+    val lyricsAlternates: StateFlow<LyricsAlternates> = _lyricsAlternates.asStateFlow()
+
+    /**
+     * Where a generated romanization has got to.
+     *
+     * Distinct from "not applicable" on purpose. A lyric written in Latin
+     * script needs no romanization and saying so is a *success*; a track the
+     * engine could not convert is a different answer, and a request still
+     * running is a third. Collapsing them would leave the player either
+     * hiding a mode that works or offering one that never will.
+     */
+    sealed interface RomanizationState {
+        /** Nothing asked for yet. */
+        data object Idle : RomanizationState
+
+        /** A request is in flight for [trackId]. */
+        data class Generating(val trackId: String) : RomanizationState
+
+        /** Done. [lines] replace the original on its own clock. */
+        data class Ready(
+            val lines: List<LyricLine>,
+            val sourceScript: String,
+            val fromCache: Boolean,
+        ) : RomanizationState
+
+        /** The words are already Latin script; there is nothing to convert. */
+        data object AlreadyRomanized : RomanizationState
+
+        /** Tried, or knowable up front, and it cannot be done for this track. */
+        data class Unavailable(val reason: String) : RomanizationState
+
+        /**
+         * Is it still worth tapping Romanized?
+         *
+         * True while idle, mid-request, or finished. False for the two states
+         * that describe a finished answer with nothing in it — the words are
+         * already Latin, or the engine could not render them. Public because
+         * this is the decision that makes the feature reachable at all: get it
+         * wrong in the cautious direction and the mode silently never appears,
+         * with nothing reporting an error.
+         */
+        val offersRomanized: Boolean
+            get() = when (this) {
+                Idle, is Generating, is Ready -> true
+                AlreadyRomanized, is Unavailable -> false
+            }
+    }
+
+    private val _lyricsRomanization = MutableStateFlow<RomanizationState>(RomanizationState.Idle)
+    val lyricsRomanization: StateFlow<RomanizationState> = _lyricsRomanization.asStateFlow()
+    private var lyricsRomanizationJob: Job? = null
+    private val lyricsRomanizationGeneration = AtomicLong(0)
+
+    private val _lyricsDisplayMode = MutableStateFlow(LyricsDisplayMode.ORIGINAL)
+    val lyricsDisplayMode: StateFlow<LyricsDisplayMode> = _lyricsDisplayMode.asStateFlow()
+
+    /**
+     * The modes worth offering for the current track.
+     *
+     * TRANSLATED counts as available when *either* the source shipped one or
+     * the on-device engine has produced one — the first is instant and the
+     * second is what the reader is really waiting for, and both satisfy the
+     * same request.
+     */
+    val availableLyricsModes: StateFlow<Set<LyricsDisplayMode>> = combine(
+        _lyricsAlternates,
+        _lyricsTranslation,
+        _lyricsRomanization,
+        _lyrics,
+    ) { alternates, translation, romanization, lines ->
+        if (lines.isNullOrEmpty()) {
+            emptySet()
+        } else {
+            buildSet {
+                add(LyricsDisplayMode.ORIGINAL)
+                if (alternates.translation != null ||
+                    (translation is LyricsTranslationState.Ready && translation.lines.isNotEmpty())
+                ) {
+                    add(LyricsDisplayMode.TRANSLATED)
+                }
+                // ROMANIZED is offered whenever the mode could produce
+                // something, not only when a provider already did. Requiring
+                // a publisher's x-roman meant the mode existed for the handful
+                // of tracks that shipped one and was absent everywhere else,
+                // which is the whole gap this feature closes. Both
+                // AlreadyRomanized and Unavailable keep it hidden: those are
+                // answers, and re-asking would only reach the same one.
+                if (alternates.romanization != null || romanization.offersRomanized) {
+                    add(LyricsDisplayMode.ROMANIZED)
+                }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), setOf(LyricsDisplayMode.ORIGINAL))
+
+    /**
+     * The rows to actually draw: the original line, plus whichever alternate
+     * layer is switched on beneath it.
+     *
+     * The original is never replaced. An alternate resolves to no sub-line at
+     * all rather than to a different song, so the panel keeps one row per
+     * line of the track and the singer's words stay put whatever the reader
+     * has toggled on top of them.
+     */
+    val displayRows: StateFlow<List<LyricDisplayRow>?> = combine(
+        _lyrics,
+        _lyricsAlternates,
+        _lyricsTranslation,
+        _lyricsRomanization,
+        _lyricsDisplayMode,
+    ) { lines, alternates, translation, romanization, mode ->
+        if (lines == null) return@combine null
+        val layer = when (mode) {
+            LyricsDisplayMode.ORIGINAL -> null
+            LyricsDisplayMode.TRANSLATED ->
+                (translation as? LyricsTranslationState.Ready)?.lines?.takeIf { it.isNotEmpty() }
+                    ?: alternates.translation
+            // Publisher first, generated second. The provider's own romanization
+            // is authoritative — it was written against the song, not derived
+            // from a rule set — and a generated one is a fallback for when
+            // there is no provider answer at all, never a replacement.
+            LyricsDisplayMode.ROMANIZED ->
+                alternates.romanization
+                    ?: (romanization as? RomanizationState.Ready)?.lines?.takeIf { it.isNotEmpty() }
+        }
+        pairLyricLayers(lines, layer)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * Which second voice is currently drawn. [LyricsDisplayMode.ORIGINAL]
+     * means the panel is showing the song alone. The discs read this for their
+     * lit state.
+     */
+    val activeSubLayer: StateFlow<LyricsDisplayMode> = _lyricsDisplayMode
+
+    /**
+     * Turns a second voice on, or back off if that one is already showing.
+     *
+     * The two discs are switches, not a three-way selector, so the same tap
+     * that asks for a layer takes it away again. Tapping the lit disc leaves
+     * the original on screen alone rather than falling through to a different
+     * layer, which is what a segmented control would do and would be
+     * indistinguishable from a bug.
+     */
+    fun toggleLyricsSubLayer(mode: LyricsDisplayMode) {
+        if (mode == LyricsDisplayMode.ORIGINAL) {
+            setLyricsDisplayMode(LyricsDisplayMode.ORIGINAL)
+            return
+        }
+        setLyricsDisplayMode(
+            if (_lyricsDisplayMode.value == mode) LyricsDisplayMode.ORIGINAL else mode,
+        )
+    }
+
+    /**
+     * Chooses which second voice is drawn. A layer the current track cannot
+     * satisfy is ignored rather than stored, so the control can never leave
+     * the player showing something the mode does not name.
+     */
+    fun setLyricsDisplayMode(mode: LyricsDisplayMode) {
+        if (mode != LyricsDisplayMode.ORIGINAL && mode !in availableLyricsModes.value) return
+        _lyricsDisplayMode.value = mode
+        // Asking for Romanized is the request. Started here rather than in the
+        // screen so the trigger is the layer itself, wherever it was set from,
+        // and so the reader's one tap on the disc is the only thing that causes
+        // work — no second control, and no work for a layer never chosen.
+
+        if (mode == LyricsDisplayMode.ROMANIZED &&
+            _lyricsRomanization.value is RomanizationState.Idle
+        ) {
+            romanizeLyrics(deviceLanguageTag())
+        }
+    }
+
+    /** The same locale the player resolves its translation target from. */
+    private fun deviceLanguageTag(): String =
+        getApplication<android.app.Application>()
+            .resources.configuration.locales[0]
+            .language
+
     private var lyricsTranslationJob: Job? = null
     private val lyricsTranslationGeneration = AtomicLong(0L)
 
     private var lyricsJob: Job? = null
+    /**
+     * Bumped on every load so a slow answer for a track the listener has
+     * already left cannot land on the next one. Cancelling the job alone was
+     * not enough: a lookup that had already resumed and was past its last
+     * cancellation point would still write, and the player would show the
+     * previous song's lyrics.
+     */
+    private val lyricsGeneration = AtomicLong(0L)
 
     /**
      * What the loaded lyrics are for. Both the track *and* the settings that
@@ -215,10 +432,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         lyricsFor = key
         _lyrics.value = null
         _lyricsSource.value = null
+        // A new track has no alternates yet, and a display mode chosen for
+        // the last one would otherwise be left pointing at a layer that is
+        // not coming.
+        _lyricsAlternates.value = LyricsAlternates()
+        _lyricsDisplayMode.value = LyricsDisplayMode.ORIGINAL
         lyricsTranslationJob?.cancel()
         lyricsTranslationGeneration.incrementAndGet()
         _lyricsTranslation.value = LyricsTranslationState.Idle
+        // Same reasoning as the translation above, and it matters more here:
+        // a romanization left over from the previous track is a set of words
+        // in the wrong language standing in for the current song's words.
+        lyricsRomanizationJob?.cancel()
+        lyricsRomanizationGeneration.incrementAndGet()
+        _lyricsRomanization.value = RomanizationState.Idle
         lyricsJob?.cancel()
+        val generation = lyricsGeneration.incrementAndGet()
         if (sources.isEmpty()) {
             // Switched off, or every source unticked. Nothing to look up, and
             // nothing to say about it — the player drops the lyric strip
@@ -234,11 +463,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // this exact file, for this exact recording.
             if (localUri != null) {
                 EmbeddedLyrics.forUri(getApplication(), localUri)?.let { embedded ->
-                    _lyrics.value = embedded
-                    // No source to name: what the file records is the lyrics,
-                    // not which of the eight services they came from months ago.
-                    _lyricsSource.value = null
-                    _lyricsChecked.value = true
+                    if (generation == lyricsGeneration.get() && lyricsFor?.first == videoId) {
+                        _lyrics.value = embedded
+                        // No source to name: what the file records is the lyrics,
+                        // not which of the eight services they came from months ago.
+                        _lyricsSource.value = null
+                        _lyricsChecked.value = true
+                    }
                     return@launch
                 }
             }
@@ -251,8 +482,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 videoId, title, artist, durationMs, album, sources,
                 AppSettings.lyricsSourceOrder.value, AppSettings.prioritizeSyllableSync.value,
             )
+            if (generation != lyricsGeneration.get() || lyricsFor?.first != videoId) {
+                // The listener moved on while this was in flight. Dropping the
+                // answer is the whole point: it is correct for a track nobody
+                // is playing any more.
+                return@launch
+            }
             _lyrics.value = found?.lines
             _lyricsSource.value = found?.source
+            _lyricsAlternates.value = LyricsAlternates(found?.translation, found?.romanization)
             _lyricsChecked.value = true
         }
     }
@@ -261,25 +499,106 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Translates lyrics on device via ML Kit. Bounded to recent songs and
      * cancels automatically if track changes before completion.
      */
-    fun translateLyrics(targetLanguageTag: String, requireWifi: Boolean = false) {
+    fun translateLyrics(targetLanguageTag: String) {
+        // Lyrics, not `lyricsFor`: a track change clears the lyrics first, so
+        // a non-empty list is always the current song's, while `lyricsFor` is
+        // transiently null while the duration gate is waiting. Returning
+        // silently on that null made a tap do nothing at all.
         val sourceLines = _lyrics.value?.takeIf { it.isNotEmpty() } ?: return
-        val trackId = lyricsFor?.first ?: return
         val target = Locale.forLanguageTag(targetLanguageTag).language.ifBlank { targetLanguageTag }
 
-        val current = _lyricsTranslation.value
-        if (current is LyricsTranslationState.Ready && Locale.forLanguageTag(current.targetLanguageTag).language == target) return
-        if (current is LyricsTranslationState.Loading && Locale.forLanguageTag(current.targetLanguageTag).language == target) return
+        if (!shouldStartTranslation(_lyricsTranslation.value, lyricsTranslationJob, target)) return
 
         lyricsTranslationJob?.cancel()
         val generation = lyricsTranslationGeneration.incrementAndGet()
         lyricsTranslationJob = viewModelScope.launch {
-            val result = LyricsTranslation.translate(sourceLines, target, requireWifi) { stage ->
-                if (generation == lyricsTranslationGeneration.get() && lyricsFor?.first == trackId) {
-                    _lyricsTranslation.value = LyricsTranslationState.Loading(target, stage)
+            val result = try {
+                LyricsTranslation.translate(
+                    lines = sourceLines,
+                    targetLanguageTag = target,
+                    // The reader's data rule, already applied. A model is a few
+                    // megabytes of the reader's data; asking ML Kit to wait for
+                    // WiFi instead of being told no left the panel spinning on a
+                    // download that was never going to start.
+                    networkAllowsDownload = AppSettings.downloadsAllowedNow,
+                ) { stage ->
+                    if (generation == lyricsTranslationGeneration.get()) {
+                        _lyricsTranslation.value = LyricsTranslationState.Loading(target, stage)
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                // ML Kit and Play Services fail in ways `catch (Exception)`
+                // does not catch — UnsatisfiedLinkError when the optional
+                // module is missing, AssertionError out of the model loader.
+                // Letting those escape is what used to strand the player: the
+                // state kept saying Loading, the job was gone, and every later
+                // tap was refused by the guard above, so the disc showed
+                // "Downloading English…" with no way out of it but changing
+                // song. Nothing below may leave a Loading behind.
+                Log.w(TAG, "Lyric translation ended unexpectedly", error)
+                LyricsTranslationState.Unavailable(target)
             }
-            if (generation == lyricsTranslationGeneration.get() && lyricsFor?.first == trackId) {
+            // The generation is the whole guard. It moves on a new request and
+            // on a track change, and a track change also resets the state to
+            // Idle — so a stale result is always one that has already been
+            // superseded. Reading `lyricsFor` here as well only added a way to
+            // drop a live result and strand the state.
+            if (generation == lyricsTranslationGeneration.get()) {
                 _lyricsTranslation.value = result
+            }
+        }
+    }
+
+    /**
+     * Produces a romanization for the current track, on device.
+     *
+     * Nothing about this touches playback: it reads lyrics, writes lyrics, and
+     * never seeks, never changes the queue. The generation counter is the
+     * important part — a transliteration that finishes after the reader has
+     * skipped to the next song would otherwise publish the previous track's
+     * words onto the new one, and the reader would sing the wrong lyric with
+     * the right music and no way to know.
+     */
+    fun romanizeLyrics(targetLanguageTag: String) {
+        val sourceLines = _lyrics.value?.takeIf { it.isNotEmpty() } ?: return
+        val trackId = lyricsFor?.first ?: return
+        // Recorded with the request rather than read off the device later, so
+        // the cache key names the target the work was actually done for.
+        val target = Locale.forLanguageTag(targetLanguageTag).language
+            .ifBlank { targetLanguageTag }
+
+        when (val current = _lyricsRomanization.value) {
+            is RomanizationState.Generating -> if (current.trackId == trackId) return
+            is RomanizationState.Ready -> return
+            else -> Unit
+        }
+
+        lyricsRomanizationJob?.cancel()
+        val generation = lyricsRomanizationGeneration.incrementAndGet()
+        _lyricsRomanization.value = RomanizationState.Generating(trackId)
+        lyricsRomanizationJob = viewModelScope.launch {
+            val result = LyricsRomanization.forContext(getApplication()).romanize(sourceLines, target)
+            // Checked twice: once for a newer request, once for a newer track.
+            // Either means this answer describes words nobody is looking at.
+            if (generation != lyricsRomanizationGeneration.get() || lyricsFor?.first != trackId) {
+                return@launch
+            }
+            _lyricsRomanization.value = when (result) {
+                is RomanizationResult.Romanized -> RomanizationState.Ready(
+                    lines = result.lines,
+                    sourceScript = result.sourceLanguage,
+                    fromCache = result.fromCache,
+                )
+                // A successful answer, not a failure: the words were Latin
+                // already, so there is nothing to offer and nothing went wrong.
+                RomanizationResult.AlreadyRomanized -> RomanizationState.AlreadyRomanized
+                // The original stays on screen either way. The distinction is
+                // only about whether to keep offering the mode.
+                RomanizationResult.Unavailable -> RomanizationState.Unavailable(
+                    "Script not supported on device",
+                )
             }
         }
     }
@@ -1296,6 +1615,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        const val TAG = "MainViewModel"
+
         /**
          * How long any one source gets to answer a search.
          *
@@ -1715,4 +2036,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun text(id: Int): String = getApplication<Application>().getString(id)
+}
+
+/**
+ * Whether the reader should be offered a translate disc for this song.
+ *
+ * Once a track has lyrics the disc stays for the whole lifecycle — idle,
+ * downloading, blocked, done. Only [LyricsTranslationState.Unavailable]
+ * takes it away, and that is the one answer that cannot change by asking
+ * again. Everything else, including the in-flight [LyricsTranslationState.Loading],
+ * is a state the button can still speak to: it shows the spinner, offers the
+ * retry, and turns into the switch once the words exist. A control that
+ * removes itself the moment it is pressed is a control the reader has to
+ * trust blind, because the failure looks identical to the working case.
+ */
+internal fun offersTranslationDisc(
+    availableModes: Set<MainViewModel.LyricsDisplayMode>,
+    canTranslate: Boolean,
+    translationState: LyricsTranslationState,
+): Boolean = MainViewModel.LyricsDisplayMode.TRANSLATED in availableModes ||
+    (canTranslate && translationState !is LyricsTranslationState.Unavailable)
+
+/**
+ * Whether a tap should start a translation, or would be a duplicate of one.
+ *
+ * The obvious version of this asks only whether the state says Loading, and
+ * that is the bug: [LyricsTranslationState.Loading] is what the disc *shows*,
+ * not a record of whether anything is still running. Ask it alone and the
+ * answer stays "already loading" after the job is gone — which is how the
+ * player came to sit on "Downloading English…" and refuse every tap, with
+ * changing song as the only way out.
+ *
+ * So the running job is the test, and the state only narrows it to the
+ * language actually being fetched: a live job for Spanish must not stop the
+ * reader from asking for English.
+ */
+internal fun shouldStartTranslation(
+    translationState: LyricsTranslationState,
+    job: Job?,
+    targetLanguage: String,
+): Boolean {
+    if (translationState is LyricsTranslationState.Ready &&
+        Locale.forLanguageTag(translationState.targetLanguageTag).language == targetLanguage
+    ) {
+        // The words are on screen; the disc is a switch now, not a start.
+        return false
+    }
+    if (job?.isActive != true) return true
+    return translationState !is LyricsTranslationState.Loading ||
+        Locale.forLanguageTag(translationState.targetLanguageTag).language != targetLanguage
 }

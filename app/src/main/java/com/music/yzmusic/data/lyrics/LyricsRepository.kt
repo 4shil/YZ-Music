@@ -33,8 +33,20 @@ import kotlinx.coroutines.coroutineScope
  */
 object LyricsRepository {
 
-    /** Lyrics, and which source they turned out to come from. */
-    data class Result(val source: LyricsSource, val lines: List<LyricLine>)
+    /**
+     * Lyrics, which source they turned out to come from, and the alternate
+     * renderings that source happened to bring with them.
+     *
+     * The alternates ride along on the original's timing and are null whenever
+     * the source had none, so "not available" is something the player can
+     * answer honestly instead of showing an empty layer.
+     */
+    data class Result(
+        val source: LyricsSource,
+        val lines: List<LyricLine>,
+        val translation: List<LyricLine>? = null,
+        val romanization: List<LyricLine>? = null,
+    )
 
     /**
      * [sources] is the user's pick from Settings; anything not in it is not
@@ -71,7 +83,7 @@ object LyricsRepository {
 
         // Genius is a plain text web scraper. To preserve bandwidth and avoid rate-limiting,
         // it starts lazily and is only contacted if all higher-priority synced sources miss.
-        val racing: List<Pair<LyricsSource, Deferred<List<LyricLine>?>>> = sequence.map { source ->
+        val racing: List<Pair<LyricsSource, Deferred<LyricsPayload?>>> = sequence.map { source ->
             val startMode = if (source == LyricsSource.GENIUS) kotlinx.coroutines.CoroutineStart.LAZY else kotlinx.coroutines.CoroutineStart.DEFAULT
             source to async(Dispatchers.IO, start = startMode) {
                 fetch(source, videoId, title, artist, durationMs, album)
@@ -91,16 +103,17 @@ object LyricsRepository {
                     LyricsLog.w("Repository", "All synced providers missed. Running Genius fallback...")
                 }
 
-                val lines = runCatching { job.await() }.getOrNull() ?: continue
+                val found = runCatching { job.await() }.getOrNull() ?: continue
+                val lines = found.lines
                 if (lines.any { it.isWordSynced }) {
                     LyricsLog.s("Repository", "Word-synced match from ${source.label}")
-                    return@coroutineScope result(source, lines)
+                    return@coroutineScope result(source, found)
                 }
                 if (!prioritizeSyllableSync && lines.any { it.timeMs > 0 }) {
                     LyricsLog.s("Repository", "Line-synced match from ${source.label}")
-                    return@coroutineScope result(source, lines)
+                    return@coroutineScope result(source, found)
                 }
-                if (lineSynced == null) lineSynced = result(source, lines)
+                if (lineSynced == null) lineSynced = result(source, found)
             }
             lineSynced
         } finally {
@@ -117,27 +130,34 @@ object LyricsRepository {
         artist: String,
         durationMs: Long,
         album: String?,
-    ): List<LyricLine>? {
+    ): LyricsPayload? {
         LyricsLog.i(source.label, "Querying $source...")
         val found = when (source) {
             LyricsSource.BETTER_LYRICS -> BetterLyrics.lyrics(title, artist, durationMs, album)
-            LyricsSource.LYRICS_PLUS -> LyricsPlus.lyrics(title, artist, durationMs, album)
-            LyricsSource.SIMP_MUSIC -> SimpMusicLyrics.lyrics(videoId, durationMs)
-            LyricsSource.LRCLIB -> LrcLib.lyrics(title, artist, durationMs)
-            LyricsSource.MUSIXMATCH -> Musixmatch.lyrics(title, artist, durationMs)
+            LyricsSource.LYRICS_PLUS -> LyricsPlus.lyrics(title, artist, durationMs, album)?.let(::LyricsPayload)
+            LyricsSource.SIMP_MUSIC -> SimpMusicLyrics.lyrics(videoId, durationMs)?.let(::LyricsPayload)
+            LyricsSource.LRCLIB -> LrcLib.lyrics(title, artist, durationMs)?.let(::LyricsPayload)
+            LyricsSource.MUSIXMATCH -> Musixmatch.lyrics(title, artist, durationMs)?.let(::LyricsPayload)
             LyricsSource.PAXSENIX -> PaxSenix.lyrics(title, artist, durationMs, album)
-            LyricsSource.KUGOU -> KuGou.lyrics(title, artist, durationMs, album)
-            LyricsSource.GENIUS -> Genius.lyrics(title, artist)
+            LyricsSource.KUGOU -> KuGou.lyrics(title, artist, durationMs, album)?.let(::LyricsPayload)
+            LyricsSource.GENIUS -> Genius.lyrics(title, artist)?.let(::LyricsPayload)
         }
-        if (found.isNullOrEmpty()) {
+        if (found == null || found.lines.isEmpty()) {
             LyricsLog.w(source.label, "No lyrics returned")
         } else {
             val syncType = when {
-                found.any { it.isWordSynced } -> "word-synced"
-                found.any { it.timeMs > 0 } -> "line-synced"
+                found.lines.any { it.isWordSynced } -> "word-synced"
+                found.lines.any { it.timeMs > 0 } -> "line-synced"
                 else -> "plain text"
             }
-            LyricsLog.s(source.label, "Returned ${found.size} lines ($syncType)")
+            LyricsLog.s(source.label, "Returned ${found.lines.size} lines ($syncType)")
+            if (found.hasAlternates) {
+                val extras = listOfNotNull(
+                    "a translation".takeIf { found.translation != null },
+                    "a romanization".takeIf { found.romanization != null },
+                )
+                LyricsLog.i(source.label, "  carrying ${extras.joinToString(" and ")}")
+            }
         }
         return found
     }
@@ -148,7 +168,18 @@ object LyricsRepository {
      * than in each parser because most of them write it as a bracket and only
      * [TtmlLyrics] knows it structurally — [withBackgroundVocals] leaves that
      * one's own split alone.
+     *
+     * The alternates get the same treatment for the opposite reason: they have
+     * to end up the *same length* as the original, or swapping one for the
+     * other would change how many rows the list has and drop the reader's
+     * place. Instrumental breaks are part of that shape, so both sides get
+     * them. Their own text is never split for a background vocal — a
+     * translated "(ooh)" is a parenthesis in whatever language it is now.
      */
-    private fun result(source: LyricsSource, lines: List<LyricLine>) =
-        Result(source, lines.withBackgroundVocals())
+    private fun result(source: LyricsSource, found: LyricsPayload) = Result(
+        source = source,
+        lines = found.lines.withBackgroundVocals(),
+        translation = found.translation?.withInstrumentalGaps(),
+        romanization = found.romanization?.withInstrumentalGaps(),
+    )
 }

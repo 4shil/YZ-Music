@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join Play Together - YZ Music</title>
+  <link rel="icon" href="/favicon.ico" />
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(22, 30, 49, 0.75);
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: rgba(255, 255, 255, 0.08);
+      --glow: rgba(99, 102, 241, 0.25);
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 1.5rem;
+      background-image: 
+        radial-gradient(circle at 50% 0%, var(--glow), transparent 70%),
+        radial-gradient(circle at 100% 100%, rgba(139, 92, 246, 0.15), transparent 50%);
+    }
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 1.5rem;
+      padding: 2.5rem 2rem;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      background: rgba(99, 102, 241, 0.15);
+      color: #818cf8;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      margin-bottom: 1.5rem;
+    }
+    .badge .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 8px #22c55e;
+    }
+    .title {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-bottom: 1.75rem;
+      line-height: 1.5;
+    }
+    .code-box {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px dashed var(--border);
+      border-radius: 1rem;
+      padding: 1rem;
+      margin-bottom: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .code-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+    .code-value {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: 0.25em;
+      color: #a5b4fc;
+      font-family: monospace;
+    }
+    .now-playing {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 0.85rem;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.75rem;
+      text-align: left;
+    }
+    .now-playing img {
+      width: 48px;
+      height: 48px;
+      border-radius: 0.5rem;
+      object-fit: cover;
+      background: #1e293b;
+    }
+    .now-playing-info {
+      overflow: hidden;
+    }
+    .song-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .song-artist {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 0.875rem 1.5rem;
+      border-radius: 0.85rem;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 4px 14px 0 var(--glow);
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">
+      <span class="dot"></span>
+      <span id="member-count">Live Listening Party</span>
+    </div>
+    
+    <h1 class="title">Play Together</h1>
+    <p class="subtitle" id="host-name">Listen to real-time synchronized music with your friends on YZ Music.</p>
+
+    <div class="code-box">
+      <span class="code-label">Party Code</span>
+      <span class="code-value" id="party-code">------</span>
+    </div>
+
+    <div class="now-playing" id="track-preview" style="display: none;">
+      <img id="track-thumb" src="" alt="Album Art" />
+      <div class="now-playing-info">
+        <div class="song-title" id="track-title">Title</div>
+        <div class="song-artist" id="track-artist">Artist</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <a id="btn-open-app" href="#" class="btn btn-primary">Open in YZ Music</a>
+      <a href="https://github.com/ashil/YZ-Music/releases" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">Download YZ Music</a>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      let code = "";
+      const joinIdx = pathParts.indexOf("join");
+      const inviteIdx = pathParts.indexOf("invite");
+      if (joinIdx !== -1 && pathParts[joinIdx + 1]) {
+        code = pathParts[joinIdx + 1];
+      } else if (inviteIdx !== -1 && pathParts[inviteIdx + 1]) {
+        code = pathParts[inviteIdx + 1];
+      } else if (pathParts.length > 0) {
+        code = pathParts[pathParts.length - 1];
+      }
+      
+      const params = new URLSearchParams(window.location.search);
+      const queryCode = params.get("code");
+      if (queryCode) code = queryCode;
+
+      code = code.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6);
+      if (code) {
+        document.getElementById('party-code').textContent = code;
+      }
+
+      const customServer = params.get("server") || "https://yz-music-party.onrender.com";
+      const schemeUrl = "yzmusic://party/" + code + (params.get("server") ? "?server=" + encodeURIComponent(params.get("server")) : "");
+      const openBtn = document.getElementById('btn-open-app');
+      openBtn.href = schemeUrl;
+
+      // Try automatic intent redirect on mobile devices
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (isMobile && code.length === 6) {
+        setTimeout(function() {
+          window.location.href = schemeUrl;
+        }, 300);
+      }
+
+      // Fetch live party preview from backend
+      if (code.length === 6) {
+        const previewUrl = customServer.replace(/\/+$/, '') + "/api/parties/" + code + "/preview";
+        fetch(previewUrl)
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (!data) return;
+            if (data.membersCount) {
+              document.getElementById('member-count').textContent = data.membersCount + " Listeners In Party";
+            }
+            if (data.hostName) {
+              document.getElementById('host-name').textContent = "Hosted by " + data.hostName + ". Join now to sync playback in real time.";
+            }
+            if (data.nowPlaying && data.nowPlaying.title) {
+              document.getElementById('track-title').textContent = data.nowPlaying.title;
+              document.getElementById('track-artist').textContent = data.nowPlaying.artist || "Unknown Artist";
+              if (data.nowPlaying.thumbnailUrl) {
+                document.getElementById('track-thumb').src = data.nowPlaying.thumbnailUrl;
+              } else {
+                document.getElementById('track-thumb').style.display = 'none';
+              }
+              document.getElementById('track-preview').style.display = 'flex';
+            }
+          })
+          .catch(() => {});
+      }
+    })();
+  </script>
+</body>
+</html>

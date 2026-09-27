@@ -1,20 +1,9 @@
-"""The domain: what a party is, who is in it, and what it is playing.
-
-Nothing here touches HTTP or WebSockets — that is [app.main] and [app.hub]. The
-point of the separation is that the sync rule, which is the whole feature, is
-testable without a socket: a [PlaybackState] is a position, the server time that
-position was true at, and whether the clock is running. Every device derives its
-own playhead from those three numbers, so "in sync" is a property of arithmetic
-rather than of message timing.
-
-The wire format is camelCase throughout, which is not this language's
-convention: the only consumer is the Android client, and matching Kotlin's own
-naming there keeps `@SerialName` off every field of every model.
-"""
+"""The domain: what a party is, who is in it, and what it is playing."""
 
 from __future__ import annotations
 
 import secrets
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,21 +23,17 @@ class PartyError(Exception):
 
 @dataclass(slots=True)
 class Track:
-    """A song, in the only terms every device needs to agree on.
-
-    Deliberately not the app's own `Song`: the party carries what it takes to
-    identify and to *show* a track, and nothing else. Everything else — stream
-    URLs, the source that resolved them, quality ceilings, download state — is
-    each device's own business, and has to stay that way. Two people in a party
-    may be on different sources at different bitrates; what they share is which
-    song is playing and where the playhead is.
-    """
+    """A song, in the only terms every device needs to agree on."""
 
     video_id: str
     title: str = ""
     artist: str = ""
     thumbnail_url: str | None = None
     duration_ms: int | None = None
+    from_autoplay: bool = False
+    added_by: str | None = None
+    added_by_name: str | None = None
+    queue_id: str | None = None
 
     @staticmethod
     def from_wire(raw: Any) -> "Track | None":
@@ -64,6 +49,10 @@ class Track:
             artist=str(raw.get("artist") or "")[:300],
             thumbnail_url=(str(raw["thumbnailUrl"])[:1000] if raw.get("thumbnailUrl") else None),
             duration_ms=int(duration) if isinstance(duration, (int, float)) and duration > 0 else None,
+            from_autoplay=bool(raw.get("fromAutoplay", False)),
+            added_by=str(raw.get("addedBy"))[:64] if raw.get("addedBy") else None,
+            added_by_name=str(raw.get("addedByName"))[:80] if raw.get("addedByName") else None,
+            queue_id=str(raw.get("queueId"))[:64] if raw.get("queueId") else None,
         )
 
     def to_wire(self) -> dict[str, Any]:
@@ -73,19 +62,16 @@ class Track:
             "artist": self.artist,
             "thumbnailUrl": self.thumbnail_url,
             "durationMs": self.duration_ms,
+            "fromAutoplay": self.from_autoplay,
+            "addedBy": self.added_by,
+            "addedByName": self.added_by_name,
+            "queueId": self.queue_id,
         }
 
 
 @dataclass(slots=True)
 class PlaybackState:
-    """Where the party is in what it is playing, as of a server timestamp.
-
-    [position_ms] is not "the current position" — it is the position at
-    [anchor_ms], and it only becomes a current position once a device adds the
-    time since. That indirection is what survives the network: a packet delayed
-    by 300 ms carries an anchor 300 ms in the past and still lands the receiving
-    device in exactly the right place.
-    """
+    """Where the party is in what it is playing, as of a server timestamp."""
 
     track: Track | None = None
     queue: list[Track] = field(default_factory=list)
@@ -93,31 +79,17 @@ class PlaybackState:
     is_playing: bool = False
     position_ms: int = 0
     anchor_ms: int = field(default_factory=now_ms)
-    #: Bumped on every mutation. Clients drop any state whose seq they have
-    #: already passed, which is what makes two controllers pressing pause at the
-    #: same moment settle rather than oscillate.
     seq: int = 0
-    #: Bumped only when the *contents* of the queue change, which [seq] cannot
-    #: distinguish because it counts pauses and seeks too. It is what lets the
-    #: queue travel separately from the state — see [to_wire] — and what lets a
-    #: client notice it has missed a queue it was never sent.
     queue_seq: int = 0
     updated_by: str | None = None
     updated_at_ms: int = field(default_factory=now_ms)
-    #: The member who selected the current track. Unlike ``updated_by``, this
-    #: does not change when somebody pauses, resumes, or seeks.
     started_by: str | None = None
     started_by_name: str | None = None
+    autoplay_enabled: bool = False
 
     def position_at(self, server_ms: int) -> int:
-        """The playhead this state implies at a given server time."""
         if not self.is_playing:
             return self.position_ms
-        # Clamped at zero because an anchor is allowed to be in the future: a
-        # resume schedules the start slightly ahead so that every device aims at
-        # one instant rather than at its own arrival time. Before that instant
-        # the party is holding at `position_ms`, which is exactly what a device
-        # that has already buffered should be showing.
         elapsed = max(0, server_ms - self.anchor_ms)
         position = self.position_ms + elapsed
         duration = self.track.duration_ms if self.track else None
@@ -125,13 +97,13 @@ class PlaybackState:
             return min(position, duration)
         return position
 
-    # -- mutations -------------------------------------------------------
-    #
-    # Each one re-anchors. That is the invariant the whole feature rests on:
-    # `position_ms` is never left describing a moment that has passed.
-
     def _touch(self, member_id: str | None) -> None:
         self.seq += 1
+        self.updated_by = member_id
+        self.updated_at_ms = now_ms()
+
+    def _touch_queue(self, member_id: str | None) -> None:
+        self.queue_seq += 1
         self.updated_by = member_id
         self.updated_at_ms = now_ms()
 
@@ -139,29 +111,18 @@ class PlaybackState:
         now = now_ms()
         start_at = position_ms if position_ms is not None else self.position_at(now)
         self.position_ms = max(0, start_at)
-        # The lead time is the difference between "everyone starts when their
-        # packet lands" and "everyone starts together". Resuming at `now` means
-        # the nearest device begins while the furthest is still reading the
-        # frame, and each then corrects by seeking — audible as a stumble on
-        # every play. Anchoring a few hundred milliseconds out gives every
-        # device a common instant to aim at, and time to have buffered by it.
         self.is_playing = True
         self.anchor_ms = now + config.PLAY_LEAD_MS
         self._touch(member_id)
 
     def pause(self, member_id: str | None, position_ms: int | None = None) -> None:
         now = now_ms()
-        # Where the *party* was, not where the pausing device's own playhead
-        # happened to be. Taking the client's number would fold that one
-        # device's drift into the state everybody else then corrects to.
         self.position_ms = max(0, position_ms if position_ms is not None else self.position_at(now))
         self.is_playing = False
         self.anchor_ms = now
         self._touch(member_id)
 
     def seek(self, member_id: str | None, position_ms: int) -> None:
-        # A seek *is* the client's number — it is a user intent, not a
-        # measurement — so unlike pause it is taken as given.
         self.position_ms = max(0, position_ms)
         self.anchor_ms = now_ms() + (config.PLAY_LEAD_MS if self.is_playing else 0)
         self._touch(member_id)
@@ -202,8 +163,107 @@ class PlaybackState:
         self.queue_seq += 1
         self._touch(member_id)
 
+    def add_upcoming(
+        self,
+        member_id: str | None,
+        tracks: list[Track],
+        play_next: bool = False,
+        member_name: str | None = None,
+    ) -> tuple[bool, str, str]:
+        """Adds tracks to the upcoming section, respecting the 25-upcoming cap."""
+        if not tracks:
+            return True, "", ""
+
+        current_upcoming_count = len(self.queue) - max(0, self.queue_index + 1)
+        if current_upcoming_count + len(tracks) > config.MAX_UPCOMING_QUEUE:
+            return (
+                False,
+                "queue_full",
+                f"Queue is full (maximum {config.MAX_UPCOMING_QUEUE} upcoming songs).",
+            )
+
+        stamped_tracks: list[Track] = []
+        for t in tracks:
+            qid = t.queue_id or secrets.token_hex(6)
+            stamped = Track(
+                video_id=t.video_id,
+                title=t.title,
+                artist=t.artist,
+                thumbnail_url=t.thumbnail_url,
+                duration_ms=t.duration_ms,
+                from_autoplay=t.from_autoplay,
+                added_by=member_id,
+                added_by_name=member_name,
+                queue_id=qid,
+            )
+            stamped_tracks.append(stamped)
+
+        if play_next and self.queue_index >= 0:
+            insert_idx = self.queue_index + 1
+            self.queue[insert_idx:insert_idx] = stamped_tracks
+        else:
+            self.queue.extend(stamped_tracks)
+
+        self._touch_queue(member_id)
+        return True, "", ""
+
+    def remove_upcoming(self, member_id: str | None, video_id: str | None = None, index: int | None = None) -> bool:
+        """Removes a track from the upcoming queue."""
+        base = max(0, self.queue_index + 1)
+        target_idx = -1
+
+        if index is not None and base <= index < len(self.queue):
+            target_idx = index
+        elif video_id:
+            for idx in range(base, len(self.queue)):
+                if self.queue[idx].video_id == video_id:
+                    target_idx = idx
+                    break
+
+        if target_idx < 0:
+            return False
+
+        self.queue.pop(target_idx)
+        self._touch_queue(member_id)
+        return True
+
+    def clear_upcoming(self, member_id: str | None) -> bool:
+        """Clears all upcoming tracks while keeping current song untouched."""
+        base = max(0, self.queue_index + 1)
+        if base >= len(self.queue):
+            return False
+        self.queue = self.queue[:base]
+        self._touch_queue(member_id)
+        return True
+
+    def move_upcoming(
+        self,
+        member_id: str | None,
+        from_index: int,
+        to_index: int,
+        video_id: str | None = None,
+    ) -> bool:
+        """Reorders tracks within upcoming without disturbing the playing song."""
+        base = max(0, self.queue_index + 1)
+        actual_from = base + from_index
+        actual_to = base + to_index
+
+        if not (base <= actual_from < len(self.queue)) or not (base <= actual_to < len(self.queue)):
+            return False
+
+        if video_id and self.queue[actual_from].video_id != video_id:
+            return False
+
+        item = self.queue.pop(actual_from)
+        self.queue.insert(actual_to, item)
+        self._touch_queue(member_id)
+        return True
+
+    def set_autoplay(self, member_id: str | None, enabled: bool) -> None:
+        self.autoplay_enabled = enabled
+        self._touch(member_id)
+
     def step(self, member_id: str | None, delta: int, member_name: str | None = None) -> bool:
-        """Next/previous. False when the queue has nowhere to go."""
         target = self.queue_index + delta
         if not (0 <= target < len(self.queue)):
             return False
@@ -217,39 +277,25 @@ class PlaybackState:
         return True
 
     def to_wire(self, server_ms: int | None = None) -> dict[str, Any]:
-        """The playback state — deliberately without the queue in it.
-
-        This frame goes to every device every few seconds, forever, and the
-        queue is the one field in it that is both large and almost never
-        different. Sending a 50-track queue twelve times a minute to each member
-        was about twenty times the bytes of everything else here combined, paid
-        continuously, on phones. So it travels on its own (see [queue_to_wire])
-        and this carries only [queue_seq] — enough for a client to notice its
-        copy is stale and ask, and nothing more.
-        """
         now = server_ms if server_ms is not None else now_ms()
         return {
             "seq": self.seq,
             "track": self.track.to_wire() if self.track else None,
             "queueSeq": self.queue_seq,
             "queueIndex": self.queue_index,
-            # So a client can say "7 of 42" without holding the list.
             "queueLength": len(self.queue),
             "isPlaying": self.is_playing,
             "positionMs": self.position_ms,
             "anchorMs": self.anchor_ms,
-            # Redundant with the three fields above, and worth the bytes: it is
-            # what a log, a test, or a human reading a frame needs in order to
-            # tell "everyone is at 1:03" from "everyone agrees on the formula".
             "effectivePositionMs": self.position_at(now),
             "updatedBy": self.updated_by,
             "startedBy": self.started_by,
             "startedByName": self.started_by_name,
+            "autoplayEnabled": self.autoplay_enabled,
             "updatedAtMs": self.updated_at_ms,
         }
 
     def queue_to_wire(self) -> dict[str, Any]:
-        """The queue, sent on joining and thereafter only when it changes."""
         return {
             "seq": self.queue_seq,
             "index": self.queue_index,
@@ -259,18 +305,7 @@ class PlaybackState:
 
 @dataclass(slots=True)
 class Member:
-    """One signed-in device in a party.
-
-    Identity comes from the app's own account layer: [user_id] is derived from
-    the signed-in Google/YouTube profile, and a request without one is refused —
-    that is what "you have to be signed in to jam" means on this side of the
-    wire. The server does not and cannot verify that claim (it holds no Google
-    credential, and an Innertube round trip per join would be both slow and a
-    second way to get rate-limited), so treat [user_id] as an assertion the
-    client makes, not as proof. What *is* server-held is [token]: minted here,
-    never guessable, and required on every subsequent call. So a member can lie
-    about who they are, but cannot act as a member they are not.
-    """
+    """One signed-in device in a party."""
 
     member_id: str
     user_id: str
@@ -282,9 +317,11 @@ class Member:
     joined_at_ms: int = field(default_factory=now_ms)
     last_seen_ms: int = field(default_factory=now_ms)
     connected: bool = False
-    #: Token bucket for control frames. See [Party.spend_control_budget].
+    wants_activity: bool = False
     control_budget: float = float(config.CONTROL_RATE_PER_SECOND)
     control_budget_at_ms: int = field(default_factory=now_ms)
+    frame_budget: float = float(config.FRAME_RATE_PER_SECOND)
+    frame_budget_at_ms: int = field(default_factory=now_ms)
 
     def to_wire(self) -> dict[str, Any]:
         return {
@@ -302,18 +339,78 @@ class Member:
 @dataclass(slots=True)
 class Party:
     code: str
+    max_members: int = config.MAX_MEMBERS
+    host_only_control: bool = config.HOST_ONLY_CONTROL_DEFAULT
     members: dict[str, Member] = field(default_factory=dict)
     playback: PlaybackState = field(default_factory=PlaybackState)
     created_at_ms: int = field(default_factory=now_ms)
-    #: Last time anything happened — a join, a control, a heartbeat from a
-    #: connected device. Drives the sweep, not [created_at_ms].
     touched_at_ms: int = field(default_factory=now_ms)
-    #: When the last connected member dropped off, or None while someone is on.
     empty_since_ms: int | None = field(default_factory=now_ms)
+    activities: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def host(self) -> Member | None:
         return next((m for m in self.members.values() if m.is_host), None)
+
+    def may_control(self, member: Member) -> bool:
+        """Checks if the member is permitted to control playback and queue."""
+        return not self.host_only_control or member.is_host
+
+    def set_host_only_control(self, member: Member, enabled: bool) -> None:
+        if not member.is_host:
+            raise PartyError(403, "host_only", "Only the host can change who controls the music.")
+        if self.host_only_control == enabled:
+            return
+        self.host_only_control = enabled
+        self.touch()
+
+    def set_max_members(self, member: Member, max_members: int) -> None:
+        if not member.is_host:
+            raise PartyError(403, "host_only", "Only the host can change the party size.")
+        if max_members < 2 or max_members > 10:
+            raise PartyError(422, "invalid_capacity", "Party size must be between 2 and 10.")
+        if max_members < len(self.members):
+            raise PartyError(409, "party_too_small", "Party size cannot be smaller than current member count.")
+        self.max_members = max_members
+        self.touch()
+
+    def set_autoplay(self, member: Member, enabled: bool) -> None:
+        if not self.may_control(member):
+            raise PartyError(403, "host_only", "Only the host can change AutoPlay in this party.")
+        self.playback.set_autoplay(member.member_id, enabled)
+        self.touch()
+
+    def record_activity(self, action: str, by_name: str, detail: str) -> dict[str, Any]:
+        activity = {
+            "type": "activity",
+            "action": action,
+            "by": by_name,
+            "detail": detail,
+            "atMs": now_ms(),
+        }
+        self.activities.append(activity)
+        if len(self.activities) > 50:
+            self.activities.pop(0)
+        return activity
+
+    def to_preview(self) -> dict[str, Any]:
+        """Safe representation for guests before joining."""
+        host_name = self.host.display_name if self.host else ""
+        return {
+            "code": self.code,
+            "hostName": host_name,
+            "memberCount": len(self.members),
+            "maxMembers": self.max_members,
+            "isFull": len(self.members) >= self.max_members,
+            "members": [
+                {
+                    "displayName": m.display_name,
+                    "avatarUrl": m.avatar_url,
+                    "isHost": m.is_host,
+                }
+                for m in sorted(self.members.values(), key=lambda m: m.joined_at_ms)
+            ],
+        }
 
     def occupied_slots(self) -> int:
         return len(self.members)
@@ -324,14 +421,10 @@ class Party:
         device_id: str,
         display_name: str,
         avatar_url: str | None,
+        max_members: int | None = None,
+        host_only_control: bool | None = None,
+        autoplay_enabled: bool | None = None,
     ) -> Member:
-        """Admit a device, or hand back the slot it already holds.
-
-        Rejoining is not a second membership. A reinstall, a force-stop, a lost
-        WebSocket that the grace period outlived — all of them come back through
-        this path, and a party of five would otherwise fill up with ghosts of
-        the same five devices.
-        """
         existing = next(
             (m for m in self.members.values() if m.device_id == device_id),
             None,
@@ -341,18 +434,25 @@ class Party:
             existing.avatar_url = avatar_url
             existing.user_id = user_id
             existing.last_seen_ms = now_ms()
-            # A fresh token: the old one may be on a device that lost the
-            # session, and a membership should only ever have one live key.
             existing.token = secrets.token_urlsafe(24)
             self.touch()
             return existing
 
-        if len(self.members) >= config.MAX_MEMBERS:
+        if len(self.members) >= self.max_members:
             raise PartyError(
                 409,
                 "party_full",
-                f"This party is full ({config.MAX_MEMBERS} devices).",
+                f"This party is full ({self.max_members} devices).",
             )
+
+        is_first = len(self.members) == 0
+        if is_first:
+            if max_members is not None and 2 <= max_members <= 10:
+                self.max_members = max_members
+            if host_only_control is not None:
+                self.host_only_control = host_only_control
+            if autoplay_enabled is not None:
+                self.playback.autoplay_enabled = autoplay_enabled
 
         member = Member(
             member_id=secrets.token_hex(8),
@@ -361,7 +461,7 @@ class Party:
             display_name=display_name,
             avatar_url=avatar_url,
             token=secrets.token_urlsafe(24),
-            is_host=not self.members,
+            is_host=is_first,
         )
         self.members[member.member_id] = member
         self.touch()
@@ -377,10 +477,7 @@ class Party:
         member = self.members.pop(member_id, None)
         if member is None:
             return None
-        # The host leaving hands the party on rather than ending it: everyone
-        # else is still listening, and the only thing the role carries is who
-        # gets asked to leave last.
-        if member.is_host:
+        if member.is_host and self.members:
             successor = next(iter(self.members.values()), None)
             if successor is not None:
                 successor.is_host = True
@@ -389,7 +486,6 @@ class Party:
         return member
 
     def spend_control_budget(self, member: Member) -> bool:
-        """One token from the member's bucket; False when they have run dry."""
         now = now_ms()
         elapsed_s = max(0, now - member.control_budget_at_ms) / 1000.0
         member.control_budget = min(
@@ -400,6 +496,19 @@ class Party:
         if member.control_budget < 1.0:
             return False
         member.control_budget -= 1.0
+        return True
+
+    def spend_frame_budget(self, member: Member) -> bool:
+        now = now_ms()
+        elapsed_s = max(0, now - member.frame_budget_at_ms) / 1000.0
+        member.frame_budget = min(
+            float(config.FRAME_RATE_PER_SECOND),
+            member.frame_budget + elapsed_s * config.FRAME_RATE_PER_SECOND,
+        )
+        member.frame_budget_at_ms = now
+        if member.frame_budget < 1.0:
+            return False
+        member.frame_budget -= 1.0
         return True
 
     def touch(self) -> None:
@@ -418,7 +527,6 @@ class Party:
             self.empty_since_ms = now_ms()
 
     def expired_members(self, now: int) -> list[Member]:
-        """Members whose disconnect grace has run out."""
         return [
             m
             for m in self.members.values()
@@ -428,11 +536,6 @@ class Party:
     def is_expired(self, now: int) -> bool:
         if now - self.created_at_ms > config.PARTY_MAX_AGE_MS:
             return True
-        # An empty party is not immediately a dead one, and a brand new party is
-        # empty by definition — the code is minted first and the creator joins
-        # against it. Both cases fall to the same grace below rather than to a
-        # `not self.members` shortcut, which would let the sweeper delete a code
-        # in the window between handing it out and the creator using it.
         if self.empty_since_ms is not None:
             return now - self.empty_since_ms > config.EMPTY_PARTY_TTL_MS
         return False
@@ -442,45 +545,59 @@ class Party:
         return {
             "code": self.code,
             "createdAtMs": self.created_at_ms,
-            "maxMembers": config.MAX_MEMBERS,
+            "maxMembers": self.max_members,
+            "hostOnlyControl": self.host_only_control,
             "members": [m.to_wire() for m in sorted(self.members.values(), key=lambda m: m.joined_at_ms)],
             "playback": self.playback.to_wire(now),
-            # A snapshot is the one place the queue always travels: it is what a
-            # device arriving has no other way to learn.
             "queue": self.playback.queue_to_wire(),
             "serverMs": now,
         }
 
 
 class PartyStore:
-    """Every live party, in this process's memory.
-
-    In memory on purpose, and the one thing to know before scaling this: a party
-    lives entirely inside the instance that is holding its WebSockets, so two
-    instances would be two disjoint sets of parties and a join would land in
-    whichever one the load balancer picked. On Render that means a single
-    instance with no autoscaling — which is the right shape for this anyway,
-    since a party is at most five devices and the state is a few hundred bytes.
-    Outgrowing that is a Redis pub/sub swap behind this class, not a rewrite of
-    anything above it.
-    """
+    """Manages active parties with optional database persistence for recovery."""
 
     def __init__(self) -> None:
         self._parties: dict[str, Party] = {}
+        self._creation_log: list[float] = []
 
     def __len__(self) -> int:
         return len(self._parties)
 
-    def create(self) -> Party:
+    def clear(self) -> None:
+        self._parties.clear()
+        self._creation_log.clear()
+
+    def _check_creation_rate_limit(self) -> None:
+        if config.CREATE_RATE_PER_MINUTE <= 0:
+            return
+        now = time.time()
+        minute_ago = now - 60.0
+        self._creation_log = [t for t in self._creation_log if t > minute_ago]
+        if len(self._creation_log) >= config.CREATE_RATE_PER_MINUTE:
+            raise PartyError(429, "rate_limited", "Creating parties too fast. Please wait a minute.")
+        self._creation_log.append(now)
+
+    def create(
+        self,
+        max_members: int = config.MAX_MEMBERS,
+        host_only_control: bool = config.HOST_ONLY_CONTROL_DEFAULT,
+    ) -> Party:
+        self._check_creation_rate_limit()
+
+        if len(self._parties) >= config.MAX_PARTIES:
+            raise PartyError(503, "server_full", "The party server is busy. Please try again in a few minutes.")
+
         for _ in range(12):
             code = codes.new_code()
             if code not in self._parties:
-                party = Party(code=code)
+                party = Party(
+                    code=code,
+                    max_members=max_members,
+                    host_only_control=host_only_control,
+                )
                 self._parties[code] = party
                 return party
-        # 33**6 possibilities against a handful of live parties: twelve
-        # collisions in a row is not luck, it is a broken RNG, and carrying on
-        # would mean handing somebody a code into a stranger's party.
         raise PartyError(503, "code_exhausted", "Could not allocate a party code.")
 
     def get(self, code: str) -> Party:
@@ -499,7 +616,6 @@ class PartyStore:
         return list(self._parties.values())
 
     def sweep(self, now: int) -> list[Party]:
-        """Evict timed-out members and dead parties. Returns parties that changed."""
         changed: list[Party] = []
         for party in list(self._parties.values()):
             gone = party.expired_members(now)

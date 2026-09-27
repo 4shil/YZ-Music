@@ -362,6 +362,36 @@ object AppSettings {
     /** When enabled, shows lyrics fetching and Genius scraping logs in the lyrics menu/panel. */
     val showLyricsLogs = MutableStateFlow(false)
 
+    /**
+     * How far the lyrics are drawn from the audio, in milliseconds.
+     *
+     * Display only. Half these tracks are late or early against the record —
+     * the beat is sampled by whoever typed the lyric, not measured from the
+     * master — and the reader can see exactly how far without ever moving the
+     * music. Nudging the *player* to fix a lyric would be the wrong way
+     * round: it would desync the audio from the video, drift under a
+     * crossfade, and silently rewrite the seek target so that tapping a line
+     * to hear it would jump somewhere the line is not.
+     */
+    val lyricsOffsetMs = MutableStateFlow(0)
+
+    /**
+     * The language lyric translations are asked for, as a BCP-47 tag.
+     *
+     * Empty means "whatever the reader's device is set to", which is the right
+     * default because it needs no configuration and is right for most people.
+     * It is a choice rather than a derived value so that someone reading lyrics
+     * in a second language — a Japanese song with an English interface, say —
+     * can ask for the language they actually read.
+     */
+    val lyricsTargetLanguage = MutableStateFlow("")
+
+    /** The step the offset buttons move by. Fine enough for most, coarse enough to undo. */
+    const val LYRICS_OFFSET_STEP_MS = 100
+
+    /** Past this the lyric is not late, it is the wrong lyric. */
+    const val LYRICS_OFFSET_LIMIT_MS = 5_000
+
     /** Disk budget for cached audio. [AudioCache][com.music.yzmusic.playback.AudioCache] evicts past it. */
     val audioCacheLimitBytes = MutableStateFlow(DEFAULT_CACHE_LIMIT_BYTES)
 
@@ -574,6 +604,9 @@ object AppSettings {
         showLyricsLogs.value = prefs.getBoolean(KEY_SHOW_LYRICS_LOGS, false)
         audioCacheLimitBytes.value = prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES)
             .coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
+        lyricsOffsetMs.value = prefs.getInt(KEY_LYRICS_OFFSET_MS, 0)
+            .coerceIn(-LYRICS_OFFSET_LIMIT_MS, LYRICS_OFFSET_LIMIT_MS)
+        lyricsTargetLanguage.value = prefs.getString(KEY_LYRICS_TARGET_LANGUAGE, "").orEmpty()
         lastfmEnabled.value = prefs.getBoolean(KEY_LASTFM_ENABLED, false)
         lastfmUsername.value = prefs.getString(KEY_LASTFM_USERNAME, "").orEmpty()
         lastfmSessionKey.value = prefs.getString(KEY_LASTFM_SESSION_KEY, "").orEmpty()
@@ -908,6 +941,28 @@ object AppSettings {
     fun setShowLyricsLogs(value: Boolean) {
         showLyricsLogs.value = value
         prefs.edit().putBoolean(KEY_SHOW_LYRICS_LOGS, value).apply()
+    }
+
+    /**
+     * Moves the lyrics by [delta] milliseconds, clamped to
+     * [LYRICS_OFFSET_LIMIT_MS]. The value is persisted, not the player, so it
+     * survives a restart as a drawing offset and nothing else.
+     */
+    fun adjustLyricsOffset(delta: Int) {
+        val next = (lyricsOffsetMs.value + delta)
+            .coerceIn(-LYRICS_OFFSET_LIMIT_MS, LYRICS_OFFSET_LIMIT_MS)
+        lyricsOffsetMs.value = next
+        prefs.edit().putInt(KEY_LYRICS_OFFSET_MS, next).apply()
+    }
+
+    fun resetLyricsOffset() {
+        lyricsOffsetMs.value = 0
+        prefs.edit().putInt(KEY_LYRICS_OFFSET_MS, 0).apply()
+    }
+
+    fun setLyricsTargetLanguage(tag: String) {
+        lyricsTargetLanguage.value = tag
+        prefs.edit().putString(KEY_LYRICS_TARGET_LANGUAGE, tag).apply()
     }
 
     /**
@@ -1424,6 +1479,8 @@ object AppSettings {
     private const val KEY_SPEED = "playback_speed"
     private const val KEY_THEME = "theme_mode"
     private const val KEY_ACCENT_COLOR = "accent_color"
+    private const val KEY_LYRICS_OFFSET_MS = "lyrics_offset_ms"
+    private const val KEY_LYRICS_TARGET_LANGUAGE = "lyrics_target_language"
     private const val KEY_AUTOPLAY = "autoplay"
     private const val KEY_NERD_STATS = "show_nerd_stats"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"

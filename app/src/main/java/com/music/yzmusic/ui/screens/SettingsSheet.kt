@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +32,7 @@ import com.music.yzmusic.ui.components.bouncingOverscroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -60,6 +63,8 @@ import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
@@ -153,6 +158,9 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import com.music.yzmusic.data.LocalMediaRepository
 import com.music.yzmusic.data.settings.LibraryViewType
+import androidx.compose.material.icons.rounded.Translate
+import com.music.yzmusic.data.lyrics.LyricsTranslation
+import com.music.yzmusic.ui.theme.onAccent
 import com.music.yzmusic.data.settings.LocalMusicSort
 import com.music.yzmusic.data.settings.OutputPcmMode
 import com.music.yzmusic.data.sources.DeviceCodecs
@@ -237,6 +245,8 @@ fun SettingsScreen(
     val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
     val lyricsBlur by AppSettings.lyricsBlur.collectAsStateWithLifecycle()
     val showLyricsLogs by AppSettings.showLyricsLogs.collectAsStateWithLifecycle()
+    val lyricsOffsetMs by AppSettings.lyricsOffsetMs.collectAsStateWithLifecycle()
+    val lyricsTargetLanguage by AppSettings.lyricsTargetLanguage.collectAsStateWithLifecycle()
     val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
@@ -323,6 +333,7 @@ fun SettingsScreen(
     }
     var showListenBrainzTokenDialog by remember { mutableStateOf(false) }
     var showLastfmLoginDialog by remember { mutableStateOf(false) }
+    var showLyricsLanguageDialog by remember { mutableStateOf(false) }
     val scrobbleScope = rememberCoroutineScope()
 
     val version = remember(context) {
@@ -1020,6 +1031,37 @@ fun SettingsScreen(
                 )
                 RowDivider()
                 SettingsRow(
+                    icon = Icons.Rounded.Schedule,
+                    title = stringResource(R.string.lyrics_offset),
+                    subtitle = if (lyricsOffsetMs == 0) {
+                        stringResource(R.string.lyrics_offset_none)
+                    } else {
+                        // formatOffsetMs carries the direction itself, so
+                        // nothing is prefixed here — the reader sees the sign
+                        // once, from the one place that owns it.
+                        stringResource(R.string.lyrics_offset_value, formatOffsetMs(lyricsOffsetMs))
+                    },
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OffsetStepButton(Icons.Rounded.Remove, stringResource(R.string.lyrics_offset_earlier)) {
+                                AppSettings.adjustLyricsOffset(-AppSettings.LYRICS_OFFSET_STEP_MS)
+                            }
+                            Text(
+                                text = formatOffsetMs(lyricsOffsetMs),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                            )
+                            OffsetStepButton(Icons.Rounded.Add, stringResource(R.string.lyrics_offset_later)) {
+                                AppSettings.adjustLyricsOffset(AppSettings.LYRICS_OFFSET_STEP_MS)
+                            }
+                        }
+                    },
+                    onClick = {
+                        if (lyricsOffsetMs != 0) AppSettings.resetLyricsOffset()
+                    },
+                )
+                SettingsRow(
                     icon = Icons.Rounded.History,
                     title = stringResource(R.string.lyrics_debug_logs),
                     subtitle = stringResource(R.string.lyrics_debug_logs_subtitle),
@@ -1034,6 +1076,13 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setShowLyricsLogs(!showLyricsLogs) },
+                )
+
+                SettingsRow(
+                    icon = Icons.Rounded.Translate,
+                    title = stringResource(R.string.lyrics_translation_language),
+                    subtitle = lyricsLanguageLabel(lyricsTargetLanguage),
+                    onClick = { showLyricsLanguageDialog = true },
                 )
             }
         }
@@ -1453,6 +1502,17 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { confirmImport = false }) { Text("Cancel") }
             },
+        )
+    }
+
+    if (showLyricsLanguageDialog) {
+        LyricsLanguageDialog(
+            selected = lyricsTargetLanguage,
+            onSelect = { tag ->
+                AppSettings.setLyricsTargetLanguage(tag)
+                showLyricsLanguageDialog = false
+            },
+            onDismiss = { showLyricsLanguageDialog = false },
         )
     }
 
@@ -2756,7 +2816,8 @@ internal fun SegmentedControl(
 private fun AccentColorRow() {
     val currentArgb by AppSettings.accentColor.collectAsStateWithLifecycle()
 
-    // Nine opinionated swatches — one per column of visual space in the row.
+    // Ten opinionated swatches spanning the visible spectrum, plus pure white
+    // for the monochrome theme people ask for.
     val swatches = remember {
         listOf(
             0xFFFA2D48.toInt(), // Default: Apple Music red
@@ -2768,6 +2829,7 @@ private fun AccentColorRow() {
             0xFF5856D6.toInt(), // Indigo
             0xFFAF52DE.toInt(), // Purple
             0xFFFF2D55.toInt(), // Pink
+            0xFFFFFFFF.toInt(), // White
         )
     }
 
@@ -2799,11 +2861,143 @@ private fun AccentColorRow() {
                     Icon(
                         imageVector = Icons.Rounded.Check,
                         contentDescription = "Selected",
-                        tint = Color.White,
+                        tint = onAccent(Color(argb)),
                         modifier = Modifier.size(16.dp),
                     )
                 }
             }
         }
     }
+}
+
+/**
+ * The language lyric translations are asked for.
+ *
+ * "Automatic" is the first entry and is a real choice, not a placeholder: it
+ * tracks the device, so someone who switches their phone to Hindi starts
+ * getting Hindi lyrics without ever opening this. Everything after it is
+ * whatever ML Kit says it can translate *into*, so the list cannot promise a
+ * language the engine would then refuse.
+ */
+@Composable
+private fun LyricsLanguageDialog(
+    selected: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val languages = remember { LyricsTranslation.supportedTargetLanguages }
+    val entries = remember(languages) {
+        languages.map { tag -> tag to languageDisplayName(tag) }.sortedBy { it.second }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.lyrics_translation_language)) },
+        text = {
+            LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                item {
+                    LanguageOption(
+                        label = stringResource(R.string.lyrics_language_automatic),
+                        checked = selected.isBlank(),
+                        onClick = { onSelect("") },
+                    )
+                }
+                items(entries) { (tag, name) ->
+                    LanguageOption(
+                        label = name,
+                        checked = selected == tag,
+                        onClick = { onSelect(tag) },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@Composable
+private fun LanguageOption(label: String, checked: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        if (checked) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The reader's own name for a language, falling back to the raw tag when the
+ * platform has nothing to say — an unrecognised name shows the reader nothing
+ * useful, whereas the tag at least is the thing the engine is keyed on.
+ */
+private fun languageDisplayName(tag: String): String {
+    val display = runCatching {
+        Locale.forLanguageTag(tag).getDisplayLanguage(Locale.getDefault())
+ }.getOrNull()
+    return display?.takeIf { it.isNotBlank() && it != tag } ?: tag
+}
+
+/** How the chosen language reads in the row, with the device's own wording. */
+private fun lyricsLanguageLabel(tag: String): String = if (tag.isBlank()) {
+    "Automatic (${Locale.getDefault().displayLanguage})"
+} else {
+    languageDisplayName(tag)
+}
+
+/**
+ * Renders the offset the way it is meant to be adjusted: in units of the
+ * step. "−300 ms" is a correction; "−0.3 s" reads as a measurement.
+ */
+private fun formatOffsetMs(ms: Int): String {
+    // Both directions carry a sign. "Drawn 200 ms from the music" is a
+    // measurement, and a reader cannot tell from it whether the words are
+    // arriving early or late — which is the only thing the number is for.
+    val sign = if (ms < 0) "−" else "+"
+    val magnitude = kotlin.math.abs(ms)
+    return if (magnitude % 1000 == 0) {
+        "$sign${magnitude / 1000} s"
+    } else {
+        "$sign$magnitude ms"
+    }
+}
+
+/**
+ * The − / + pair for the offset. Two buttons rather than a slider: a slider
+ * has to be grabbed and dragged, and dragging is the one interaction the
+ * player already leans on hardest — keeping the correction a pair of taps
+ * means adjusting the lyrics never fights adjusting the volume next to it.
+ */
+@Composable
+private fun OffsetStepButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Icon(
+        imageVector = icon,
+        contentDescription = description,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+    )
 }
