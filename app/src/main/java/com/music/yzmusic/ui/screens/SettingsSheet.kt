@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +33,7 @@ import com.music.yzmusic.ui.components.bouncingOverscroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -60,6 +64,8 @@ import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
@@ -111,12 +117,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -130,6 +138,7 @@ import com.music.yzmusic.ui.components.languageDisplayNameRes
 import com.music.yzmusic.ui.components.thumbnailBorder
 import com.music.yzmusic.data.model.Account
 import com.music.yzmusic.BuildConfig
+import com.music.yzmusic.data.lyrics.translationLanguageName
 import com.music.yzmusic.data.scrobbling.LastFM
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.R
@@ -153,6 +162,9 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import com.music.yzmusic.data.LocalMediaRepository
 import com.music.yzmusic.data.settings.LibraryViewType
+import androidx.compose.material.icons.rounded.Translate
+import com.music.yzmusic.data.lyrics.LyricsTranslation
+import com.music.yzmusic.ui.theme.onAccent
 import com.music.yzmusic.data.settings.LocalMusicSort
 import com.music.yzmusic.data.settings.OutputPcmMode
 import com.music.yzmusic.data.sources.DeviceCodecs
@@ -237,6 +249,8 @@ fun SettingsScreen(
     val prioritizeSyllableSync by AppSettings.prioritizeSyllableSync.collectAsStateWithLifecycle()
     val lyricsBlur by AppSettings.lyricsBlur.collectAsStateWithLifecycle()
     val showLyricsLogs by AppSettings.showLyricsLogs.collectAsStateWithLifecycle()
+    val lyricsOffsetMs by AppSettings.lyricsOffsetMs.collectAsStateWithLifecycle()
+    val lyricsTargetLanguage by AppSettings.lyricsTargetLanguage.collectAsStateWithLifecycle()
     val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
     val sessionId by AppSettings.audioSessionId.collectAsStateWithLifecycle()
     val cacheLimitBytes by AppSettings.audioCacheLimitBytes.collectAsStateWithLifecycle()
@@ -323,6 +337,7 @@ fun SettingsScreen(
     }
     var showListenBrainzTokenDialog by remember { mutableStateOf(false) }
     var showLastfmLoginDialog by remember { mutableStateOf(false) }
+    var showLyricsLanguageDialog by remember { mutableStateOf(false) }
     val scrobbleScope = rememberCoroutineScope()
 
     val version = remember(context) {
@@ -1020,6 +1035,37 @@ fun SettingsScreen(
                 )
                 RowDivider()
                 SettingsRow(
+                    icon = Icons.Rounded.Schedule,
+                    title = stringResource(R.string.lyrics_offset),
+                    subtitle = if (lyricsOffsetMs == 0) {
+                        stringResource(R.string.lyrics_offset_none)
+                    } else {
+                        // formatOffsetMs carries the direction itself, so
+                        // nothing is prefixed here — the reader sees the sign
+                        // once, from the one place that owns it.
+                        stringResource(R.string.lyrics_offset_value, formatOffsetMs(lyricsOffsetMs))
+                    },
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OffsetStepButton(Icons.Rounded.Remove, stringResource(R.string.lyrics_offset_earlier)) {
+                                AppSettings.adjustLyricsOffset(-AppSettings.LYRICS_OFFSET_STEP_MS)
+                            }
+                            Text(
+                                text = formatOffsetMs(lyricsOffsetMs),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                            )
+                            OffsetStepButton(Icons.Rounded.Add, stringResource(R.string.lyrics_offset_later)) {
+                                AppSettings.adjustLyricsOffset(AppSettings.LYRICS_OFFSET_STEP_MS)
+                            }
+                        }
+                    },
+                    onClick = {
+                        if (lyricsOffsetMs != 0) AppSettings.resetLyricsOffset()
+                    },
+                )
+                SettingsRow(
                     icon = Icons.Rounded.History,
                     title = stringResource(R.string.lyrics_debug_logs),
                     subtitle = stringResource(R.string.lyrics_debug_logs_subtitle),
@@ -1034,6 +1080,13 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setShowLyricsLogs(!showLyricsLogs) },
+                )
+
+                SettingsRow(
+                    icon = Icons.Rounded.Translate,
+                    title = stringResource(R.string.lyrics_translation_language),
+                    subtitle = lyricsLanguageLabel(lyricsTargetLanguage),
+                    onClick = { showLyricsLanguageDialog = true },
                 )
             }
         }
@@ -1453,6 +1506,17 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { confirmImport = false }) { Text("Cancel") }
             },
+        )
+    }
+
+    if (showLyricsLanguageDialog) {
+        LyricsLanguageDialog(
+            selected = lyricsTargetLanguage,
+            onSelect = { tag ->
+                AppSettings.setLyricsTargetLanguage(tag)
+                showLyricsLanguageDialog = false
+            },
+            onDismiss = { showLyricsLanguageDialog = false },
         )
     }
 
@@ -2756,7 +2820,8 @@ internal fun SegmentedControl(
 private fun AccentColorRow() {
     val currentArgb by AppSettings.accentColor.collectAsStateWithLifecycle()
 
-    // Nine opinionated swatches — one per column of visual space in the row.
+    // Ten opinionated swatches spanning the visible spectrum, plus pure white
+    // for the monochrome theme people ask for.
     val swatches = remember {
         listOf(
             0xFFFA2D48.toInt(), // Default: Apple Music red
@@ -2768,42 +2833,349 @@ private fun AccentColorRow() {
             0xFF5856D6.toInt(), // Indigo
             0xFFAF52DE.toInt(), // Purple
             0xFFFF2D55.toInt(), // Pink
+            0xFFFFFFFF.toInt(), // White
         )
     }
 
-    Row(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = ROW_INSET, end = ROW_INSET, top = 6.dp, bottom = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Label on the left, matching the icon-less SegmentedControl rows above.
-        Text(
-            text = "Accent color",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.weight(1f),
-        )
-        swatches.forEach { argb ->
-            val isSelected = argb == currentArgb
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(Color(argb))
-                    .clickable { AppSettings.setAccentColor(argb) },
-            ) {
-                if (isSelected) {
-                    Icon(
-                        imageVector = Icons.Rounded.Check,
-                        contentDescription = "Selected",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp),
+        val totalWidth = maxWidth
+        val density = LocalDensity.current
+        val textMeasurer = rememberTextMeasurer()
+        val textStyle = MaterialTheme.typography.bodyLarge
+        val labelText = "Accent color"
+
+        val labelWidth = remember(textMeasurer, textStyle, labelText, density) {
+            val result = textMeasurer.measure(
+                text = labelText,
+                style = textStyle,
+                maxLines = 1,
+                softWrap = false,
+            )
+            with(density) { result.size.width.toDp() } + 2.dp
+        }
+
+        val minLabelGap = 12.dp
+        val availableForSwatches = totalWidth - labelWidth - minLabelGap
+
+        when {
+            // Tablets, landscape, or wide displays: 10 swatches in a single horizontal row on the right
+            availableForSwatches >= 280.dp -> {
+                val circleSize = if (availableForSwatches >= 350.dp) 28.dp else 24.dp
+                val spacing = ((availableForSwatches - (circleSize * 10)) / 9).coerceIn(4.dp, 10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = labelText,
+                        style = textStyle,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        softWrap = false,
                     )
+                    Spacer(Modifier.weight(1f))
+                    SwatchesSingleRow(
+                        swatches = swatches,
+                        currentArgb = currentArgb,
+                        circleSize = circleSize,
+                        spacing = spacing,
+                    )
+                }
+            }
+
+            // Standard mobile portrait: 2 rows of 5 swatches on the right, vertically centered with label
+            availableForSwatches >= 130.dp -> {
+                val circleSize = when {
+                    availableForSwatches >= 165.dp -> 26.dp
+                    availableForSwatches >= 140.dp -> 24.dp
+                    else -> 22.dp
+                }
+                val spacing = ((availableForSwatches - (circleSize * 5)) / 4).coerceIn(4.dp, 8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = labelText,
+                        style = textStyle,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    SwatchesTwoRows(
+                        swatches = swatches,
+                        currentArgb = currentArgb,
+                        circleSize = circleSize,
+                        spacing = spacing,
+                        horizontalAlignment = Alignment.End,
+                    )
+                }
+            }
+
+            // Severely constrained width / large accessibility font scales: stack label and swatches
+            else -> {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = labelText,
+                        style = textStyle,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    if (totalWidth >= 280.dp) {
+                        val circleSize = if (totalWidth >= 350.dp) 28.dp else 24.dp
+                        val spacing = ((totalWidth - (circleSize * 10)) / 9).coerceIn(4.dp, 10.dp)
+                        SwatchesSingleRow(
+                            swatches = swatches,
+                            currentArgb = currentArgb,
+                            circleSize = circleSize,
+                            spacing = spacing,
+                        )
+                    } else {
+                        val circleSize = when {
+                            totalWidth >= 160.dp -> 26.dp
+                            totalWidth >= 140.dp -> 24.dp
+                            else -> 22.dp
+                        }
+                        val spacing = ((totalWidth - (circleSize * 5)) / 4).coerceIn(4.dp, 8.dp)
+                        SwatchesTwoRows(
+                            swatches = swatches,
+                            currentArgb = currentArgb,
+                            circleSize = circleSize,
+                            spacing = spacing,
+                            horizontalAlignment = Alignment.Start,
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SwatchBox(
+    argb: Int,
+    size: Dp,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Color(argb))
+            .clickable(onClick = onClick),
+    ) {
+        if (isSelected) {
+            val iconSize = (size * 16f / 28f).coerceAtLeast(12.dp)
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = "Selected",
+                tint = onAccent(Color(argb)),
+                modifier = Modifier.size(iconSize),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwatchesSingleRow(
+    swatches: List<Int>,
+    currentArgb: Int,
+    circleSize: Dp,
+    spacing: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        swatches.forEach { argb ->
+            SwatchBox(
+                argb = argb,
+                size = circleSize,
+                isSelected = argb == currentArgb,
+                onClick = { AppSettings.setAccentColor(argb) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwatchesTwoRows(
+    swatches: List<Int>,
+    currentArgb: Int,
+    circleSize: Dp,
+    spacing: Dp,
+    modifier: Modifier = Modifier,
+    horizontalAlignment: Alignment.Horizontal = Alignment.End,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(spacing),
+        horizontalAlignment = horizontalAlignment,
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            swatches.take(5).forEach { argb ->
+                SwatchBox(
+                    argb = argb,
+                    size = circleSize,
+                    isSelected = argb == currentArgb,
+                    onClick = { AppSettings.setAccentColor(argb) },
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            swatches.drop(5).forEach { argb ->
+                SwatchBox(
+                    argb = argb,
+                    size = circleSize,
+                    isSelected = argb == currentArgb,
+                    onClick = { AppSettings.setAccentColor(argb) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The language lyric translations are asked for.
+ *
+ * "Automatic" is the first entry and is a real choice, not a placeholder: it
+ * tracks the device, so someone who switches their phone to Hindi starts
+ * getting Hindi lyrics without ever opening this. Everything after it is
+ * whatever ML Kit says it can translate *into*, so the list cannot promise a
+ * language the engine would then refuse.
+ */
+@Composable
+private fun LyricsLanguageDialog(
+    selected: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val languages = remember { LyricsTranslation.supportedTargetLanguages }
+    val entries = remember(languages) {
+        languages.map { tag -> tag to languageDisplayName(tag) }.sortedBy { it.second }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.lyrics_translation_language)) },
+        text = {
+            LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                item {
+                    LanguageOption(
+                        label = stringResource(R.string.lyrics_language_automatic),
+                        checked = selected.isBlank(),
+                        onClick = { onSelect("") },
+                    )
+                }
+                items(entries) { (tag, name) ->
+                    LanguageOption(
+                        label = name,
+                        checked = selected == tag,
+                        onClick = { onSelect(tag) },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@Composable
+private fun LanguageOption(label: String, checked: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        if (checked) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/**
+ * How to call a language code on screen.
+ *
+ * The endpoint's list reaches past what Android's ICU data carries, so a
+ * handful of codes have no platform name at all and would otherwise sit in the
+ * picker spelled `bho` or `mni-Mtei`. [translationLanguageName] asks the
+ * platform first — so the name arrives in the reader's own language — and
+ * falls back to the English name the table carries.
+ */
+private fun languageDisplayName(tag: String): String =
+    translationLanguageName(tag, Locale.getDefault())
+
+/** How the chosen language reads in the row, with the device's own wording. */
+private fun lyricsLanguageLabel(tag: String): String = if (tag.isBlank()) {
+    "Automatic (${Locale.getDefault().displayLanguage})"
+} else {
+    languageDisplayName(tag)
+}
+
+/**
+ * Renders the offset the way it is meant to be adjusted: in units of the
+ * step. "−300 ms" is a correction; "−0.3 s" reads as a measurement.
+ */
+private fun formatOffsetMs(ms: Int): String {
+    // Both directions carry a sign. "Drawn 200 ms from the music" is a
+    // measurement, and a reader cannot tell from it whether the words are
+    // arriving early or late — which is the only thing the number is for.
+    val sign = if (ms < 0) "−" else "+"
+    val magnitude = kotlin.math.abs(ms)
+    return if (magnitude % 1000 == 0) {
+        "$sign${magnitude / 1000} s"
+    } else {
+        "$sign$magnitude ms"
+    }
+}
+
+/**
+ * The − / + pair for the offset. Two buttons rather than a slider: a slider
+ * has to be grabbed and dragged, and dragging is the one interaction the
+ * player already leans on hardest — keeping the correction a pair of taps
+ * means adjusting the lyrics never fights adjusting the volume next to it.
+ */
+@Composable
+private fun OffsetStepButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Icon(
+        imageVector = icon,
+        contentDescription = description,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+    )
 }

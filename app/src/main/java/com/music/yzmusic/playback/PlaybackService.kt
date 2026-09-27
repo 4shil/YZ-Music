@@ -72,6 +72,7 @@ import com.music.yzmusic.download.Downloads
 import com.music.yzmusic.widget.MediaWidget
 import com.music.yzmusic.widget.MediaWidgetSnapshot
 import com.music.yzmusic.data.innertube.Innertube
+import com.music.yzmusic.data.listentogether.ListenTogether
 import com.music.yzmusic.data.model.ShelfItem
 import com.music.yzmusic.data.LocalMediaRepository
 import kotlinx.coroutines.sync.Mutex
@@ -929,6 +930,8 @@ class PlaybackService : MediaLibraryService() {
         )
         crossfade = controller
         controller.start()
+
+        PartyPersonalQueueStash.init(this)
 
         val sync = PartySync(scope) { player }
         partySync = sync
@@ -2761,6 +2764,7 @@ class PlaybackService : MediaLibraryService() {
 
     /** Serialize only the bounded window needed for a future cold-start resume. */
     private fun saveQueueSnapshot(player: ExoPlayer) {
+        if (ListenTogether.state.value.inParty) return
         if (player.mediaItemCount == 0) {
             persistedQueueStart = 0
             LastPlayed.clear()
@@ -2778,6 +2782,7 @@ class PlaybackService : MediaLibraryService() {
 
     /** Make the newly installed radio queue the durable cold-start boundary. */
     private fun saveQueueSnapshotImmediately(player: ExoPlayer) {
+        if (ListenTogether.state.value.inParty) return
         if (player.mediaItemCount == 0) {
             persistedQueueStart = 0
             LastPlayed.clearImmediately()

@@ -28,7 +28,7 @@ object BetterLyrics {
         artist: String,
         durationMs: Long,
         album: String? = null,
-    ): List<LyricLine>? = withContext(Dispatchers.IO) {
+    ): LyricsPayload? = withContext(Dispatchers.IO) {
         val url = BASE.toHttpUrl().newBuilder()
             .addQueryParameter("s", title)
             .addQueryParameter("a", artist)
@@ -45,6 +45,11 @@ object BetterLyrics {
                 ?.get("ttml")?.jsonPrimitive?.contentOrNull
         }.getOrNull() ?: return@withContext null
 
-        TtmlLyrics.parse(ttml).takeIf { it.isNotEmpty() }
+        // Read whole rather than as a bare list: this host serves Apple's
+        // document, which often carries a translation and a romanization
+        // alongside the words, and both used to be dropped on the floor.
+        TtmlLyrics.parseDocument(ttml)
+            .takeIf { it.lines.isNotEmpty() }
+            ?.let { LyricsPayload(it.lines, it.translation, it.romanization) }
     }
 }

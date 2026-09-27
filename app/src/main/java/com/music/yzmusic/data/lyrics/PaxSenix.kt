@@ -35,7 +35,7 @@ object PaxSenix {
         artist: String,
         durationMs: Long,
         album: String? = null,
-    ): List<LyricLine>? = withContext(Dispatchers.IO) {
+    ): LyricsPayload? = withContext(Dispatchers.IO) {
         val seconds = (durationMs / 1000).toInt()
         val query = listOfNotNull(title.cleaned(), artist.cleaned().takeIf { it.isNotBlank() })
             .joinToString(" ")
@@ -85,7 +85,7 @@ object PaxSenix {
         return response?.results?.songs?.data
     }
 
-    private fun fetchLyrics(appleId: String): List<LyricLine>? {
+    private fun fetchLyrics(appleId: String): LyricsPayload? {
         val url = "$PROXY/apple-music/lyrics".toHttpUrl().newBuilder()
             .addQueryParameter("id", appleId)
             .build()
@@ -93,14 +93,19 @@ object PaxSenix {
         val response = runCatching { lyricsJson.decodeFromString<LyricsResponse>(body) }.getOrNull()
             ?: return null
 
+        // TTML first, and read whole: the same Apple document often arrives
+        // with a translation and a romanization already in it, which is the
+        // cheapest and best-timed translation there is.
         response.ttmlContent?.takeIf { it.isNotBlank() }?.let { ttml ->
-            TtmlLyrics.parse(ttml).takeIf { it.isNotEmpty() }?.let { return it }
+            TtmlLyrics.parseDocument(ttml)
+                .takeIf { it.lines.isNotEmpty() }
+                ?.let { return LyricsPayload(it.lines, it.translation, it.romanization) }
         }
         response.elrcMultiPerson?.takeIf { it.isNotBlank() }?.let { elrc ->
-            EnhancedLrc.parse(elrc).takeIf { it.isNotEmpty() }?.let { return it }
+            EnhancedLrc.parse(elrc).takeIf { it.isNotEmpty() }?.let { return LyricsPayload(it) }
         }
         response.elrc?.takeIf { it.isNotBlank() }?.let { elrc ->
-            EnhancedLrc.parse(elrc).takeIf { it.isNotEmpty() }?.let { return it }
+            EnhancedLrc.parse(elrc).takeIf { it.isNotEmpty() }?.let { return LyricsPayload(it) }
         }
         return null
     }

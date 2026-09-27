@@ -93,8 +93,33 @@
 -dontwarn coil3.**
 -keep class androidx.palette.** { *; }
 
+
 # ---------------------------------------------------------------------------
-# 9. UI Frameworks & Utilities
+# 9. ZXing (party invite QR codes)
+# ---------------------------------------------------------------------------
+# The encode path is all direct calls (QRCodeWriter → Encoder →
+# DefaultGridPlacement), so R8 would in fact trace it correctly on its own. The
+# rule is here to make that a guarantee rather than a property of R8's
+# whole-program analysis today.
+#
+# The QR *decoder* rides along under this rule, which is not what it is for —
+# nothing in the app reads a code; the other phone's camera does that, by
+# pointing a lens at a link. It is left in deliberately. Pruning it to a
+# hand-picked list of the ~20 classes the encoder actually reaches saves a few
+# hundred KB against a ~53 MB APK, and buys a release-only NoClassDefFoundError
+# in the encoder if that list is ever one class short — a failure where a
+# minified build and a debug build disagree and no local test would catch it.
+-keep class com.google.zxing.qrcode.** { *; }
+-keep class com.google.zxing.common.** { *; }
+-keep interface com.google.zxing.Writer { *; }
+-keep class com.google.zxing.EncodeHintType { *; }
+-keep class com.google.zxing.BarcodeFormat { *; }
+# The rest of the artifact is unused, and the AWT/imageio-based helpers in it
+# have no Android equivalent — R8 would warn about every one of them.
+-dontwarn com.google.zxing.**
+
+# ---------------------------------------------------------------------------
+# 10. UI Frameworks & Utilities
 # ---------------------------------------------------------------------------
 -dontwarn dev.chrisbanes.haze.**
 -dontwarn com.halilibo.richtext.**

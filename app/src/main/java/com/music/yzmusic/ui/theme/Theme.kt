@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.TextStyle
@@ -37,9 +38,22 @@ fun accentColor(): Color {
     return Color(argb)
 }
 
+/**
+ * The colour to draw *on* [this] colour.
+ *
+ * A hardcoded white foreground works for the dark saturated accents and fails
+ * for the pale ones — white on the existing yellow is already thin, and white
+ * on the white swatch is nothing at all, so every label and control painted
+ * with it would simply disappear. Picking the foreground from the background's
+ * own luminance is what makes the whole palette safe rather than the safe half
+ * of it.
+ */
+fun onAccent(accent: Color): Color =
+    if (accent.luminance() > 0.5f) Color.Black else Color.White
+
 private fun darkColors(accent: Color) = darkColorScheme(
     primary = accent,
-    onPrimary = Color.White,
+    onPrimary = onAccent(accent),
     background = Color.Black,
     onBackground = Color.White,
     surface = Color(0xFF0D0D0F),
@@ -51,7 +65,7 @@ private fun darkColors(accent: Color) = darkColorScheme(
 
 private fun lightColors(accent: Color) = lightColorScheme(
     primary = accent,
-    onPrimary = Color.White,
+    onPrimary = onAccent(accent),
     background = Color.White,
     onBackground = Color.Black,
     surface = Color(0xFFF7F7F9),

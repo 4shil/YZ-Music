@@ -104,14 +104,17 @@ class ListenTogetherTest {
     fun `jam invite link parsing and formatting`() {
         // CODE_LENGTH is 6
         val url = JamInviteLink.url("ABC123")
-        assertEquals("${JamInviteLink.ORIGIN}/invite/ABC123", url)
+        assertEquals("${JamInviteLink.ORIGIN}/join/ABC123", url)
 
         val parsed = JamInviteLink.parse(url)
         assertEquals("ABC123", parsed)
 
         // Case insensitivity
-        val lowerUrl = "${JamInviteLink.ORIGIN}/invite/abc123"
+        val lowerUrl = "${JamInviteLink.ORIGIN}/join/abc123"
         assertEquals("ABC123", JamInviteLink.parse(lowerUrl))
+
+        // Legacy /invite/ url compatibility
+        assertEquals("ABC123", JamInviteLink.parse("https://yz-music-party.onrender.com/invite/ABC123"))
 
         // Invalid urls
         assertNull(JamInviteLink.parse("https://google.com"))

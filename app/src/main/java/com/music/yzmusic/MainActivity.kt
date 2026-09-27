@@ -113,6 +113,7 @@ import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.durationMillis
 import com.music.yzmusic.data.scrobbling.LastFM
 import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.LibrarySort
 import com.music.yzmusic.data.settings.SongSort
 import com.music.yzmusic.data.settings.ThemeMode
 import com.music.yzmusic.ui.screens.AccountAndScrobblingScreen
@@ -121,6 +122,7 @@ import com.music.yzmusic.ui.screens.ExploreScreen
 import com.music.yzmusic.ui.screens.HistoryScreen
 import com.music.yzmusic.ui.screens.ListenTogetherScreen
 import com.music.yzmusic.ui.screens.LiquidGlassScreen
+import com.music.yzmusic.ui.screens.PartyServerEditor
 import com.music.yzmusic.ui.screens.SettingsScreen
 import com.music.yzmusic.ui.screens.SourcesScreen
 import com.music.yzmusic.ui.screens.SpotifyCanvasAuthScreen
@@ -184,6 +186,7 @@ import com.music.yzmusic.ui.screens.HomeScreen
 import com.music.yzmusic.ui.screens.LibraryGridPage
 import com.music.yzmusic.ui.screens.LibraryScreen
 import com.music.yzmusic.ui.screens.SearchScreen
+import com.music.yzmusic.ui.search.RecentSearchAction
 import com.music.yzmusic.ui.replay.ReplayScreen
 import com.music.yzmusic.ui.replay.cards
 import com.music.yzmusic.ui.replay.ReplayShareSheet
@@ -366,13 +369,23 @@ private fun YZMusicApp(
     var showEqualizer by remember { mutableStateOf(false) }
     var showListenTogether by remember { mutableStateOf(false) }
     var songSortMenuOpen by remember { mutableStateOf(false) }
+    var librarySortMenuOpen by remember { mutableStateOf(false) }
 
-    val pendingInvite by JamInviteLink.pending.collectAsStateWithLifecycle()
+    // Parsed, not just the code: an invite can name the server that hosts the
+    // party, and the screen needs both halves of it to ask before pulling a
+    // live device over to somebody else's address.
+    val pendingInvite by JamInviteLink.pendingInvite.collectAsStateWithLifecycle()
     LaunchedEffect(pendingInvite) {
         if (pendingInvite != null) {
             showListenTogether = true
         }
     }
+
+    // Hosted here rather than on the Listen Together page for the same reason
+    // the addon editor is: the card underneath is a haze effect reading the
+    // app's own backdrop layer, and its scrim covers the window. See
+    // [PartyServerEditor].
+    var partyServerEditorOpen by remember { mutableStateOf(false) }
     
     // Hosted here rather than inside SourcesScreen so its scrim covers the tab
     // bar and mini player, like every other alert in the app.
@@ -429,8 +442,12 @@ private fun YZMusicApp(
     var browseActions by remember { mutableStateOf<BrowseTarget?>(null) }
     val autoplay by AppSettings.autoplay.collectAsStateWithLifecycle()
     val listenBrainzToken by AppSettings.listenBrainzToken.collectAsStateWithLifecycle()
-    // Incremented each time the search tab is re-tapped while already selected,
-    // which SearchScreen uses as a signal to focus the input field.
+    // Bumped when the search tab is entered, and again when it is re-tapped
+    // while already there; SearchScreen uses the change to focus the input
+    // field and raise the keyboard. Zeroed on the way out so that arriving
+    // always moves it — and deliberately not saved across a process restart,
+    // where taking the keyboard away from wherever the user has landed would
+    // be the wrong answer.
     var searchFocusTrigger by remember { mutableIntStateOf(0) }
 
     // The player fills the screen with dark artwork whichever theme is on, so
@@ -463,7 +480,7 @@ private fun YZMusicApp(
         }
     }
     val query by viewModel.query.collectAsStateWithLifecycle()
-    val results by viewModel.results.collectAsStateWithLifecycle()
+    val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()
     val libraryState by viewModel.library.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
@@ -473,6 +490,12 @@ private fun YZMusicApp(
     val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
     val lyricsSource by viewModel.lyricsSource.collectAsStateWithLifecycle()
     val lyricsChecked by viewModel.lyricsChecked.collectAsStateWithLifecycle()
+    val displayRows by viewModel.displayRows.collectAsStateWithLifecycle()
+    val lyricsDisplayMode by viewModel.lyricsDisplayMode.collectAsStateWithLifecycle()
+    val availableLyricsModes by viewModel.availableLyricsModes.collectAsStateWithLifecycle()
+    val lyricsOffsetMs by AppSettings.lyricsOffsetMs.collectAsStateWithLifecycle()
+    val lyricsTranslation by viewModel.lyricsTranslation.collectAsStateWithLifecycle()
+    val lyricsRomanization by viewModel.lyricsRomanization.collectAsStateWithLifecycle()
     val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
     val searchSuggestions by viewModel.suggestions.collectAsStateWithLifecycle()
     val searchLoadingMore by viewModel.searchLoadingMore.collectAsStateWithLifecycle()
@@ -1413,6 +1436,17 @@ private fun YZMusicApp(
             lyrics = lyrics,
             lyricsSource = lyricsSource,
             lyricsUnavailable = lyricsChecked && lyrics.isNullOrEmpty(),
+            displayRows = displayRows,
+            lyricsDisplayMode = lyricsDisplayMode,
+            availableLyricsModes = availableLyricsModes,
+            onLyricsLayerToggle = viewModel::toggleLyricsSubLayer,
+            lyricsOffsetMs = lyricsOffsetMs.toLong(),
+            lyricsTranslation = lyricsTranslation,
+            lyricsRomanization = lyricsRomanization,
+            // The engine only has something to offer once there are words to
+            // translate, so the button appears with them rather than before.
+            canTranslateLyrics = !lyrics.isNullOrEmpty(),
+            translateLyrics = viewModel::translateLyrics,
             docked = docked,
             onClearQueue = {
                 // Keep what's playing; drop everything queued after it.
@@ -1446,6 +1480,7 @@ private fun YZMusicApp(
                 !showReplay,
         ) { viewModel.closeDetail() }
         BackHandler(enabled = songSortMenuOpen) { songSortMenuOpen = false }
+        BackHandler(enabled = librarySortMenuOpen) { librarySortMenuOpen = false }
         BackHandler(enabled = showEqualizer) { showEqualizer = false }
         BackHandler(enabled = showListenTogether) { showListenTogether = false }
         BackHandler(enabled = showAccountScrobbling) {
@@ -1477,6 +1512,7 @@ private fun YZMusicApp(
         BackHandler(enabled = showListenBrainzLogin) { showListenBrainzLogin = false }
         BackHandler(enabled = showLastfmLogin) { showLastfmLogin = false }
         BackHandler(enabled = customModuleAlert) { customModuleAlert = false }
+        BackHandler(enabled = partyServerEditorOpen) { partyServerEditorOpen = false }
         BackHandler(enabled = showHistory) { showHistory = false }
         // Disabled while a detail page is open over the grid: that one's own
         // BackHandler below has to close first, or back would skip past it
@@ -1672,13 +1708,15 @@ private fun YZMusicApp(
                     } else if (key == "listen_together") {
                         ListenTogetherScreen(
                             signedIn = signedIn,
-                            inviteCode = pendingInvite,
-                            onInviteJoined = { JamInviteLink.handled() },
+                            inviteCode = pendingInvite?.code,
+                            inviteServer = pendingInvite?.serverUrl,
+                            onInviteHandled = { JamInviteLink.handled() },
                             onSignIn = {
                                 showListenTogether = false
                                 showLogin = true
                             },
                             contentPadding = listPadding,
+                            onEditServer = { partyServerEditorOpen = true },
                         )
                     } else if (key == "settings") {
                         SettingsScreen(
@@ -1937,7 +1975,8 @@ private fun YZMusicApp(
                             onQueryChange = viewModel::onQueryChange,
                             filter = filter,
                             onFilterChange = viewModel::onFilterChange,
-                            results = results,
+                            results = searchState,
+                            onRetry = viewModel::retrySearch,
                             loadingMore = searchLoadingMore,
                             onLoadMore = viewModel::loadMoreSearchResults,
                             listState = searchListState,
@@ -1947,25 +1986,26 @@ private fun YZMusicApp(
                             // order — play the one tapped and build a station from it.
                             onSongClick = { songs, index ->
                                 songs.getOrNull(index)?.let {
-                                    // Acting on a hit is what makes the query worth
-                                    // keeping — see MainViewModel.recordSearch.
-                                    viewModel.recordSearch()
+                                    // Acting on a hit is what makes it worth keeping —
+                                    // recorded as the track it is, cover and all, so
+                                    // the recents can play it again without a search.
+                                    viewModel.recordTrack(it)
                                     playRadio(it)
                                 }
                             },
                             onSongLongPress = openSongMenu,
                             onSongSwipe = onSongSwipe,
                             onTopResultPlay = { song ->
-                                viewModel.recordSearch()
+                                viewModel.recordTrack(song)
                                 playRadio(song)
                             },
                             onTopResultPlaylist = { song ->
-                                viewModel.recordSearch()
+                                viewModel.recordTrack(song)
                                 viewModel.loadPlaylists()
                                 playlistTarget = song
                             },
                             onBrowseClick = { item ->
-                                viewModel.recordSearch()
+                                viewModel.recordBrowseItem(item)
                                 viewModel.openDetail(
                                     browseId = item.browseId,
                                     title = item.title,
@@ -1993,8 +2033,26 @@ private fun YZMusicApp(
                             typeaheadResults = viewModel.typeaheadResults.collectAsStateWithLifecycle().value,
                             onSubmit = viewModel::submitSearch,
                             onSuggestionClick = viewModel::searchFor,
-                            onHistoryClick = viewModel::searchFor,
-                            onHistoryRemove = viewModel::removeSearch,
+                            onHistoryClick = { entity ->
+                                // A recent is the thing it was found as, not the words
+                                // that found it: a track plays and a page opens from
+                                // what is stored, with no search and no connection
+                                // needed. A typed term has nothing else, and the
+                                // controller has already run it.
+                                when (val action = viewModel.openRecent(entity)) {
+                                    is RecentSearchAction.PlayTrack -> playRadio(action.song)
+                                    is RecentSearchAction.OpenDetail -> viewModel.openDetail(
+                                        browseId = action.item.browseId,
+                                        title = action.item.title,
+                                        subtitle = action.item.subtitle,
+                                        thumbnailUrl = action.item.thumbnailUrl,
+                                        type = action.item.type,
+                                    )
+                                    is RecentSearchAction.RunQuery -> Unit
+                                    null -> Unit
+                                }
+                            },
+                            onHistoryRemove = viewModel::removeRecent,
                             onHistoryClear = viewModel::clearSearchHistory,
                             onTypeaheadLongPress = openSongMenu,
                             contentPadding = listPadding,
@@ -2011,8 +2069,10 @@ private fun YZMusicApp(
                             onShelfItemLongPress = onBrowseLongPress,
                             onNewPlaylist = { creatingPlaylist = true },
                             onShowAll = { shelf -> libraryShowAll = shelf },
-                            replayCard = replayCards.firstOrNull(),
-                            onOpenReplay = { showReplay = true },
+                            replayCards = replayCards,
+                            replayHolder = account?.name.orEmpty(),
+                            replayMemberSince = replay.memberSince,
+                            onOpenReplay = { page -> replayStory = page },
                             onSignIn = { showLogin = true },
                             onRetry = viewModel::loadLibrary,
                             refreshing = MainViewModel.Feed.LIBRARY in refreshing,
@@ -2115,6 +2175,19 @@ private fun YZMusicApp(
                                     )
                                 }
                             }
+                            // Left of the account photo, and only on a Library
+                            // "Show all" grid — the same control the album and
+                            // playlist pages offer, narrowed to the one thing a
+                            // Library card carries: a title.
+                            if (libraryShowAll != null && detail == null) {
+                                IconButton(onClick = { librarySortMenuOpen = true }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.Sort,
+                                        contentDescription = stringResource(R.string.sort_library),
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
                             // Left of the account photo, and only on Library itself:
                             // a history is a record of what was played, which reads
                             // as that tab's business rather than every tab's.
@@ -2166,6 +2239,10 @@ private fun YZMusicApp(
                     } else {
                         if (index != TAB_SEARCH) {
                             searchFocusTrigger = 0
+                        } else {
+                            // Arriving at search is as much a request to search as
+                            // re-tapping it from here: the field takes the keyboard.
+                            searchFocusTrigger++
                         }
                         viewModel.clearDetail()
                         showSettings = false
@@ -2486,12 +2563,29 @@ private fun YZMusicApp(
             val currentSongSort = detail?.browseId?.let { detailSorts[it] } ?: SongSort.DEFAULT
             FrostedSortMenu(
                 hazeState = hazeState,
+                options = SongSort.entries,
                 selected = currentSongSort,
+                label = { it.localizedLabel() },
                 onSelect = { option ->
                     detail?.browseId?.let { AppSettings.setDetailSongSort(it, option) }
                     songSortMenuOpen = false
                 },
                 onDismiss = { songSortMenuOpen = false },
+            )
+        }
+
+        if (librarySortMenuOpen) {
+            val librarySort by AppSettings.librarySort.collectAsStateWithLifecycle()
+            FrostedSortMenu(
+                hazeState = hazeState,
+                options = LibrarySort.entries,
+                selected = librarySort,
+                label = { it.localizedLabel() },
+                onSelect = { option ->
+                    AppSettings.setLibrarySort(option)
+                    librarySortMenuOpen = false
+                },
+                onDismiss = { librarySortMenuOpen = false },
             )
         }
 
@@ -2801,6 +2895,13 @@ private fun YZMusicApp(
                 onDismiss = { customModuleAlert = false },
             )
         }
+
+        if (partyServerEditorOpen) {
+            PartyServerEditor(
+                hazeState = hazeState,
+                onDismiss = { partyServerEditorOpen = false },
+            )
+        }
     }
 }
 
@@ -2943,10 +3044,12 @@ private const val TAB_KEY = "tab:"
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
-private fun FrostedSortMenu(
+private fun <T> FrostedSortMenu(
     hazeState: HazeState,
-    selected: SongSort,
-    onSelect: (SongSort) -> Unit,
+    options: List<T>,
+    selected: T,
+    label: @Composable (T) -> String,
+    onSelect: (T) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
@@ -2979,7 +3082,7 @@ private fun FrostedSortMenu(
                 .clickable(onClick = {}),
         ) {
             Column(Modifier.padding(vertical = 8.dp)) {
-                SongSort.entries.forEach { option ->
+                options.forEach { option ->
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -2989,7 +3092,7 @@ private fun FrostedSortMenu(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            option.localizedLabel(),
+                            label(option),
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.weight(1f),
                         )
@@ -3005,6 +3108,14 @@ private fun FrostedSortMenu(
             }
         }
     }
+}
+
+/** A Library grid's sort names, the same wording the song lists use. */
+@Composable
+private fun LibrarySort.localizedLabel(): String = when (this) {
+    LibrarySort.DEFAULT -> stringResource(R.string.sort_default)
+    LibrarySort.TITLE_ASC -> stringResource(R.string.sort_title_ascending)
+    LibrarySort.TITLE_DESC -> stringResource(R.string.sort_title_descending)
 }
 
 @Composable

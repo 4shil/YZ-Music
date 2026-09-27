@@ -1,34 +1,21 @@
-"""BitChord Listen Together — the party server.
-
-The whole service in one sentence: a party is a six-character code, up to five
-signed-in devices, and one playback state that any of them may change and all of
-them re-derive their playhead from.
-
-The REST half is the paperwork — mint a code, join one, leave. The WebSocket
-half is the feature: it carries controls up, state down, and the clock samples
-that let each device translate the server's timeline into its own. A client that
-only ever polls `GET /api/parties/{code}` would still work and would still be in
-sync, just coarsely; the socket is what makes a pause land on five phones at
-once rather than within a second or so of each other.
-
-Deliberately stateless-per-request and stateful-per-process: see
-[app.party.PartyStore] for why that rules out running more than one instance.
-"""
+"""YZ Music Listen Together — realtime party synchronization server."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import codes, config, protocol
 from .clock import now_ms
+from .db import db
 from .hub import Hub
 from .party import Member, Party, PartyError, PartyStore, Track
 
@@ -41,6 +28,20 @@ hub = Hub()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize DB and recover active parties
+    await db.init()
+    recovered_data = await db.load_all(config.PARTY_MAX_AGE_MS, now_ms())
+    for p_data in recovered_data:
+        code = p_data.get("code")
+        if code and code not in store._parties:
+            p = Party(
+                code=code,
+                max_members=p_data.get("maxMembers", config.MAX_MEMBERS),
+                host_only_control=p_data.get("hostOnlyControl", config.HOST_ONLY_CONTROL_DEFAULT),
+                created_at_ms=p_data.get("createdAtMs", now_ms()),
+            )
+            store._parties[code] = p
+
     ticker = asyncio.create_task(_heartbeat())
     try:
         yield
@@ -51,8 +52,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="BitChord Listen Together",
-    version="1.0.0",
+    title="YZ Music Listen Together",
+    version="1.7.0",
     lifespan=lifespan,
 )
 
@@ -77,8 +78,10 @@ async def _party_error(_: Request, exc: PartyError) -> JSONResponse:
 @app.get("/")
 async def root() -> dict[str, Any]:
     return {
-        "service": "bitchord-listen-together",
+        "service": "yz-music-listen-together",
+        "version": "1.7.0",
         "maxMembers": config.MAX_MEMBERS,
+        "maxUpcomingQueue": config.MAX_UPCOMING_QUEUE,
         "parties": len(store),
         "serverMs": now_ms(),
     }
@@ -92,6 +95,8 @@ async def healthz() -> dict[str, Any]:
 @app.get("/invite/{code}", response_class=HTMLResponse)
 async def invite_landing(code: str) -> str:
     clean_code = codes.clean(code)
+    vercel_url = f"{config.PUBLIC_BASE_URL}/join/{clean_code}"
+    scheme_url = f"yzmusic://party?code={clean_code}"
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -111,10 +116,10 @@ async def invite_landing(code: str) -> str:
 <body>
     <div class="card">
         <h1>🎵 YZ Music Party</h1>
-        <p>You've been invited to Listen Together!</p>
+        <p>You've been invited to Play Together!</p>
         <div class="code">{clean_code}</div>
-        <a class="btn" href="intent://yz-music-party.onrender.com/invite/{clean_code}#Intent;scheme=https;package=com.music.yzmusic;end">Open in YZ Music</a>
-        <a class="btn btn-sub" href="https://github.com/4shil/YZ-Music/releases/latest">Download YZ Music APK</a>
+        <a class="btn" href="{scheme_url}">Open in YZ Music</a>
+        <a class="btn btn-sub" href="{vercel_url}">Join on Web</a>
     </div>
 </body>
 </html>"""
@@ -122,15 +127,6 @@ async def invite_landing(code: str) -> str:
 
 @app.get("/api/time")
 async def server_time() -> dict[str, Any]:
-    """One reading of the server clock, for a client that has no socket yet.
-
-    The client wants the round trip as much as the number: with `t0` and `t1`
-    taken either side of this call, the offset is `serverMs - (t0 + t1) / 2` and
-    the error is bounded by half the round trip. Repeating it and keeping the
-    sample with the smallest round trip is the same trick NTP uses, and is
-    enough to put two phones on the same millisecond-ish timeline over mobile
-    data. The socket's own ping/pong does exactly this, continuously.
-    """
     return {"serverMs": now_ms()}
 
 
@@ -147,36 +143,58 @@ async def _authenticated(
     return party, party.authenticate(token)
 
 
+@app.get("/api/parties/{code}/preview")
+async def party_preview(code: str) -> dict[str, Any]:
+    party = store.find(code)
+    if party is None:
+        raise PartyError(404, "no_such_party", "No party with that code.")
+    return party.to_preview()
+
+
 @app.post("/api/parties", status_code=201)
 async def create_party(body: protocol.JoinRequest) -> dict[str, Any]:
-    """Mint a code and put the caller in it as host."""
-    party = store.create()
-    member = party.join(body.user_id, body.device_id, body.display_name, body.avatar_url)
-    log.info("party %s created by %s", party.code, member.display_name)
+    max_m = body.max_members or config.MAX_MEMBERS
+    host_only = body.host_only_control if body.host_only_control is not None else config.HOST_ONLY_CONTROL_DEFAULT
+    party = store.create(max_members=max_m, host_only_control=host_only)
+    member = party.join(
+        user_id=body.user_id,
+        device_id=body.device_id,
+        display_name=body.display_name,
+        avatar_url=body.avatar_url,
+        max_members=max_m,
+        host_only_control=host_only,
+        autoplay_enabled=body.autoplay_enabled,
+    )
+    asyncio.create_task(db.save_party(party.code, party.to_wire(), party.touched_at_ms))
     return _membership_payload(party, member)
 
 
-@app.post("/api/parties/{code}/join")
+@app.post("/api/parties/{code}/join", status_code=200)
 async def join_party(code: str, body: protocol.JoinRequest) -> dict[str, Any]:
-    normalised = codes.normalise(code)
-    if not codes.is_valid(normalised):
-        raise PartyError(400, "bad_code", "A party code is six letters or digits.")
-    party = store.get(normalised)
-    member = party.join(body.user_id, body.device_id, body.display_name, body.avatar_url)
-    log.info("party %s joined by %s (%d/%d)", party.code, member.display_name,
-             party.occupied_slots(), config.MAX_MEMBERS)
-    # Everyone already in the party learns about the arrival now, rather than at
-    # the next heartbeat — the member list is the one part of this feature that
-    # is visible before any music plays.
-    await hub.broadcast(party.code, _members_frame(party))
+    party = store.get(code)
+    member = party.join(
+        user_id=body.user_id,
+        device_id=body.device_id,
+        display_name=body.display_name,
+        avatar_url=body.avatar_url,
+    )
+    asyncio.create_task(db.save_party(party.code, party.to_wire(), party.touched_at_ms))
+    await hub.broadcast(party.code, _members_frame(party), skip=member.member_id)
     return _membership_payload(party, member)
 
 
 @app.get("/api/parties/{code}")
-async def read_party(auth: tuple[Party, Member] = Depends(_authenticated)) -> dict[str, Any]:
-    party, member = auth
-    member.last_seen_ms = now_ms()
+async def get_party(auth: tuple[Party, Member] = Depends(_authenticated)) -> dict[str, Any]:
+    party, _ = auth
     return party.to_wire()
+
+
+@app.get("/api/parties/{code}/activity")
+async def get_party_activity(code: str) -> list[dict[str, Any]]:
+    party = store.find(code)
+    if party is None:
+        raise PartyError(404, "no_such_party", "No party with that code.")
+    return party.activities
 
 
 @app.post("/api/parties/{code}/leave", status_code=200)
@@ -187,8 +205,10 @@ async def leave_party(auth: tuple[Party, Member] = Depends(_authenticated)) -> d
     if not party.members:
         store.drop(party.code)
         await hub.drop_party(party.code)
+        asyncio.create_task(db.delete_party(party.code))
     else:
         await hub.broadcast(party.code, _members_frame(party))
+        asyncio.create_task(db.save_party(party.code, party.to_wire(), party.touched_at_ms))
     return {"ok": True}
 
 
@@ -196,18 +216,34 @@ async def leave_party(auth: tuple[Party, Member] = Depends(_authenticated)) -> d
 
 
 @app.websocket("/ws/parties/{code}")
-async def party_socket(socket: WebSocket, code: str, token: str = "") -> None:
-    await socket.accept()
+async def party_socket(
+    socket: WebSocket,
+    code: str,
+    token: str = Query(default=""),
+) -> None:
+    # 1. Resolve token from Authorization header or ?token= query parameter
+    auth_header = socket.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        resolved_token = auth_header[7:].strip()
+    else:
+        resolved_token = token.strip()
 
     party = store.find(code)
     if party is None:
         await _reject(socket, 4404, "no_such_party", "No party with that code.")
         return
+
     try:
-        member = party.authenticate(token)
+        member = party.authenticate(resolved_token)
     except PartyError as exc:
         await _reject(socket, 4401, exc.code, exc.message)
         return
+
+    # 2. Handshake accepted only after authentication passes
+    await socket.accept()
+
+    wants_activity = socket.query_params.get("activity") == "true" or "activity" in socket.headers.get("x-features", "")
+    member.wants_activity = wants_activity
 
     await hub.attach(party.code, member.member_id, socket)
     party.mark_connected(member, True)
@@ -221,19 +257,26 @@ async def party_socket(socket: WebSocket, code: str, token: str = "") -> None:
 
     try:
         while True:
-            frame = await socket.receive_json()
+            raw = await socket.receive_text()
+            if len(raw) > config.MAX_FRAME_BYTES:
+                await _reply(party, member, {
+                    "type": protocol.ERROR,
+                    "error": "frame_too_large",
+                    "message": "WebSocket frame exceeded size limit.",
+                })
+                continue
+
+            frame = json.loads(raw)
             await _handle_frame(party, member, frame)
     except WebSocketDisconnect:
         pass
-    except Exception as exc:  # noqa: BLE001 — a malformed frame kills one socket, not the party
+    except Exception as exc:  # noqa: BLE001
         log.info("socket error in %s: %s", party.code, exc)
     finally:
         await hub.detach(party.code, member.member_id, socket)
-        # Still a member, just not currently holding a socket: the grace period
-        # in [Party.expired_members] is what turns this into an actual
-        # departure, so a tunnel or a screen-off does not empty the room.
         party.mark_connected(member, False)
         await hub.broadcast(party.code, _members_frame(party))
+        asyncio.create_task(db.save_party(party.code, party.to_wire(), party.touched_at_ms))
 
 
 async def _handle_frame(party: Party, member: Member, frame: Any) -> None:
@@ -242,10 +285,16 @@ async def _handle_frame(party: Party, member: Member, frame: Any) -> None:
     kind = frame.get("type")
     member.last_seen_ms = now_ms()
 
+    # Frame budget check for all frames
+    if not party.spend_frame_budget(member):
+        await _reply(party, member, {
+            "type": protocol.ERROR,
+            "error": "rate_limited",
+            "message": "Too many frames sent. Slow down.",
+        })
+        return
+
     if kind == protocol.PING:
-        # Echoed back unread. The client's own send timestamp is what lets it
-        # pair the reply with the request and halve the round trip; the server
-        # has no use for it and no business interpreting it.
         await _reply(party, member, {
             "type": protocol.PONG,
             "clientMs": frame.get("clientMs"),
@@ -262,10 +311,6 @@ async def _handle_frame(party: Party, member: Member, frame: Any) -> None:
         return
 
     if kind == protocol.REPORT:
-        # A device saying where it actually is. Nothing is done with it beyond
-        # keeping the membership alive and making drift visible in the log —
-        # the server's state is the truth, not an average of what devices
-        # report, or a straggler on a bad connection would drag the party to it.
         reported = _as_int(frame.get("positionMs"))
         if reported is not None and party.playback.is_playing:
             drift = reported - party.playback.position_at(now_ms())
@@ -281,48 +326,76 @@ async def _handle_frame(party: Party, member: Member, frame: Any) -> None:
                 "message": "Too many controls at once.",
             })
             return
-        queue_before = party.playback.queue_seq
-        if _apply_control(party, member, frame):
-            party.touch()
-            # The queue first, so that nobody is holding a state frame that
-            # points at an index in a list they have not been given yet.
-            if party.playback.queue_seq != queue_before:
-                await hub.broadcast(party.code, _queue_frame(party))
-            # To everyone, the sender included. The device that pressed pause
-            # re-anchors off the same frame as the rest, so nobody is running on
-            # a locally predicted state that the server never confirmed.
-            await hub.broadcast(party.code, _state_frame(party))
-        else:
+
+        action = frame.get("action")
+        # Check permissions
+        if action in protocol.CONTROL_ACTIONS and not party.may_control(member):
             await _reply(party, member, {
                 "type": protocol.ERROR,
-                "error": "bad_control",
-                "message": f"Unsupported control: {frame.get('action')!r}",
+                "error": "host_only",
+                "message": "Only the host can control the music in this party.",
             })
+            return
+
+        queue_before = party.playback.queue_seq
+        success, err_code, err_msg, activity_info = _apply_control(party, member, frame)
+
+        if not success:
+            await _reply(party, member, {
+                "type": protocol.ERROR,
+                "error": err_code or "bad_control",
+                "message": err_msg or f"Unsupported control: {action!r}",
+            })
+            return
+
+        party.touch()
+
+        # Broadcast queue update if queue was modified
+        if party.playback.queue_seq != queue_before:
+            await hub.broadcast(party.code, _queue_frame(party))
+
+        # Broadcast state frame to everyone
+        await hub.broadcast(party.code, _state_frame(party))
+
+        # Broadcast activity if recorded
+        if activity_info:
+            act_frame = party.record_activity(
+                action=activity_info["action"],
+                by_name=member.display_name,
+                detail=activity_info["detail"],
+            )
+            for m in party.members.values():
+                if getattr(m, "wants_activity", False):
+                    await hub.send(party.code, m.member_id, act_frame)
+
+        asyncio.create_task(db.save_party(party.code, party.to_wire(), party.touched_at_ms))
 
 
-def _apply_control(party: Party, member: Member, frame: dict[str, Any]) -> bool:
-    """Any member may send any of these. There is no host privilege here.
-
-    "Anyone can control the music" is a product decision, and this function is
-    all of its enforcement: the member is identified so the state can say who
-    moved it, and then not consulted about whether they were allowed to.
-    """
+def _apply_control(
+    party: Party,
+    member: Member,
+    frame: dict[str, Any],
+) -> tuple[bool, str, str, dict[str, str] | None]:
+    """Applies control mutation. Returns (success, err_code, err_msg, activity_info)."""
     action = frame.get("action")
     playback = party.playback
     who = member.member_id
 
     if action == protocol.ACTION_PLAY:
         playback.play(who, _as_int(frame.get("positionMs")))
-        return True
+        return True, "", "", {"action": action, "detail": "Started playback"}
+
     if action == protocol.ACTION_PAUSE:
         playback.pause(who, _as_int(frame.get("positionMs")))
-        return True
+        return True, "", "", {"action": action, "detail": "Paused playback"}
+
     if action == protocol.ACTION_SEEK:
         position = _as_int(frame.get("positionMs"))
         if position is None:
-            return False
+            return False, "invalid_position", "Seek position required.", None
         playback.seek(who, position)
-        return True
+        return True, "", "", {"action": action, "detail": "Changed the playback position"}
+
     if action == protocol.ACTION_SET_TRACK:
         track = Track.from_wire(frame.get("track"))
         playback.set_track(
@@ -333,21 +406,115 @@ def _apply_control(party: Party, member: Member, frame: dict[str, Any]) -> bool:
             queue_index=_as_int(frame.get("queueIndex")),
             member_name=member.display_name,
         )
-        return True
+        title = track.title if track and track.title else "track"
+        return True, "", "", {"action": action, "detail": f"Changed the song to '{title}'"}
+
     if action == protocol.ACTION_SET_QUEUE:
         raw = frame.get("queue")
         if not isinstance(raw, list):
-            return False
+            return False, "invalid_queue", "Queue must be a list.", None
         queue = [track for track in (Track.from_wire(item) for item in raw) if track is not None]
         playback.set_queue(who, queue, _as_int(frame.get("queueIndex")) if frame.get("queueIndex") is not None else -1)
-        return True
+        return True, "", "", {"action": action, "detail": f"Replaced the queue with {len(queue)} songs"}
+
+    if action == protocol.ACTION_QUEUE_ADD:
+        raw_tracks = frame.get("tracks")
+        raw_track = frame.get("track")
+        to_add: list[Track] = []
+        if isinstance(raw_tracks, list):
+            to_add = [t for t in (Track.from_wire(item) for item in raw_tracks) if t is not None]
+        elif isinstance(raw_track, dict):
+            t = Track.from_wire(raw_track)
+            if t:
+                to_add = [t]
+
+        play_next = bool(frame.get("playNext", False))
+        ok, code, msg = playback.add_upcoming(who, to_add, play_next=play_next, member_name=member.display_name)
+        if not ok:
+            return False, code, msg, None
+
+        first_title = to_add[0].title if to_add and to_add[0].title else "song"
+        detail = f"Added '{first_title}' to queue" if len(to_add) == 1 else f"Added {len(to_add)} songs to queue"
+        return True, "", "", {"action": action, "detail": detail}
+
+    if action == protocol.ACTION_QUEUE_REMOVE:
+        vid = str(frame.get("videoId") or "")
+        idx = _as_int(frame.get("index"))
+        if not playback.remove_upcoming(who, video_id=vid if vid else None, index=idx):
+            return False, "not_found", "Track is not in the upcoming queue.", None
+        return True, "", "", {"action": action, "detail": "Removed a song from the queue"}
+
+    if action == protocol.ACTION_QUEUE_CLEAR:
+        if not playback.clear_upcoming(who):
+            return False, "no_upcoming", "No upcoming songs to clear.", None
+        return True, "", "", {"action": action, "detail": "Cleared upcoming queue"}
+
+    if action == protocol.ACTION_QUEUE_MOVE:
+        from_idx = _as_int(frame.get("fromIndex"))
+        to_idx = _as_int(frame.get("toIndex"))
+        vid = str(frame.get("videoId") or "")
+        if from_idx is None or to_idx is None:
+            return False, "missing_indices", "fromIndex and toIndex required.", None
+        if not playback.move_upcoming(who, from_idx, to_idx, video_id=vid if vid else None):
+            return False, "invalid_move", "Invalid queue move indices.", None
+        return True, "", "", {"action": action, "detail": "Reordered the upcoming queue"}
+
     if action == protocol.ACTION_NEXT:
-        playback.step(who, 1, member.display_name)
-        return True
+        if not playback.step(who, 1, member.display_name):
+            return False, "end_of_queue", "Already at the end of the queue.", None
+        return True, "", "", {"action": action, "detail": "Skipped to next song"}
+
     if action == protocol.ACTION_PREVIOUS:
-        playback.step(who, -1, member.display_name)
-        return True
-    return False
+        if not playback.step(who, -1, member.display_name):
+            return False, "start_of_queue", "Already at the beginning of the queue.", None
+        return True, "", "", {"action": action, "detail": "Went back to previous song"}
+
+    if action == protocol.ACTION_SET_MAX_MEMBERS:
+        max_m = _as_int(frame.get("maxMembers"))
+        if max_m is None:
+            return False, "invalid_capacity", "maxMembers required.", None
+        try:
+            party.set_max_members(member, max_m)
+            asyncio.create_task(hub.broadcast(party.code, _members_frame(party)))
+            return True, "", "", {"action": action, "detail": f"Changed party size to {max_m}"}
+        except PartyError as exc:
+            return False, exc.code, exc.message, None
+
+    if action == protocol.ACTION_SET_AUTOPLAY:
+        enabled = bool(frame.get("enabled", False))
+        try:
+            party.set_autoplay(member, enabled)
+            return True, "", "", {"action": action, "detail": f"Set AutoPlay to {enabled}"}
+        except PartyError as exc:
+            return False, exc.code, exc.message, None
+
+    if action == protocol.ACTION_SET_HOST_ONLY_CONTROL:
+        enabled = bool(frame.get("enabled", False))
+        try:
+            party.set_host_only_control(member, enabled)
+            asyncio.create_task(hub.broadcast(party.code, _members_frame(party)))
+            return True, "", "", {"action": action, "detail": f"Set host-only controls to {enabled}"}
+        except PartyError as exc:
+            return False, exc.code, exc.message, None
+
+    if action == protocol.ACTION_KICK:
+        target_id = str(frame.get("memberId") or "")
+        if not member.is_host:
+            return False, "host_only", "Only the host can kick listeners.", None
+        if not target_id or target_id == member.member_id:
+            return False, "invalid_member", "Choose another listener to remove.", None
+        removed = party.remove(target_id)
+        if removed is None:
+            return False, "not_found", "Listener not found in this party.", None
+        asyncio.create_task(hub.send(party.code, target_id, {
+            "type": protocol.BYE,
+            "reason": "kicked",
+            "message": "The host removed you from this party.",
+        }))
+        asyncio.create_task(hub.broadcast(party.code, _members_frame(party)))
+        return True, "", "", {"action": action, "detail": f"Removed {removed.display_name} from the party"}
+
+    return False, "bad_control", f"Unsupported control: {action!r}", None
 
 
 # -------------------------------------------------------------- shared ----
@@ -356,9 +523,6 @@ def _apply_control(party: Party, member: Member, frame: dict[str, Any]) -> bool:
 def _membership_payload(party: Party, member: Member) -> dict[str, Any]:
     return {
         "code": party.code,
-        # The one time this is ever sent. It is the device's key to the party
-        # for as long as the membership lasts, so it lives in the client's own
-        # storage and goes back as a bearer header or a socket query parameter.
         "token": member.token,
         "you": member.to_wire(),
         "party": party.to_wire(),
@@ -367,15 +531,14 @@ def _membership_payload(party: Party, member: Member) -> dict[str, Any]:
 
 
 def _state_frame(party: Party) -> dict[str, Any]:
-    now = now_ms()
-    return {"type": protocol.STATE, "playback": party.playback.to_wire(now), "serverMs": now}
+    return {
+        "type": protocol.STATE,
+        "playback": party.playback.to_wire(now_ms()),
+        "serverMs": now_ms(),
+    }
 
 
 def _queue_frame(party: Party) -> dict[str, Any]:
-    """Sent when the queue changes, and when a client says its copy is stale.
-
-    Never on the heartbeat — that is the whole point of it being its own frame.
-    """
     return {
         "type": protocol.QUEUE,
         "queue": party.playback.queue_to_wire(),
@@ -387,51 +550,40 @@ def _members_frame(party: Party) -> dict[str, Any]:
     return {
         "type": protocol.MEMBERS,
         "members": [m.to_wire() for m in sorted(party.members.values(), key=lambda m: m.joined_at_ms)],
-        "maxMembers": config.MAX_MEMBERS,
+        "maxMembers": party.max_members,
+        "hostOnlyControl": party.host_only_control,
         "serverMs": now_ms(),
     }
 
 
-async def _reply(party: Party, member: Member, payload: dict[str, Any]) -> None:
-    await hub.send(party.code, member.member_id, payload)
-
-
 async def _reject(socket: WebSocket, close_code: int, error: str, message: str) -> None:
     with contextlib.suppress(Exception):
+        await socket.accept()
         await socket.send_json({"type": protocol.ERROR, "error": error, "message": message})
         await socket.close(code=close_code)
 
 
+async def _reply(party: Party, member: Member, frame: dict[str, Any]) -> None:
+    await hub.send(party.code, member.member_id, frame)
+
+
 def _as_int(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 async def _heartbeat() -> None:
-    """Re-state the truth on a timer, and sweep what has gone quiet.
-
-    The unprompted re-broadcast is the backstop for everything the protocol
-    cannot notice: a frame that never arrived, a device whose clock offset has
-    wandered, a phone that came back from doze believing it is still where it
-    was. None of those announce themselves, so correctness cannot depend on
-    anybody asking — every few seconds each party is simply told again where it
-    is, and each device re-derives its playhead from that.
-    """
-    interval = max(1.0, config.STATE_HEARTBEAT_MS / 1000.0)
+    interval_s = max(1.0, config.STATE_HEARTBEAT_MS / 1000.0)
     while True:
-        await asyncio.sleep(interval)
-        try:
-            now = now_ms()
-            for party in store.all():
-                if hub.members_online(party.code):
-                    await hub.broadcast(party.code, _state_frame(party))
-            for party in store.sweep(now):
-                await hub.broadcast(party.code, _members_frame(party))
-            # Sockets whose party the sweep has just deleted. Left attached they
-            # would sit open forever receiving nothing, which on a phone is a
-            # radio kept awake for a party that no longer exists.
-            for code in hub.active_codes() - {p.code for p in store.all()}:
-                await hub.drop_party(code)
-        except Exception as exc:  # noqa: BLE001 — the ticker must outlive any one bad pass
-            log.warning("heartbeat pass failed: %s", exc)
+        await asyncio.sleep(interval_s)
+        now = now_ms()
+        for party in store.all():
+            if hub.has_connections(party.code):
+                await hub.broadcast(party.code, _state_frame(party))
+        changed = store.sweep(now)
+        for party in changed:
+            await hub.broadcast(party.code, _members_frame(party))
+            asyncio.create_task(db.save_party(party.code, party.to_wire(), party.touched_at_ms))

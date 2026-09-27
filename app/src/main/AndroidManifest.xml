@@ -176,6 +176,26 @@
               Listen Together party invites: links clicked in chat apps or
               on the web open directly into MainActivity to join the jam.
             -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="yz-music.vercel.app" />
+                <data android:pathPrefix="/join" />
+                <data android:pathPrefix="/invite" />
+            </intent-filter>
+
+            <!-- Custom scheme: yzmusic://party/<CODE> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="yzmusic" />
+                <data android:host="party" />
+            </intent-filter>
+
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

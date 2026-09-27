@@ -1,7 +1,11 @@
 package com.music.yzmusic
 
+import com.music.yzmusic.data.model.HomeShelf
+import com.music.yzmusic.data.model.ShelfItem
 import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.data.settings.SongSort
+import com.music.yzmusic.data.settings.LibrarySort
+import com.music.yzmusic.ui.screens.sortedForLibrary
 import com.music.yzmusic.ui.screens.sortedForDetail
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -70,5 +74,47 @@ class LibrarySortingTest {
         }
 
         assertTrue("Sorting 10,000 items twice should complete in under 500ms, took $elapsedMs ms", elapsedMs < 500)
+    }
+
+    private val sampleShelf = HomeShelf(
+        title = "On Device",
+        items = listOf(
+            ShelfItem(title = "Zebra", browseId = "z"),
+            ShelfItem(title = "apple", browseId = "a"),
+            ShelfItem(title = "Banana", browseId = "b"),
+            ShelfItem(title = "cherry", browseId = "c"),
+        ),
+    )
+
+    @Test
+    fun `library default sort preserves YouTube Music's own order`() {
+        val sorted = sampleShelf.sortedForLibrary(LibrarySort.DEFAULT)
+        assertEquals(listOf("z", "a", "b", "c"), sorted.items.map { it.browseId })
+    }
+
+    @Test
+    fun `library title asc sorts card titles case-insensitively`() {
+        val sorted = sampleShelf.sortedForLibrary(LibrarySort.TITLE_ASC)
+        assertEquals(listOf("a", "b", "c", "z"), sorted.items.map { it.browseId })
+    }
+
+    @Test
+    fun `library title desc is the exact reverse of title asc`() {
+        val asc = sampleShelf.sortedForLibrary(LibrarySort.TITLE_ASC).items.map { it.browseId }
+        val desc = sampleShelf.sortedForLibrary(LibrarySort.TITLE_DESC).items.map { it.browseId }
+        assertEquals(asc.reversed(), desc)
+    }
+
+    @Test
+    fun `library sort keeps the shelf's own title and every card that was on it`() {
+        val sorted = sampleShelf.sortedForLibrary(LibrarySort.TITLE_DESC)
+        assertEquals("On Device", sorted.title)
+        assertEquals(4, sorted.items.size)
+    }
+
+    @Test
+    fun `library sort of an empty shelf stays empty`() {
+        val empty = HomeShelf(title = "Playlists", items = emptyList())
+        assertTrue(LibrarySort.entries.all { empty.sortedForLibrary(it).items.isEmpty() })
     }
 }

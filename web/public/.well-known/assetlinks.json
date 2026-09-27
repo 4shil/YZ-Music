@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.music.yzmusic",
+      "sha256_cert_fingerprints": [
+        "14:6D:E9:44:EA:B0:5A:97:10:49:10:16:1F:AF:1B:0C:D3:78:FC:D9:2A:EF:DD:01:8B:05:72:40:14:A0:2E:CA"
+      ]
+    }
+  }
+]

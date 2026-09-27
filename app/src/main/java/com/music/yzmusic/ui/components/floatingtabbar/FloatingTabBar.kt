@@ -179,6 +179,7 @@ fun FloatingTabBar(
     tabBarContentModifier: @Composable () -> Modifier = DefaultTabBarContentModifier,
     inlineAccessory: (@Composable SharedTransitionScope.(Modifier, AnimatedVisibilityScope) -> Unit)? = null,
     expandedAccessory: (@Composable SharedTransitionScope.(Modifier, AnimatedVisibilityScope) -> Unit)? = null,
+    inlineModifier: Modifier = Modifier,
     colors: FloatingTabBarColors = FloatingTabBarDefaults.colors(),
     shapes: FloatingTabBarShapes = FloatingTabBarDefaults.shapes(),
     sizes: FloatingTabBarSizes = FloatingTabBarDefaults.sizes(),
@@ -208,7 +209,8 @@ fun FloatingTabBar(
                     sizes = sizes,
                     elevations = elevations,
                     tabBarContentModifier = tabBarContentModifier,
-                    animatedVisibilityScope = this@AnimatedContent
+                    animatedVisibilityScope = this@AnimatedContent,
+                    modifier = inlineModifier,
                 )
             } else {
                 ExpandedBar(
@@ -389,7 +391,8 @@ private fun SharedTransitionScope.InlineBar(
     sizes: FloatingTabBarSizes,
     elevations: FloatingTabBarElevations,
     tabBarContentModifier: @Composable () -> Modifier,
-    animatedVisibilityScope: AnimatedVisibilityScope
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    modifier: Modifier = Modifier,
 ) {
     val inlineTab = scope.getInlineTab(selectedTabKey)
     val standaloneTab = scope.standaloneTab
@@ -404,6 +407,7 @@ private fun SharedTransitionScope.InlineBar(
             .fillMaxWidth()
             .then(if (accessory == null) Modifier.wrapContentWidth() else Modifier)
             .height(IntrinsicSize.Max)
+            .then(modifier)
     ) {
         if (hasInlineTab) {
             InlineTab(

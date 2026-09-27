@@ -22,7 +22,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -53,14 +55,18 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import com.music.yzmusic.ui.icons.YZMusicIcons
 import com.music.yzmusic.R
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.music.yzmusic.data.model.CARD_ART_PX
+import com.music.yzmusic.data.model.ROW_ART_PX
 import com.music.yzmusic.data.model.HEADER_ART_PX
 import com.music.yzmusic.data.model.HomeShelf
 import com.music.yzmusic.data.model.ShelfItem
 import com.music.yzmusic.data.model.ShelfType
 import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.artworkAt
+import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.LibraryViewType
 import com.music.yzmusic.ui.components.HERO_CARD_RATIO
 import com.music.yzmusic.ui.components.MessageState
 import com.music.yzmusic.ui.components.PAGE_GUTTER
@@ -70,6 +76,7 @@ import com.music.yzmusic.ui.components.SignInBanner
 import com.music.yzmusic.ui.components.feedMoreSkeleton
 import com.music.yzmusic.ui.components.feedSkeleton
 import com.music.yzmusic.ui.components.heroCardWidth
+import com.music.yzmusic.ui.components.trackColumnWidth
 import com.music.yzmusic.ui.components.thumbnailBorder
 import com.music.yzmusic.ui.player.MeshGradientBackground
 import com.music.yzmusic.ui.player.MeshPalette
@@ -100,6 +107,10 @@ fun HomeScreen(
     loadingMore: Boolean = false,
     onShowAll: ((HomeShelf) -> Unit)? = null,
 ) {
+    // The Recents shelf's own layout, and the only thing in the feed that reads
+    // this flow. The rest of Home is laid out the way it already was.
+    val recentsViewType by AppSettings.homeRecentsViewType.collectAsStateWithLifecycle()
+
     PullToRefresh(
         refreshing = refreshing,
         onRefresh = onRefresh,
@@ -130,7 +141,7 @@ fun HomeScreen(
                     MessageState(state.message, actionLabel = "Retry", onAction = onRetry)
                 }
                 is UiState.Success -> {
-                    itemsIndexedShelves(state.data, onItemClick, onItemLongPress, onShowAll)
+                    itemsIndexedShelves(state.data, onItemClick, onItemLongPress, recentsViewType, onShowAll)
                     if (loadingMore) feedMoreSkeleton()
                 }
             }
@@ -166,6 +177,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     shelves: List<HomeShelf>,
     onItemClick: (ShelfItem) -> Unit,
     onItemLongPress: ((ShelfItem) -> Unit)?,
+    /** Read only by the Recents shelf; see [RecentShelfLayout]. */
+    recentsViewType: LibraryViewType,
     onShowAll: ((HomeShelf) -> Unit)? = null,
 ) {
     shelves.forEachIndexed { index, shelf ->
@@ -175,7 +188,21 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
             } else null
             when {
                 index == 0 && shelf.type == ShelfType.DEFAULT -> {
-                    HeroShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress, onShowAll = showAllAction)
+                    // Recents keeps the lead position it already had, but gets a
+                    // layout the reader picks. Any other lead shelf — a guest
+                    // has no history, so YouTube's own takes the top — is still
+                    // the hero carousel it was.
+                    if (RecentShelfLayout.isRecents(shelf.title)) {
+                        RecentShelf(
+                            shelf = shelf,
+                            viewType = recentsViewType,
+                            onItemClick = onItemClick,
+                            onItemLongPress = onItemLongPress,
+                            onShowAll = showAllAction,
+                        )
+                    } else {
+                        HeroShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress, onShowAll = showAllAction)
+                    }
                 }
                 shelf.type == ShelfType.HERO -> {
                     HeroShelf(shelf = shelf, onItemClick = onItemClick, onItemLongPress = onItemLongPress, onShowAll = showAllAction)
@@ -271,6 +298,206 @@ private fun HeroShelf(
                         modifier = Modifier.width(cardWidth),
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * The Recents shelf in whichever of its two layouts [viewType] names.
+ *
+ * The same tracks in the same order either way: [RecentShelfLayout.columns]
+ * only decides which column a track sits in, so nothing about a play depends
+ * on which layout the reader last left it in.
+ */
+@Composable
+private fun RecentShelf(
+    shelf: HomeShelf,
+    viewType: LibraryViewType,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)? = null,
+    onShowAll: (() -> Unit)? = null,
+) {
+    // Each layout keeps its own scroll state, so a switch starts the new
+    // layout at its beginning. Carrying the old position over would mean
+    // something else by it — index 2 is the third card in a grid and the ninth
+    // track in a list — and sharing one state between two rows is how a
+    // LazyList ends up asked to restore a position it cannot hold.
+    Column(Modifier.padding(bottom = 26.dp)) {
+        RecentSectionHeader(
+            title = shelf.title,
+            subtitle = shelf.subtitle,
+            viewType = viewType,
+            onToggleViewType = { AppSettings.toggleHomeRecentsViewType() },
+            onShowAll = onShowAll,
+        )
+        if (viewType == LibraryViewType.LIST) {
+            // Keyed by the column's own place rather than by what is in it, so
+            // the row Compose is holding on to keeps matching the track under
+            // the reader's finger across a switch.
+            val columns = remember(shelf.items) { RecentShelfLayout.columns(shelf.items) }
+            BoxWithConstraints {
+                val columnWidth = trackColumnWidth(maxWidth)
+                LazyRow(
+                    state = rememberLazyListState(),
+                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    itemsIndexed(columns, key = { index, _ -> "recents-column-$index" }) { _, columnItems ->
+                        Column(
+                            modifier = Modifier.width(columnWidth),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            columnItems.forEach { item ->
+                                RecentTrackRow(
+                                    item = item,
+                                    onClick = { onItemClick(item) },
+                                    onLongPress = onItemLongPress?.let { { it(item) } },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Measured off the row, not the fixed SHELF_CARD_WIDTH the other
+            // shelves use: Recents leads the feed, so its grid is held to the
+            // lead-card proportion and comes out larger than a shelf card.
+            // Same heroCardWidth the hero carousel and the List layout's
+            // siblings measure with, so one answer covers all three.
+            BoxWithConstraints {
+                val cardWidth = heroCardWidth(maxWidth)
+                LazyRow(
+                    state = rememberLazyListState(),
+                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    itemsIndexed(shelf.items, key = { index, _ -> "recents-card-$index" }) { _, item ->
+                        ShelfCard(
+                            item = item,
+                            onClick = { onItemClick(item) },
+                            onLongPress = onItemLongPress?.let { { it(item) } },
+                            modifier = Modifier.width(cardWidth),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The Recents heading, carrying the control that switches its shelf's layout.
+ *
+ * A separate heading rather than a [SectionHeader] with a slot for one: the
+ * toggle only has anything to say about this shelf, and the shared heading is
+ * used by Library and Explore, which have no such shelf to offer.
+ */
+@Composable
+private fun RecentSectionHeader(
+    title: String,
+    subtitle: String,
+    viewType: LibraryViewType,
+    onToggleViewType: () -> Unit,
+    onShowAll: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp)
+            .fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (onShowAll != null) {
+            Text(
+                text = stringResource(R.string.show_all),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(onClick = onShowAll)
+                    .padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
+            )
+        }
+        // The same affordance the Library page's layout toggle uses: the icon
+        // shows the layout a tap switches to, not the one in use.
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onToggleViewType),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (viewType == LibraryViewType.GRID) YZMusicIcons.ListView else YZMusicIcons.GridView,
+                contentDescription = stringResource(
+                    if (viewType == LibraryViewType.GRID) R.string.switch_to_list_view else R.string.switch_to_grid_view
+                ),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** One track in a Recents column. Tap plays it; hold opens its menu. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecentTrackRow(
+    item: ShelfItem,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = item.thumbnailUrl.artworkAt(ROW_ART_PX),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .thumbnailBorder(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (item.subtitle.isNotBlank()) {
+                Text(
+                    text = item.subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

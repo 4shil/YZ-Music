@@ -273,6 +273,8 @@ internal fun AlertAction(
     emphasised: Boolean,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    /** Paints the label in the error colour — for an action that takes things away. */
+    destructive: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -298,7 +300,8 @@ internal fun AlertAction(
                 fontSize = 17.sp,
                 fontWeight = if (emphasised) FontWeight.W600 else FontWeight.W400,
             ),
-            color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.4f),
+            color = (if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                .copy(alpha = if (enabled) 1f else 0.4f),
         )
     }
 }

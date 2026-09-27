@@ -32,6 +32,14 @@ enum class EqualizerMode {
  * addition at the foot — so read backwards it *is* a date order, newest first.
  * DetailScreen.kt holds the sort itself.
  */
+/** Ordering for the cards on a Library "Show all" grid. */
+enum class LibrarySort {
+    /** Whatever order the shelf itself arrived in — YouTube Music's own. */
+    DEFAULT,
+    TITLE_ASC,
+    TITLE_DESC,
+}
+
 enum class SongSort {
     DEFAULT,
     TITLE_ASC,
@@ -362,6 +370,36 @@ object AppSettings {
     /** When enabled, shows lyrics fetching and Genius scraping logs in the lyrics menu/panel. */
     val showLyricsLogs = MutableStateFlow(false)
 
+    /**
+     * How far the lyrics are drawn from the audio, in milliseconds.
+     *
+     * Display only. Half these tracks are late or early against the record —
+     * the beat is sampled by whoever typed the lyric, not measured from the
+     * master — and the reader can see exactly how far without ever moving the
+     * music. Nudging the *player* to fix a lyric would be the wrong way
+     * round: it would desync the audio from the video, drift under a
+     * crossfade, and silently rewrite the seek target so that tapping a line
+     * to hear it would jump somewhere the line is not.
+     */
+    val lyricsOffsetMs = MutableStateFlow(0)
+
+    /**
+     * The language lyric translations are asked for, as a BCP-47 tag.
+     *
+     * Empty means "whatever the reader's device is set to", which is the right
+     * default because it needs no configuration and is right for most people.
+     * It is a choice rather than a derived value so that someone reading lyrics
+     * in a second language — a Japanese song with an English interface, say —
+     * can ask for the language they actually read.
+     */
+    val lyricsTargetLanguage = MutableStateFlow("")
+
+    /** The step the offset buttons move by. Fine enough for most, coarse enough to undo. */
+    const val LYRICS_OFFSET_STEP_MS = 100
+
+    /** Past this the lyric is not late, it is the wrong lyric. */
+    const val LYRICS_OFFSET_LIMIT_MS = 5_000
+
     /** Disk budget for cached audio. [AudioCache][com.music.yzmusic.playback.AudioCache] evicts past it. */
     val audioCacheLimitBytes = MutableStateFlow(DEFAULT_CACHE_LIMIT_BYTES)
 
@@ -472,6 +510,7 @@ object AppSettings {
     val lyricsBlur = MutableStateFlow(true)
     val libraryViewType = MutableStateFlow(LibraryViewType.LIST)
     val downloadedMusicViewType = MutableStateFlow(LibraryViewType.LIST)
+    val homeRecentsViewType = MutableStateFlow(LibraryViewType.LIST)
     val localMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
     val downloadedMusicSort = MutableStateFlow(LocalMusicSort.TITLE_ASC)
     val allowDolbyAtmos = MutableStateFlow(true)
@@ -495,6 +534,7 @@ object AppSettings {
      * [SongSort.DEFAULT].
      */
     val detailSongSorts = MutableStateFlow<Map<String, SongSort>>(emptyMap())
+    val librarySort = MutableStateFlow(LibrarySort.DEFAULT)
 
     /**
      * Whether a download may start on the connection in hand.
@@ -573,6 +613,9 @@ object AppSettings {
         showLyricsLogs.value = prefs.getBoolean(KEY_SHOW_LYRICS_LOGS, false)
         audioCacheLimitBytes.value = prefs.getLong(KEY_CACHE_LIMIT, DEFAULT_CACHE_LIMIT_BYTES)
             .coerceIn(DEFAULT_CACHE_LIMIT_BYTES, MAX_CACHE_LIMIT_BYTES)
+        lyricsOffsetMs.value = prefs.getInt(KEY_LYRICS_OFFSET_MS, 0)
+            .coerceIn(-LYRICS_OFFSET_LIMIT_MS, LYRICS_OFFSET_LIMIT_MS)
+        lyricsTargetLanguage.value = prefs.getString(KEY_LYRICS_TARGET_LANGUAGE, "").orEmpty()
         lastfmEnabled.value = prefs.getBoolean(KEY_LASTFM_ENABLED, false)
         lastfmUsername.value = prefs.getString(KEY_LASTFM_USERNAME, "").orEmpty()
         lastfmSessionKey.value = prefs.getString(KEY_LASTFM_SESSION_KEY, "").orEmpty()
@@ -624,6 +667,10 @@ object AppSettings {
         downloadedMusicViewType.value = runCatching {
             LibraryViewType.valueOf(prefs.getString(KEY_DOWNLOADED_MUSIC_VIEW_TYPE, LibraryViewType.LIST.name) ?: LibraryViewType.LIST.name)
         }.getOrDefault(LibraryViewType.LIST)
+        homeRecentsViewType.value = runCatching {
+            LibraryViewType.valueOf(prefs.getString(KEY_HOME_RECENTS_VIEW_TYPE, LibraryViewType.LIST.name) ?: LibraryViewType.LIST.name)
+        }.getOrDefault(LibraryViewType.LIST)
+        librarySort.value = readLibrarySort()
         localMusicSort.value = readLocalMusicSort(KEY_LOCAL_MUSIC_SORT)
         downloadedMusicSort.value = readLocalMusicSort(KEY_DOWNLOADED_MUSIC_SORT)
         allowDolbyAtmos.value = prefs.getBoolean(KEY_ALLOW_DOLBY_ATMOS, true)
@@ -907,6 +954,28 @@ object AppSettings {
     }
 
     /**
+     * Moves the lyrics by [delta] milliseconds, clamped to
+     * [LYRICS_OFFSET_LIMIT_MS]. The value is persisted, not the player, so it
+     * survives a restart as a drawing offset and nothing else.
+     */
+    fun adjustLyricsOffset(delta: Int) {
+        val next = (lyricsOffsetMs.value + delta)
+            .coerceIn(-LYRICS_OFFSET_LIMIT_MS, LYRICS_OFFSET_LIMIT_MS)
+        lyricsOffsetMs.value = next
+        prefs.edit().putInt(KEY_LYRICS_OFFSET_MS, next).apply()
+    }
+
+    fun resetLyricsOffset() {
+        lyricsOffsetMs.value = 0
+        prefs.edit().putInt(KEY_LYRICS_OFFSET_MS, 0).apply()
+    }
+
+    fun setLyricsTargetLanguage(tag: String) {
+        lyricsTargetLanguage.value = tag
+        prefs.edit().putString(KEY_LYRICS_TARGET_LANGUAGE, tag).apply()
+    }
+
+    /**
      * Puts the source list, its order and [prioritizeSyllableSync] back the
      * way a fresh install finds them. [syncedLyrics] itself is left alone —
      * this is "start over on *which* lyrics", not "turn lyrics off".
@@ -1167,6 +1236,42 @@ object AppSettings {
         }
     }
 
+    fun setHomeRecentsViewType(value: LibraryViewType) {
+        homeRecentsViewType.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_HOME_RECENTS_VIEW_TYPE, value.name).apply()
+        }
+    }
+
+    /**
+     * Swaps the Home screen's Recents shelf to its other layout.
+     *
+     * A toggle rather than a setter the caller reads the pairing off: what the
+     * header offers is always "the other one", and leaving that arithmetic at
+     * the call site is one more place for the icon and the tap to disagree.
+     */
+    fun toggleHomeRecentsViewType() {
+        setHomeRecentsViewType(
+            if (homeRecentsViewType.value == LibraryViewType.LIST) LibraryViewType.GRID else LibraryViewType.LIST
+        )
+    }
+
+    fun setLibrarySort(value: LibrarySort) {
+        librarySort.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_LIBRARY_SORT, value.name).apply()
+        }
+    }
+
+    private fun readLibrarySort(): LibrarySort =
+        if (::prefs.isInitialized) {
+            prefs.getString(KEY_LIBRARY_SORT, null)
+                ?.let { saved -> LibrarySort.entries.firstOrNull { it.name == saved } }
+                ?: LibrarySort.DEFAULT
+        } else {
+            LibrarySort.DEFAULT
+        }
+
     fun setLocalMusicSort(value: LocalMusicSort) {
         localMusicSort.value = value
         if (::prefs.isInitialized) {
@@ -1400,6 +1505,8 @@ object AppSettings {
     private const val KEY_SPEED = "playback_speed"
     private const val KEY_THEME = "theme_mode"
     private const val KEY_ACCENT_COLOR = "accent_color"
+    private const val KEY_LYRICS_OFFSET_MS = "lyrics_offset_ms"
+    private const val KEY_LYRICS_TARGET_LANGUAGE = "lyrics_target_language"
     private const val KEY_AUTOPLAY = "autoplay"
     private const val KEY_NERD_STATS = "show_nerd_stats"
     private const val KEY_CACHE_LIMIT = "audio_cache_limit_bytes"
@@ -1453,6 +1560,8 @@ object AppSettings {
     private const val KEY_SHOW_LYRICS_LOGS = "show_lyrics_logs"
     private const val KEY_LIBRARY_VIEW_TYPE = "library_view_type"
     private const val KEY_DOWNLOADED_MUSIC_VIEW_TYPE = "downloaded_music_view_type"
+    private const val KEY_HOME_RECENTS_VIEW_TYPE = "home_recents_view_type"
+    private const val KEY_LIBRARY_SORT = "library_sort"
     private const val KEY_LOCAL_MUSIC_SORT = "local_music_sort"
     private const val KEY_DOWNLOADED_MUSIC_SORT = "downloaded_music_sort"
     private const val KEY_ALLOW_DOLBY_ATMOS = "allow_dolby_atmos"
