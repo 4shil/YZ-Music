@@ -113,6 +113,7 @@ import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.durationMillis
 import com.music.yzmusic.data.scrobbling.LastFM
 import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.data.settings.LibrarySort
 import com.music.yzmusic.data.settings.SongSort
 import com.music.yzmusic.data.settings.ThemeMode
 import com.music.yzmusic.ui.screens.AccountAndScrobblingScreen
@@ -121,6 +122,7 @@ import com.music.yzmusic.ui.screens.ExploreScreen
 import com.music.yzmusic.ui.screens.HistoryScreen
 import com.music.yzmusic.ui.screens.ListenTogetherScreen
 import com.music.yzmusic.ui.screens.LiquidGlassScreen
+import com.music.yzmusic.ui.screens.PartyServerEditor
 import com.music.yzmusic.ui.screens.SettingsScreen
 import com.music.yzmusic.ui.screens.SourcesScreen
 import com.music.yzmusic.ui.screens.SpotifyCanvasAuthScreen
@@ -367,13 +369,23 @@ private fun YZMusicApp(
     var showEqualizer by remember { mutableStateOf(false) }
     var showListenTogether by remember { mutableStateOf(false) }
     var songSortMenuOpen by remember { mutableStateOf(false) }
+    var librarySortMenuOpen by remember { mutableStateOf(false) }
 
-    val pendingInvite by JamInviteLink.pending.collectAsStateWithLifecycle()
+    // Parsed, not just the code: an invite can name the server that hosts the
+    // party, and the screen needs both halves of it to ask before pulling a
+    // live device over to somebody else's address.
+    val pendingInvite by JamInviteLink.pendingInvite.collectAsStateWithLifecycle()
     LaunchedEffect(pendingInvite) {
         if (pendingInvite != null) {
             showListenTogether = true
         }
     }
+
+    // Hosted here rather than on the Listen Together page for the same reason
+    // the addon editor is: the card underneath is a haze effect reading the
+    // app's own backdrop layer, and its scrim covers the window. See
+    // [PartyServerEditor].
+    var partyServerEditorOpen by remember { mutableStateOf(false) }
     
     // Hosted here rather than inside SourcesScreen so its scrim covers the tab
     // bar and mini player, like every other alert in the app.
@@ -1468,6 +1480,7 @@ private fun YZMusicApp(
                 !showReplay,
         ) { viewModel.closeDetail() }
         BackHandler(enabled = songSortMenuOpen) { songSortMenuOpen = false }
+        BackHandler(enabled = librarySortMenuOpen) { librarySortMenuOpen = false }
         BackHandler(enabled = showEqualizer) { showEqualizer = false }
         BackHandler(enabled = showListenTogether) { showListenTogether = false }
         BackHandler(enabled = showAccountScrobbling) {
@@ -1499,6 +1512,7 @@ private fun YZMusicApp(
         BackHandler(enabled = showListenBrainzLogin) { showListenBrainzLogin = false }
         BackHandler(enabled = showLastfmLogin) { showLastfmLogin = false }
         BackHandler(enabled = customModuleAlert) { customModuleAlert = false }
+        BackHandler(enabled = partyServerEditorOpen) { partyServerEditorOpen = false }
         BackHandler(enabled = showHistory) { showHistory = false }
         // Disabled while a detail page is open over the grid: that one's own
         // BackHandler below has to close first, or back would skip past it
@@ -1694,13 +1708,15 @@ private fun YZMusicApp(
                     } else if (key == "listen_together") {
                         ListenTogetherScreen(
                             signedIn = signedIn,
-                            inviteCode = pendingInvite,
-                            onInviteJoined = { JamInviteLink.handled() },
+                            inviteCode = pendingInvite?.code,
+                            inviteServer = pendingInvite?.serverUrl,
+                            onInviteHandled = { JamInviteLink.handled() },
                             onSignIn = {
                                 showListenTogether = false
                                 showLogin = true
                             },
                             contentPadding = listPadding,
+                            onEditServer = { partyServerEditorOpen = true },
                         )
                     } else if (key == "settings") {
                         SettingsScreen(
@@ -2053,8 +2069,10 @@ private fun YZMusicApp(
                             onShelfItemLongPress = onBrowseLongPress,
                             onNewPlaylist = { creatingPlaylist = true },
                             onShowAll = { shelf -> libraryShowAll = shelf },
-                            replayCard = replayCards.firstOrNull(),
-                            onOpenReplay = { showReplay = true },
+                            replayCards = replayCards,
+                            replayHolder = account?.name.orEmpty(),
+                            replayMemberSince = replay.memberSince,
+                            onOpenReplay = { page -> replayStory = page },
                             onSignIn = { showLogin = true },
                             onRetry = viewModel::loadLibrary,
                             refreshing = MainViewModel.Feed.LIBRARY in refreshing,
@@ -2150,6 +2168,19 @@ private fun YZMusicApp(
                         if (!showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass && !showEqualizer && !showListenTogether) {
                             if (detail != null) {
                                 IconButton(onClick = { songSortMenuOpen = true }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.Sort,
+                                        contentDescription = stringResource(R.string.sort_library),
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                            // Left of the account photo, and only on a Library
+                            // "Show all" grid — the same control the album and
+                            // playlist pages offer, narrowed to the one thing a
+                            // Library card carries: a title.
+                            if (libraryShowAll != null && detail == null) {
+                                IconButton(onClick = { librarySortMenuOpen = true }) {
                                     Icon(
                                         Icons.AutoMirrored.Rounded.Sort,
                                         contentDescription = stringResource(R.string.sort_library),
@@ -2532,12 +2563,29 @@ private fun YZMusicApp(
             val currentSongSort = detail?.browseId?.let { detailSorts[it] } ?: SongSort.DEFAULT
             FrostedSortMenu(
                 hazeState = hazeState,
+                options = SongSort.entries,
                 selected = currentSongSort,
+                label = { it.localizedLabel() },
                 onSelect = { option ->
                     detail?.browseId?.let { AppSettings.setDetailSongSort(it, option) }
                     songSortMenuOpen = false
                 },
                 onDismiss = { songSortMenuOpen = false },
+            )
+        }
+
+        if (librarySortMenuOpen) {
+            val librarySort by AppSettings.librarySort.collectAsStateWithLifecycle()
+            FrostedSortMenu(
+                hazeState = hazeState,
+                options = LibrarySort.entries,
+                selected = librarySort,
+                label = { it.localizedLabel() },
+                onSelect = { option ->
+                    AppSettings.setLibrarySort(option)
+                    librarySortMenuOpen = false
+                },
+                onDismiss = { librarySortMenuOpen = false },
             )
         }
 
@@ -2847,6 +2895,13 @@ private fun YZMusicApp(
                 onDismiss = { customModuleAlert = false },
             )
         }
+
+        if (partyServerEditorOpen) {
+            PartyServerEditor(
+                hazeState = hazeState,
+                onDismiss = { partyServerEditorOpen = false },
+            )
+        }
     }
 }
 
@@ -2989,10 +3044,12 @@ private const val TAB_KEY = "tab:"
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
-private fun FrostedSortMenu(
+private fun <T> FrostedSortMenu(
     hazeState: HazeState,
-    selected: SongSort,
-    onSelect: (SongSort) -> Unit,
+    options: List<T>,
+    selected: T,
+    label: @Composable (T) -> String,
+    onSelect: (T) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
@@ -3025,7 +3082,7 @@ private fun FrostedSortMenu(
                 .clickable(onClick = {}),
         ) {
             Column(Modifier.padding(vertical = 8.dp)) {
-                SongSort.entries.forEach { option ->
+                options.forEach { option ->
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -3035,7 +3092,7 @@ private fun FrostedSortMenu(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            option.localizedLabel(),
+                            label(option),
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.weight(1f),
                         )
@@ -3051,6 +3108,14 @@ private fun FrostedSortMenu(
             }
         }
     }
+}
+
+/** A Library grid's sort names, the same wording the song lists use. */
+@Composable
+private fun LibrarySort.localizedLabel(): String = when (this) {
+    LibrarySort.DEFAULT -> stringResource(R.string.sort_default)
+    LibrarySort.TITLE_ASC -> stringResource(R.string.sort_title_ascending)
+    LibrarySort.TITLE_DESC -> stringResource(R.string.sort_title_descending)
 }
 
 @Composable

@@ -6,6 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
+import java.util.Locale
 
 /**
  * One piece of singable text waiting to be transformed, and the place it came
@@ -67,12 +68,12 @@ internal fun interface ScriptTransliterator {
  * Android's own transliteration, via ICU's `Any-Latin` transform.
  *
  * Why this and not BitChord's engine, which posts the lyric to Google's
- * `translate_a/single` with `tl=Latn`: that path needs a network, a service
- * that can be down, and permission to send a song's words to a third party.
- * YZ's translation already runs on device and the app states that no lyric text
- * is sent to an application server; a remote romanizer would be the one part of
- * the feature that quietly broke that. ICU is in the platform at API 24 and this
- * app's floor is 26, so it costs nothing and works on a plane.
+ * `translate_a/single` with `tl=Latn`: romanization is a rendering of words the
+ * reader already has, not a reading of them in another language. It needs no
+ * language model, so a round trip would buy nothing and cost a connection the
+ * reader may not have — this still works on a plane while translation, which
+ * genuinely does need a service, does not. ICU is in the platform at API 24 and
+ * this app's floor is 26, so it is free besides.
  *
  * ## It is not the engine for Japanese, and that is deliberate
  *
@@ -341,7 +342,12 @@ private fun unchangedWeight(slots: List<LyricTextSlot>, converted: List<String>)
 
 private fun comparable(text: String): String = text
     .trim()
-    .lowercase()
+    // ROOT, not the default locale, so the answer does not depend on the
+    // device's language. Under a Turkish locale the default maps I to a
+    // dotless ı, which makes a genuine transliteration of "I" into "ı" read
+    // as *no* change — the transliterator did its job, and the guard above
+    // would throw the result away and call the script unsupported.
+    .lowercase(Locale.ROOT)
     .replace(Regex("\\s+"), " ")
 
 /** A small LRU. The keys are content digests, so entries expire with their song. */

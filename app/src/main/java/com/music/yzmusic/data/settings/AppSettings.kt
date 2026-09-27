@@ -32,6 +32,14 @@ enum class EqualizerMode {
  * addition at the foot — so read backwards it *is* a date order, newest first.
  * DetailScreen.kt holds the sort itself.
  */
+/** Ordering for the cards on a Library "Show all" grid. */
+enum class LibrarySort {
+    /** Whatever order the shelf itself arrived in — YouTube Music's own. */
+    DEFAULT,
+    TITLE_ASC,
+    TITLE_DESC,
+}
+
 enum class SongSort {
     DEFAULT,
     TITLE_ASC,
@@ -526,6 +534,7 @@ object AppSettings {
      * [SongSort.DEFAULT].
      */
     val detailSongSorts = MutableStateFlow<Map<String, SongSort>>(emptyMap())
+    val librarySort = MutableStateFlow(LibrarySort.DEFAULT)
 
     /**
      * Whether a download may start on the connection in hand.
@@ -661,6 +670,7 @@ object AppSettings {
         homeRecentsViewType.value = runCatching {
             LibraryViewType.valueOf(prefs.getString(KEY_HOME_RECENTS_VIEW_TYPE, LibraryViewType.LIST.name) ?: LibraryViewType.LIST.name)
         }.getOrDefault(LibraryViewType.LIST)
+        librarySort.value = readLibrarySort()
         localMusicSort.value = readLocalMusicSort(KEY_LOCAL_MUSIC_SORT)
         downloadedMusicSort.value = readLocalMusicSort(KEY_DOWNLOADED_MUSIC_SORT)
         allowDolbyAtmos.value = prefs.getBoolean(KEY_ALLOW_DOLBY_ATMOS, true)
@@ -1246,6 +1256,22 @@ object AppSettings {
         )
     }
 
+    fun setLibrarySort(value: LibrarySort) {
+        librarySort.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_LIBRARY_SORT, value.name).apply()
+        }
+    }
+
+    private fun readLibrarySort(): LibrarySort =
+        if (::prefs.isInitialized) {
+            prefs.getString(KEY_LIBRARY_SORT, null)
+                ?.let { saved -> LibrarySort.entries.firstOrNull { it.name == saved } }
+                ?: LibrarySort.DEFAULT
+        } else {
+            LibrarySort.DEFAULT
+        }
+
     fun setLocalMusicSort(value: LocalMusicSort) {
         localMusicSort.value = value
         if (::prefs.isInitialized) {
@@ -1535,6 +1561,7 @@ object AppSettings {
     private const val KEY_LIBRARY_VIEW_TYPE = "library_view_type"
     private const val KEY_DOWNLOADED_MUSIC_VIEW_TYPE = "downloaded_music_view_type"
     private const val KEY_HOME_RECENTS_VIEW_TYPE = "home_recents_view_type"
+    private const val KEY_LIBRARY_SORT = "library_sort"
     private const val KEY_LOCAL_MUSIC_SORT = "local_music_sort"
     private const val KEY_DOWNLOADED_MUSIC_SORT = "downloaded_music_sort"
     private const val KEY_ALLOW_DOLBY_ATMOS = "allow_dolby_atmos"

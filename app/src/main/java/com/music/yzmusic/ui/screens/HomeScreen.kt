@@ -360,17 +360,26 @@ private fun RecentShelf(
                 }
             }
         } else {
-            LazyRow(
-                state = rememberLazyListState(),
-                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                itemsIndexed(shelf.items, key = { index, _ -> "recents-card-$index" }) { _, item ->
-                    ShelfCard(
-                        item = item,
-                        onClick = { onItemClick(item) },
-                        onLongPress = onItemLongPress?.let { { it(item) } },
-                    )
+            // Measured off the row, not the fixed SHELF_CARD_WIDTH the other
+            // shelves use: Recents leads the feed, so its grid is held to the
+            // lead-card proportion and comes out larger than a shelf card.
+            // Same heroCardWidth the hero carousel and the List layout's
+            // siblings measure with, so one answer covers all three.
+            BoxWithConstraints {
+                val cardWidth = heroCardWidth(maxWidth)
+                LazyRow(
+                    state = rememberLazyListState(),
+                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    itemsIndexed(shelf.items, key = { index, _ -> "recents-card-$index" }) { _, item ->
+                        ShelfCard(
+                            item = item,
+                            onClick = { onItemClick(item) },
+                            onLongPress = onItemLongPress?.let { { it(item) } },
+                            modifier = Modifier.width(cardWidth),
+                        )
+                    }
                 }
             }
         }

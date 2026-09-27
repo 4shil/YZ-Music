@@ -24,10 +24,6 @@ object JamInviteLink {
     private const val CUSTOM_SCHEME = "yzmusic"
     private const val CUSTOM_HOST = "party"
 
-    private val _pending = MutableStateFlow<String?>(null)
-    /** Code of pending invite. Retained as String? for binary/source compatibility with UI. */
-    val pending: StateFlow<String?> = _pending.asStateFlow()
-
     private val _pendingInvite = MutableStateFlow<ParsedJamInvite?>(null)
     val pendingInvite: StateFlow<ParsedJamInvite?> = _pendingInvite.asStateFlow()
 
@@ -41,13 +37,11 @@ object JamInviteLink {
 
         val invite = parseInvite(intent.dataString) ?: return false
         intent.putExtra(EXTRA_CONSUMED, true)
-        _pending.value = invite.code
         _pendingInvite.value = invite
         return true
     }
 
     fun handled() {
-        _pending.value = null
         _pendingInvite.value = null
     }
 

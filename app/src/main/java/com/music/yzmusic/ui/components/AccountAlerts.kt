@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.yzmusic.data.settings.AppSettings
+import com.music.yzmusic.R
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
@@ -418,4 +420,198 @@ private fun AlertTextField(
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+/**
+ * One field of a server editor: the value, its change handler, the hint, and
+ * how the keyboard behaves on it. The last field always gets Done-to-save
+ * while the rest advance with Next, which is what every editor below already
+ * did by hand.
+ */
+data class EditorField(
+    val value: String,
+    val onChange: (String) -> Unit,
+    val placeholder: String,
+    val keyboardType: KeyboardType = KeyboardType.Text,
+    val isPassword: Boolean = false,
+)
+
+/**
+ * The shape every server editor in this app shares: a centered title, the
+ * last test result in place of the description, the fields, then Test above
+ * Save above Cancel — plus an optional destructive row between Save and
+ * Cancel for an entry that can also be removed.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+fun ServerEditorAlert(
+    hazeState: HazeState,
+    title: String,
+    description: String,
+    fields: List<EditorField>,
+    /** What the last test said, or null before one has been run. */
+    status: String?,
+    statusIsGood: Boolean,
+    testing: Boolean,
+    /** Whether there is enough typed in to be worth testing or saving. */
+    canSubmit: Boolean,
+    onTest: () -> Unit,
+    onSave: () -> Unit,
+    removeLabel: String? = null,
+    /** Offered only when there is something stored to remove. */
+    onRemove: (() -> Unit)? = null,
+    onDismiss: () -> Unit,
+) {
+    AlertScaffold(hazeState = hazeState, onDismiss = { if (!testing) onDismiss() }) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 19.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = status ?: description,
+                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 17.sp),
+                color = when {
+                    status == null -> MaterialTheme.colorScheme.onSurface
+                    statusIsGood -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.error
+                },
+                textAlign = TextAlign.Center,
+            )
+            fields.forEachIndexed { index, field ->
+                if (index > 0) Spacer(Modifier.height(8.dp))
+                PillTextField(
+                    value = field.value,
+                    onValueChange = field.onChange,
+                    placeholder = field.placeholder,
+                    enabled = !testing,
+                    isPassword = field.isPassword,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = field.keyboardType,
+                        imeAction = if (index == fields.lastIndex) ImeAction.Done else ImeAction.Next,
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { if (canSubmit && !testing) onSave() },
+                    ),
+                )
+            }
+        }
+        AlertRule()
+        // Above Save rather than beside it: an address is worth checking before
+        // it is stored, and a row of three cramped buttons is what the Material
+        // dialog did badly.
+        AlertAction(
+            label = if (testing) stringResource(R.string.testing) else stringResource(R.string.test),
+            emphasised = false,
+            onClick = onTest,
+            enabled = canSubmit && !testing,
+        )
+        AlertRule()
+        AlertAction(
+            label = stringResource(R.string.save),
+            emphasised = true,
+            onClick = onSave,
+            enabled = canSubmit && !testing,
+        )
+        if (onRemove != null && removeLabel != null) {
+            AlertRule()
+            AlertAction(
+                label = removeLabel,
+                emphasised = false,
+                destructive = true,
+                onClick = onRemove,
+                enabled = !testing,
+            )
+        }
+        AlertRule()
+        AlertAction(
+            label = stringResource(R.string.cancel),
+            emphasised = false,
+            onClick = onDismiss,
+            enabled = !testing,
+        )
+    }
+}
+
+/**
+ * Add or edit a source that has an address — the addon editor, and the party
+ * server's own address card, which is the same one field and the same four
+ * stacked actions.
+ *
+ * The same frosted card every other alert in this app uses, rather than the
+ * Material `AlertDialog` this replaced. That one put a filled `OutlinedTextField`
+ * and a row of cramped text buttons in the middle of a screen where nothing
+ * else looks like that, and it read as a stock widget dropped into somebody
+ * else's design.
+ *
+ * There is deliberately no name field: an addon states its own name in its
+ * manifest, so asking the user to invent one is asking for information the
+ * addon is about to supply anyway — and a blank field would leave the row
+ * showing a bare hostname next to a perfectly good published name.
+ *
+ * [status] is the one thing here that no other alert in the file needs:
+ * testing an address has *three* outcomes rather than the usual two, and "it
+ * answered, but not with something this app can use" is the one worth reading
+ * — so a result replaces the description in place, coloured by [statusIsGood],
+ * the way [LastfmLoginAlert] surfaces a failed sign-in.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+fun AddonEditorAlert(
+    hazeState: HazeState,
+    title: String,
+    description: String,
+    urlValue: String,
+    onUrlChange: (String) -> Unit,
+    urlPlaceholder: String,
+    /** What the last test said, or null before one has been run. */
+    status: String?,
+    statusIsGood: Boolean,
+    testing: Boolean,
+    /** Whether there is enough typed in to be worth testing or saving. */
+    canSubmit: Boolean,
+    onTest: () -> Unit,
+    onSave: () -> Unit,
+    /** Offered only for a source already stored — there is nothing to remove otherwise. */
+    onRemove: (() -> Unit)?,
+    /**
+     * What [onRemove] is called, for the callers that are not removing a source.
+     *
+     * The party server's address wears this same card — one field, an address
+     * to test, four stacked actions — and "Remove source" would be the one line
+     * on it still talking about addons.
+     */
+    removeLabel: String? = null,
+    onDismiss: () -> Unit,
+) {
+    ServerEditorAlert(
+        hazeState = hazeState,
+        title = title,
+        description = description,
+        fields = listOf(
+            EditorField(
+                value = urlValue,
+                onChange = onUrlChange,
+                placeholder = urlPlaceholder,
+                keyboardType = KeyboardType.Uri,
+            ),
+        ),
+        status = status,
+        statusIsGood = statusIsGood,
+        testing = testing,
+        canSubmit = canSubmit,
+        onTest = onTest,
+        onSave = onSave,
+        removeLabel = removeLabel ?: stringResource(R.string.remove_source),
+        onRemove = onRemove,
+        onDismiss = onDismiss,
+    )
 }

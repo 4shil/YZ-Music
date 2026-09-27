@@ -243,6 +243,13 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     implementation("androidx.palette:palette-ktx:1.0.0")
 
+    // ---- QR encoding, for the party invite ----
+    // `core` only: it is the encoder, and the app never decodes. The
+    // `zxing-android-embedded` / `android-core` artifacts are for scanning,
+    // which the invite sheet does not do — it draws the code and lets the
+    // other phone's camera read it.
+    implementation("com.google.zxing:core:3.5.3")
+
     // ---- Frosted glass / progressive blur (Telegram-style bars) ----
     implementation("dev.chrisbanes.haze:haze:1.3.1")
     implementation("dev.chrisbanes.haze:haze-materials:1.3.1")
@@ -294,10 +301,9 @@ dependencies {
     // the app for a saving that does not matter in a self-distributed APK.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
 
-    // ---- Lyrics Translation: on-device ML Kit ----
-    implementation("com.google.mlkit:language-id:17.0.6")
-    implementation("com.google.mlkit:translate:17.0.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    // Lyrics translation goes to Google's web endpoint, not an on-device
+    // model, so ML Kit is no longer a dependency at all. Romanization never
+    // used it: that is ICU4J in JapaneseTransliterator.kt.
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

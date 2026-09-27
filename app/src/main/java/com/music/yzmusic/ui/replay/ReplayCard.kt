@@ -2,6 +2,8 @@
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.music.yzmusic.R
+import com.music.yzmusic.ui.components.PAGE_GUTTER
 import com.music.yzmusic.ui.player.MeshGradientBackground
 import com.music.yzmusic.ui.player.rememberArtworkColors
 import java.util.Locale
@@ -303,9 +308,52 @@ private val EmbossShadow = Shadow(
 )
 
 private val CardShape = RoundedCornerShape(20.dp)
+/**
+ * The wallet of cards, wherever it is drawn.
+ *
+ * It lives on the Library page rather than on Replay's own — see the Library
+ * screen's note on where each half of Replay belongs — but it is defined
+ * alongside the page it summarises, because the two have to keep saying the
+ * same thing.
+ */
+@Composable
+fun ReplayCardRow(
+    cards: List<ReplayHeroCard>,
+    holder: String,
+    memberSince: String?,
+    onCardClick: (ReplayStoryPage) -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(horizontal = PAGE_GUTTER + 10.dp),
+) {
+    LazyRow(
+        modifier = modifier,
+        contentPadding = contentPadding,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(cards, key = { it.label }) { card ->
+            ReplayCreditCard(
+                label = card.label,
+                value = card.value,
+                detail = card.detail,
+                artworkUrl = card.artworkUrl,
+                holder = holder,
+                memberSince = memberSince,
+                onClick = { onCardClick(card.page) },
+                modifier = Modifier.width(300.dp),
+            )
+        }
+    }
+}
 
-/** Whose card it is when there is no signed-in account to name. */
-const val DEFAULT_HOLDER = "BITCHORD LISTENER"
+/**
+ * Whose card it is when there is no signed-in account to name.
+ *
+ * Was "BITCHORD LISTENER", left over from the port this file came from. It was
+ * harmless while the only card on screen was behind a Replay tap, and would
+ * have put another app's name across the top of the Library page now that the
+ * row is drawn there.
+ */
+const val DEFAULT_HOLDER = "YZ MUSIC LISTENER"
 
 /** 85.6mm × 54mm, which is what makes the shape read as a card. */
 private const val CARD_RATIO = 1.586f

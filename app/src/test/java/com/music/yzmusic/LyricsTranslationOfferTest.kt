@@ -2,7 +2,6 @@ package com.music.yzmusic
 
 import com.music.yzmusic.data.lyrics.LyricLine
 import com.music.yzmusic.data.lyrics.LyricsTranslationState
-import com.music.yzmusic.data.lyrics.LyricsTranslationStage
 import com.music.yzmusic.ui.MainViewModel.LyricsDisplayMode
 import com.music.yzmusic.ui.offersTranslationDisc
 import org.junit.Assert.assertFalse
@@ -81,14 +80,12 @@ class LyricsTranslationOfferTest {
     }
 
     @Test
-    fun `a download in flight keeps the disc`() {
+    fun `a request in flight keeps the disc`() {
         // The whole point of the rule: pressing the button must not take the
         // button away, or the reader is left at a spinner with no control left
         // to cancel it or to retry if it stalls.
-        listOf(LyricsTranslationStage.DOWNLOADING_MODEL, LyricsTranslationStage.TRANSLATING)
-            .forEach { stage ->
-                assertTrue(stage.name, offers(state = LyricsTranslationState.Loading("en", stage)))
-            }
+        assertTrue(offers(state = LyricsTranslationState.Loading("en")))
+        assertTrue(offers(state = LyricsTranslationState.Loading("es")))
     }
 
     @Test
@@ -133,7 +130,7 @@ class LyricsTranslationRetryTest {
         val dead = job { }
         assertTrue(
             shouldStartTranslation(
-                LyricsTranslationState.Loading("en", LyricsTranslationStage.DOWNLOADING_MODEL),
+                LyricsTranslationState.Loading("en"),
                 dead,
                 "en",
             ),
@@ -146,7 +143,7 @@ class LyricsTranslationRetryTest {
         val running = job { gate.await() }
         assertFalse(
             shouldStartTranslation(
-                LyricsTranslationState.Loading("en", LyricsTranslationStage.DOWNLOADING_MODEL),
+                LyricsTranslationState.Loading("en"),
                 running,
                 "en",
             ),
@@ -160,7 +157,7 @@ class LyricsTranslationRetryTest {
         val running = job { gate.await() }
         assertTrue(
             shouldStartTranslation(
-                LyricsTranslationState.Loading("es", LyricsTranslationStage.DOWNLOADING_MODEL),
+                LyricsTranslationState.Loading("es"),
                 running,
                 "en",
             ),
@@ -188,7 +185,7 @@ class LyricsTranslationRetryTest {
     fun `no job at all means nothing to wait for`() {
         assertTrue(
             shouldStartTranslation(
-                LyricsTranslationState.Loading("en", LyricsTranslationStage.TRANSLATING),
+                LyricsTranslationState.Loading("en"),
                 null,
                 "en",
             ),

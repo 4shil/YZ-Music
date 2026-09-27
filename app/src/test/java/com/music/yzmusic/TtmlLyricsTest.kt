@@ -1,4 +1,5 @@
 package com.music.yzmusic
+import com.music.yzmusic.data.lyrics.LyricAlignment
 import com.music.yzmusic.data.lyrics.LyricsLog
 import com.music.yzmusic.data.lyrics.TtmlLyrics
 import org.junit.Assert.assertEquals
@@ -49,6 +50,14 @@ class TtmlLyricsTest {
             append("""<span ttm:role="x-roman" begin="${0.0}" end="99.0">$it</span>""")
         }
         append("</p>")
+    }
+
+    /** A paragraph sung by a named voice, so the duet lane has something to alternate. */
+    private fun voiced(begin: String, end: String, text: String, agent: String) = buildString {
+        append("""<p begin="$begin" end="$end" ttm:agent="$agent">""")
+        append("""<span begin="$begin" end="$end" ttm:role="x-ala">""")
+        text.split(' ').forEach { append("""<span>$it </span>""") }
+        append("</span></p>")
     }
 
     /** Deliberately wrong per-word stamps — the alternates must not inherit these. */
@@ -241,5 +250,87 @@ class TtmlLyricsTest {
         TtmlLyrics.parseDocument(ttml(paragraph("1.0", "5.0", "Just the two of us")))
 
         assertNull(LyricsLog.entries.value.firstOrNull { it.message.contains("x-roman") })
+    }
+
+    @Test
+    fun `two voices alternate sides so the duet reads as a conversation`() {
+        val document = TtmlLyrics.parseDocument(
+            ttml(
+                voiced("1.0", "2.0", "Are you coming", "v1") +
+                    voiced("2.0", "3.0", "Already here", "v2") +
+                    voiced("3.0", "4.0", "Then let us go", "v1") +
+                    voiced("4.0", "5.0", "Lead the way", "v2")
+            )
+        )
+
+        // The same voice twice in a row is the same turn, not two of them, so
+        // only the changes of voice move the side. Both singers land on both
+        // sides over four lines.
+        assertEquals(
+            listOf(LyricAlignment.Start, LyricAlignment.End, LyricAlignment.Start, LyricAlignment.End),
+            document.lines.map { it.alignment },
+        )
+    }
+
+    @Test
+    fun `a chorus sung by everyone stays left and does not take a turn`() {
+        val document = TtmlLyrics.parseDocument(
+            ttml(
+                voiced("1.0", "2.0", "Sing it with me", "v1") +
+                    // Apple's reserved group id: it carries no declaration of
+                    // its own, and it belongs to neither side.
+                    voiced("2.0", "3.0", "We are the ones", "v1000") +
+                    voiced("3.0", "4.0", "Sing it again", "v1") +
+                    voiced("4.0", "5.0", "Sing it louder", "v2")
+            )
+        )
+
+        // The chorus is nobody's turn, so the voice that sings either side of
+        // it is the same voice and nothing moves. v1 keeps the left it opened
+        // on, and the panel only changes side when v2 actually takes over.
+        assertEquals(
+            listOf(LyricAlignment.Start, LyricAlignment.Start, LyricAlignment.Start, LyricAlignment.End),
+            document.lines.map { it.alignment },
+        )
+    }
+
+    /**
+     * A lead line and then nothing but the second singer: the shape that trips
+     * the flip, because the walk starts the opening line on the left and every
+     * line after it on the right.
+     */
+    private fun leadThenDuet(closingChorus: Boolean): String = buildString {
+        append(voiced("1.0", "2.0", "Opening", "v1"))
+        repeat(6) { index ->
+            val at = 2.0 + index
+            append(voiced("$at", "${at + 1.0}", "Answer ${index + 1}", "v2"))
+        }
+        if (closingChorus) append(voiced("8.0", "9.0", "All together", "v1000"))
+    }
+
+    @Test
+    fun `a song that is almost entirely the second singer is flipped, not laid out down the right`() {
+        val document = TtmlLyrics.parseDocument(ttml(leadThenDuet(closingChorus = false)))
+
+        // Six of the seven lines came out on the right. Taken at face value
+        // that is a whole song hugging the right edge, so the walk is turned
+        // around and the opening line joins the other six.
+        assertEquals(LyricAlignment.End, document.lines.first().alignment)
+        assertTrue(document.lines.drop(1).all { it.alignment == LyricAlignment.Start })
+    }
+
+    @Test
+    fun `a closing chorus is enough to stop a near-right song being flipped`() {
+        val document = TtmlLyrics.parseDocument(ttml(leadThenDuet(closingChorus = true)))
+
+        // A group chorus is laid out but never counted as a right-hand line,
+        // so one of them takes six right lines down to six of eight and the
+        // song reads the way it was written: a line on the left, the other
+        // singer all the way through, then everyone at once.
+        val alignments = document.lines.map { it.alignment }
+        assertEquals(LyricAlignment.Start, alignments.first())
+        assertEquals(LyricAlignment.End, alignments[1])
+        assertEquals(LyricAlignment.End, alignments[6])
+        assertEquals(LyricAlignment.Start, alignments.last())
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
@@ -46,6 +47,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,8 +62,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -126,6 +133,70 @@ fun GlassNavBar(
     // Held through a state that is always current instead, which also keeps the
     // handler out of the key.
     val currentOnTabSelected by rememberUpdatedState(onTabSelected)
+    val currentSelectedIndex by rememberUpdatedState(selectedIndex)
+    val density = LocalDensity.current
+    var inlineBarWidth by remember { mutableFloatStateOf(0f) }
+    var lastHapticTab by remember { mutableIntStateOf(selectedIndex) }
+
+    LaunchedEffect(selectedIndex) {
+        lastHapticTab = selectedIndex
+    }
+
+    val compactSwipeModifier = Modifier
+        .onSizeChanged { inlineBarWidth = it.width.toFloat() }
+        .pointerInput(Unit) {
+            var totalDrag = 0f
+            detectHorizontalDragGestures(
+                onDragStart = { totalDrag = 0f },
+                onDragCancel = { },
+                onDragEnd = {
+                    val count = tabs.size
+                    if (count > 0) {
+                        val tabStepPx = if (inlineBarWidth > 0f) {
+                            inlineBarWidth / count
+                        } else {
+                            with(density) { 80.dp.toPx() }
+                        }
+                        if (tabStepPx > 0f) {
+                            val ratio = totalDrag / tabStepPx
+                            val shift = when {
+                                ratio > 0.35f -> max(1, ratio.roundToInt())
+                                ratio < -0.35f -> min(-1, ratio.roundToInt())
+                                else -> 0
+                            }
+                            val newIndex = (currentSelectedIndex + shift).coerceIn(0, tabs.lastIndex)
+                            if (newIndex != currentSelectedIndex) {
+                                currentOnTabSelected(newIndex)
+                            }
+                        }
+                    }
+                    totalDrag = 0f
+                },
+                onHorizontalDrag = { _, delta ->
+                    totalDrag += delta
+                    val count = tabs.size
+                    val tabStepPx = if (inlineBarWidth > 0f && count > 0) {
+                        inlineBarWidth / count
+                    } else {
+                        with(density) { 80.dp.toPx() }
+                    }
+                    val dragOffset = when {
+                        totalDrag > 0 && currentSelectedIndex == tabs.lastIndex -> totalDrag * 0.25f
+                        totalDrag < 0 && currentSelectedIndex == 0 -> totalDrag * 0.25f
+                        else -> totalDrag
+                    }
+                    if (tabStepPx > 0f && count > 0) {
+                        val approxTab = (currentSelectedIndex + dragOffset / tabStepPx)
+                            .coerceIn(0f, tabs.lastIndex.toFloat())
+                            .roundToInt()
+                        if (approxTab != lastHapticTab) {
+                            haptics.play(Haptic.Tick)
+                            lastHapticTab = approxTab
+                        }
+                    }
+                },
+            )
+        }
 
     // Search is the odd one out in the iOS 26 layout: a circle of its own beside
     // the pill rather than a quarter of it. It is the last tab in BitChord's
@@ -144,6 +215,7 @@ fun GlassNavBar(
             .padding(horizontal = PAGE_GUTTER)
             .padding(bottom = 2.dp)
             .fillMaxWidth(),
+        inlineModifier = compactSwipeModifier,
         tabBarContentModifier = glassSurface,
         inlineAccessory = song?.let { current ->
             { accessoryModifier, _ ->

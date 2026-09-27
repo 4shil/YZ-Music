@@ -11,6 +11,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Locale
 
 /**
  * The engine is exercised through a fake transliterator rather than ICU.
@@ -282,4 +283,44 @@ class LyricsRomanizationTest {
             .forEach { pipeline.romanize(it, "en") }
         assertTrue("cache grew to ${cache.size()} entries for a limit of 2", cache.size() <= 2)
     }
+
+    @Test
+    fun `a mixed-script song keeps its Latin capitals when the locale folds them`() =
+        runBlocking {
+            // Under a Turkish locale "I" folds to a dotless ı, so a comparison
+            // done in the default locale can score a line that *was* converted
+            // as unchanged and throw the result away. The song carries a
+            // Cyrillic line so it is worth romanizing at all, and a Latin one
+            // that exercises the fold.
+            val original = Locale.getDefault()
+            try {
+                Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+                val (pipeline, _) = engine(mapOf("И" to "i", "I" to "i"))
+                val result = pipeline.romanize(listOf(line(0, "И"), line(500, "I")), "en")
+
+                assertTrue("expected a romanization, got $result", result is RomanizationResult.Romanized)
+                assertEquals(listOf("i", "i"), (result as RomanizationResult.Romanized).lines.map { it.text })
+            } finally {
+                Locale.setDefault(original)
+            }
+        }
+
+    @Test
+    fun `the same song romanizes the same way whatever the device language is`() =
+        runBlocking {
+            suspend fun run(tag: String): String {
+                val original = Locale.getDefault()
+                try {
+                    Locale.setDefault(Locale.forLanguageTag(tag))
+                    val (pipeline, _) = engine(mapOf("I" to "i", "И" to "i"))
+                    val result = pipeline.romanize(listOf(line(0, "И"), line(500, "I")), "en")
+                    assertTrue("expected a romanization, got $result", result is RomanizationResult.Romanized)
+                    return (result as RomanizationResult.Romanized).lines.joinToString("|") { it.text }
+                } finally {
+                    Locale.setDefault(original)
+                }
+            }
+
+            assertEquals(run("en-US"), run("tr-TR"))
+        }
 }

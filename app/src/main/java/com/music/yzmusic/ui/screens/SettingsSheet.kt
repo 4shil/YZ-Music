@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -116,12 +117,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -135,6 +138,7 @@ import com.music.yzmusic.ui.components.languageDisplayNameRes
 import com.music.yzmusic.ui.components.thumbnailBorder
 import com.music.yzmusic.data.model.Account
 import com.music.yzmusic.BuildConfig
+import com.music.yzmusic.data.lyrics.translationLanguageName
 import com.music.yzmusic.data.scrobbling.LastFM
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.R
@@ -2833,38 +2837,212 @@ private fun AccentColorRow() {
         )
     }
 
-    Row(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = ROW_INSET, end = ROW_INSET, top = 6.dp, bottom = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Label on the left, matching the icon-less SegmentedControl rows above.
-        Text(
-            text = "Accent color",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.weight(1f),
-        )
-        swatches.forEach { argb ->
-            val isSelected = argb == currentArgb
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(Color(argb))
-                    .clickable { AppSettings.setAccentColor(argb) },
-            ) {
-                if (isSelected) {
-                    Icon(
-                        imageVector = Icons.Rounded.Check,
-                        contentDescription = "Selected",
-                        tint = onAccent(Color(argb)),
-                        modifier = Modifier.size(16.dp),
+        val totalWidth = maxWidth
+        val density = LocalDensity.current
+        val textMeasurer = rememberTextMeasurer()
+        val textStyle = MaterialTheme.typography.bodyLarge
+        val labelText = "Accent color"
+
+        val labelWidth = remember(textMeasurer, textStyle, labelText, density) {
+            val result = textMeasurer.measure(
+                text = labelText,
+                style = textStyle,
+                maxLines = 1,
+                softWrap = false,
+            )
+            with(density) { result.size.width.toDp() } + 2.dp
+        }
+
+        val minLabelGap = 12.dp
+        val availableForSwatches = totalWidth - labelWidth - minLabelGap
+
+        when {
+            // Tablets, landscape, or wide displays: 10 swatches in a single horizontal row on the right
+            availableForSwatches >= 280.dp -> {
+                val circleSize = if (availableForSwatches >= 350.dp) 28.dp else 24.dp
+                val spacing = ((availableForSwatches - (circleSize * 10)) / 9).coerceIn(4.dp, 10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = labelText,
+                        style = textStyle,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    SwatchesSingleRow(
+                        swatches = swatches,
+                        currentArgb = currentArgb,
+                        circleSize = circleSize,
+                        spacing = spacing,
                     )
                 }
+            }
+
+            // Standard mobile portrait: 2 rows of 5 swatches on the right, vertically centered with label
+            availableForSwatches >= 130.dp -> {
+                val circleSize = when {
+                    availableForSwatches >= 165.dp -> 26.dp
+                    availableForSwatches >= 140.dp -> 24.dp
+                    else -> 22.dp
+                }
+                val spacing = ((availableForSwatches - (circleSize * 5)) / 4).coerceIn(4.dp, 8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = labelText,
+                        style = textStyle,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    SwatchesTwoRows(
+                        swatches = swatches,
+                        currentArgb = currentArgb,
+                        circleSize = circleSize,
+                        spacing = spacing,
+                        horizontalAlignment = Alignment.End,
+                    )
+                }
+            }
+
+            // Severely constrained width / large accessibility font scales: stack label and swatches
+            else -> {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = labelText,
+                        style = textStyle,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    if (totalWidth >= 280.dp) {
+                        val circleSize = if (totalWidth >= 350.dp) 28.dp else 24.dp
+                        val spacing = ((totalWidth - (circleSize * 10)) / 9).coerceIn(4.dp, 10.dp)
+                        SwatchesSingleRow(
+                            swatches = swatches,
+                            currentArgb = currentArgb,
+                            circleSize = circleSize,
+                            spacing = spacing,
+                        )
+                    } else {
+                        val circleSize = when {
+                            totalWidth >= 160.dp -> 26.dp
+                            totalWidth >= 140.dp -> 24.dp
+                            else -> 22.dp
+                        }
+                        val spacing = ((totalWidth - (circleSize * 5)) / 4).coerceIn(4.dp, 8.dp)
+                        SwatchesTwoRows(
+                            swatches = swatches,
+                            currentArgb = currentArgb,
+                            circleSize = circleSize,
+                            spacing = spacing,
+                            horizontalAlignment = Alignment.Start,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwatchBox(
+    argb: Int,
+    size: Dp,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Color(argb))
+            .clickable(onClick = onClick),
+    ) {
+        if (isSelected) {
+            val iconSize = (size * 16f / 28f).coerceAtLeast(12.dp)
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = "Selected",
+                tint = onAccent(Color(argb)),
+                modifier = Modifier.size(iconSize),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwatchesSingleRow(
+    swatches: List<Int>,
+    currentArgb: Int,
+    circleSize: Dp,
+    spacing: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        swatches.forEach { argb ->
+            SwatchBox(
+                argb = argb,
+                size = circleSize,
+                isSelected = argb == currentArgb,
+                onClick = { AppSettings.setAccentColor(argb) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwatchesTwoRows(
+    swatches: List<Int>,
+    currentArgb: Int,
+    circleSize: Dp,
+    spacing: Dp,
+    modifier: Modifier = Modifier,
+    horizontalAlignment: Alignment.Horizontal = Alignment.End,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(spacing),
+        horizontalAlignment = horizontalAlignment,
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            swatches.take(5).forEach { argb ->
+                SwatchBox(
+                    argb = argb,
+                    size = circleSize,
+                    isSelected = argb == currentArgb,
+                    onClick = { AppSettings.setAccentColor(argb) },
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            swatches.drop(5).forEach { argb ->
+                SwatchBox(
+                    argb = argb,
+                    size = circleSize,
+                    isSelected = argb == currentArgb,
+                    onClick = { AppSettings.setAccentColor(argb) },
+                )
             }
         }
     }
@@ -2944,16 +3122,16 @@ private fun LanguageOption(label: String, checked: Boolean, onClick: () -> Unit)
 }
 
 /**
- * The reader's own name for a language, falling back to the raw tag when the
- * platform has nothing to say — an unrecognised name shows the reader nothing
- * useful, whereas the tag at least is the thing the engine is keyed on.
+ * How to call a language code on screen.
+ *
+ * The endpoint's list reaches past what Android's ICU data carries, so a
+ * handful of codes have no platform name at all and would otherwise sit in the
+ * picker spelled `bho` or `mni-Mtei`. [translationLanguageName] asks the
+ * platform first — so the name arrives in the reader's own language — and
+ * falls back to the English name the table carries.
  */
-private fun languageDisplayName(tag: String): String {
-    val display = runCatching {
-        Locale.forLanguageTag(tag).getDisplayLanguage(Locale.getDefault())
- }.getOrNull()
-    return display?.takeIf { it.isNotBlank() && it != tag } ?: tag
-}
+private fun languageDisplayName(tag: String): String =
+    translationLanguageName(tag, Locale.getDefault())
 
 /** How the chosen language reads in the row, with the device's own wording. */
 private fun lyricsLanguageLabel(tag: String): String = if (tag.isBlank()) {

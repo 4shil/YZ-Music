@@ -15,7 +15,6 @@ import com.music.yzmusic.data.lyrics.LyricLine
 import com.music.yzmusic.data.lyrics.LyricsRepository
 import com.music.yzmusic.data.lyrics.LyricsSource
 import com.music.yzmusic.data.lyrics.LyricsTranslation
-import com.music.yzmusic.data.lyrics.LyricsTranslationStage
 import com.music.yzmusic.data.lyrics.LyricsTranslationState
 import com.music.yzmusic.data.lyrics.LyricsRomanization
 import com.music.yzmusic.data.lyrics.RomanizationResult
@@ -264,9 +263,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * The modes worth offering for the current track.
      *
      * TRANSLATED counts as available when *either* the source shipped one or
-     * the on-device engine has produced one — the first is instant and the
-     * second is what the reader is really waiting for, and both satisfy the
-     * same request.
+     * the engine has produced one — the first is instant and the second is what
+     * the reader is really waiting for, and both satisfy the same request.
      */
     val availableLyricsModes: StateFlow<Set<LyricsDisplayMode>> = combine(
         _lyricsAlternates,
@@ -496,8 +494,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Translates lyrics on device via ML Kit. Bounded to recent songs and
-     * cancels automatically if track changes before completion.
+     * Translates lyrics through Google's web endpoint. Bounded to the current
+     * song and cancels automatically if the track changes before completion.
      */
     fun translateLyrics(targetLanguageTag: String) {
         // Lyrics, not `lyricsFor`: a track change clears the lyrics first, so
@@ -505,38 +503,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // transiently null while the duration gate is waiting. Returning
         // silently on that null made a tap do nothing at all.
         val sourceLines = _lyrics.value?.takeIf { it.isNotEmpty() } ?: return
-        val target = Locale.forLanguageTag(targetLanguageTag).language.ifBlank { targetLanguageTag }
+        // Two forms, because they answer two different questions. On the wire
+        // the tag goes exactly as the reader chose it: zh-CN and zh-TW are the
+        // same language in two scripts, and reducing either to "zh" hands back
+        // Simplified whichever one was asked for. For "do we already have this
+        // one" the base language is the right comparison, because that is the
+        // same question either way round.
+        val target = targetLanguageTag.trim()
+        val targetBase = Locale.forLanguageTag(target).language.ifBlank { target }
 
-        if (!shouldStartTranslation(_lyricsTranslation.value, lyricsTranslationJob, target)) return
+        if (!shouldStartTranslation(_lyricsTranslation.value, lyricsTranslationJob, targetBase)) return
 
         lyricsTranslationJob?.cancel()
         val generation = lyricsTranslationGeneration.incrementAndGet()
         lyricsTranslationJob = viewModelScope.launch {
+            if (generation == lyricsTranslationGeneration.get()) {
+                _lyricsTranslation.value = LyricsTranslationState.Loading(target)
+            }
             val result = try {
                 LyricsTranslation.translate(
+                    context = getApplication(),
                     lines = sourceLines,
                     targetLanguageTag = target,
-                    // The reader's data rule, already applied. A model is a few
-                    // megabytes of the reader's data; asking ML Kit to wait for
-                    // WiFi instead of being told no left the panel spinning on a
-                    // download that was never going to start.
-                    networkAllowsDownload = AppSettings.downloadsAllowedNow,
-                ) { stage ->
-                    if (generation == lyricsTranslationGeneration.get()) {
-                        _lyricsTranslation.value = LyricsTranslationState.Loading(target, stage)
-                    }
-                }
+                    // The reader's data rule, already applied. The words leave
+                    // the device on this request, so a metered connection the
+                    // reader said no to is refused in a millisecond rather than
+                    // used, and the disc stays tappable instead of spinning on
+                    // a request that was never going to be made.
+                    networkAllowed = AppSettings.downloadsAllowedNow,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                // ML Kit and Play Services fail in ways `catch (Exception)`
-                // does not catch — UnsatisfiedLinkError when the optional
-                // module is missing, AssertionError out of the model loader.
-                // Letting those escape is what used to strand the player: the
-                // state kept saying Loading, the job was gone, and every later
-                // tap was refused by the guard above, so the disc showed
-                // "Downloading English…" with no way out of it but changing
-                // song. Nothing below may leave a Loading behind.
+                // Nothing below may leave a Loading behind. A failure that is
+                // not an IOException — an Error out of the TLS stack, say — is
+                // exactly what used to strand the player: the state kept
+                // saying Loading, the job was gone, and every later tap was
+                // refused by the guard above, so the disc showed a spinner with
+                // no way out of it but changing song.
                 Log.w(TAG, "Lyric translation ended unexpectedly", error)
                 LyricsTranslationState.Unavailable(target)
             }
