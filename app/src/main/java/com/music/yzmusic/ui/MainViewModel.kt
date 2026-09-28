@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.music.yzmusic.R
 import com.music.yzmusic.auth.AuthStore
+import com.music.yzmusic.auth.withProfilePhoto
 import com.music.yzmusic.data.AppUpdateChecker
 import com.music.yzmusic.data.LocalMediaRepository
 import com.music.yzmusic.data.LikeState
@@ -1285,8 +1286,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadAccount() {
         viewModelScope.launch {
-            _account.value = YtMusicRepository.account().getOrNull()
+            val loaded = YtMusicRepository.account().getOrNull()
+            _account.value = loaded
+            loaded?.thumbnailUrl?.let { persistAccountPhoto(it) }
         }
+    }
+
+    /**
+     * Persists the freshly fetched account photo for the party layer to read.
+     *
+     * Two models describe the same listener and only one was ever filled.
+     * [Account.thumbnailUrl] is re-fetched on every launch and is what the top
+     * bar draws; [YouTubeProfile.avatar] is the persisted twin the party layer
+     * reads, and nothing ever wrote to it — so it only came back out of its own
+     * blob the way it went in, null. Every member therefore went out with no
+     * avatar and came back drawn as an initial, on every device.
+     *
+     * This is the one place both are live at once. The decision of which
+     * profile to write belongs to the session, so it lives with the session.
+     */
+    private fun persistAccountPhoto(url: String) {
+        val updated = authStore.activeSession?.withProfilePhoto(url) ?: return
+        // The account and profile in use are already selected, and this writes
+        // nothing else; re-selecting would only risk a no-op write.
+        authStore.upsertSession(updated, activate = false)
     }
 
     /**
