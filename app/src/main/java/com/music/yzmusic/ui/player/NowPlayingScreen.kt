@@ -1767,6 +1767,13 @@ fun NowPlayingScreen(
                             // underneath rather than replacing anything, so
                             // turning one on never moves the song or the scroll.
                             rows = displayRows.orEmpty(),
+                            // Null and empty reach the panel as the same empty
+                            // list, so it cannot tell a lookup still in flight
+                            // from a lookup that came back with nothing. That
+                            // answer already exists upstream and is passed with
+                            // the rest: false here means the words have not been
+                            // looked for yet, not that there are none.
+                            unavailable = lyricsUnavailable,
                             trackKey = song.videoId,
                             // The offset shifts what is *drawn*, and a tap on a
                             // line seeks back out through the same correction:
@@ -1896,7 +1903,11 @@ fun NowPlayingScreen(
                         )
                     } else {
                         LyricsLoadingLine(
-                            text = stringResource(com.music.yzmusic.R.string.lyrics),
+                            // One of the pool, picked per track and held. A
+                            // bare "Lyrics" here reads as a label for whatever
+                            // lands underneath it, which is the opposite of
+                            // what this line is for.
+                            text = remember(song.videoId) { LYRICS_LOADING_LINES.random() },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -2272,6 +2283,12 @@ fun NowPlayingScreen(
 private fun LyricsPanel(
     rows: List<LyricDisplayRow>,
     trackKey: Any,
+    /**
+     * True only once a lookup has come back and found nothing. False while one
+     * is still out, which is the whole difference between the shimmer and the
+     * empty state — [rows] cannot express it, being empty either way.
+     */
+    unavailable: Boolean = false,
     positionMs: Long,
     isPlaying: Boolean,
     onSeekToLine: (Long) -> Unit,
@@ -2544,15 +2561,24 @@ private fun LyricsPanel(
     )
 
     if (lines.isEmpty()) {
-        Box(
-            modifier = modifier.then(swipeDownModifier),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "No lyrics for this track",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White.copy(alpha = 0.6f),
-            )
+        // Two different facts arrive here as the same empty list: a lookup
+        // still out, and a lookup that came back with nothing. Only the second
+        // is a statement about this track, so only the second gets to say so —
+        // the first gets a shimmer, or the panel tells the reader the song has
+        // no words for as long as it takes to find out that it does.
+        if (unavailable) {
+            Box(
+                modifier = modifier.then(swipeDownModifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "No lyrics for this track",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White.copy(alpha = 0.6f),
+                )
+            }
+        } else {
+            LyricsSkeleton(modifier = modifier.then(swipeDownModifier))
         }
         return
     }

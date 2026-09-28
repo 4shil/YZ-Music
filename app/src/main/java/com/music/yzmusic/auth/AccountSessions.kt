@@ -38,6 +38,26 @@ fun adjacentProfile(
     return items.getOrNull(index + if (forward) 1 else -1)
 }
 
+/**
+ * This session with [photo] written onto the profile the account is showing as.
+ *
+ * The account's own picture is a [com.music.yzmusic.data.model.Account]
+ * concern — fetched fresh, never stored — while the profile is what the party
+ * layer reads, so the picture has to be carried across for anyone to see it.
+ * Only the showing profile is touched: the other profiles belong to brand
+ * channels with their own photos.
+ *
+ * Null means "persist nothing" — either there is no such profile to write to,
+ * or it already holds that exact picture. This runs on every launch, and a
+ * rewrite that would change nothing is a disk write for nothing.
+ */
+internal fun GoogleAccountSession.withProfilePhoto(photo: String): GoogleAccountSession? {
+    val id = activeProfileId ?: profiles.firstOrNull()?.profileId ?: return null
+    val shown = profiles.firstOrNull { it.profileId == id } ?: return null
+    if (shown.avatar == photo) return null
+    return copy(profiles = profiles.map { if (it.profileId == id) it.copy(avatar = photo) else it })
+}
+
 internal fun sessionId(cookie: String, dataSyncId: String?): String =
     dataSyncId?.takeIf { it.isNotBlank() } ?: sha256(cookie).take(24)
 
