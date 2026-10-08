@@ -1704,7 +1704,9 @@ private fun CircleIconButton(
             .size(size)
             .then(
                 if (lightFill) {
-                    Modifier.background(Color.White.copy(alpha = LIGHT_FILL_ALPHA))
+                    Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = LIGHT_FILL_ALPHA), CircleShape)
                         .border(1.dp, Color.White.copy(alpha = TOP_RELEASE_EDGE_ALPHA), CircleShape)
                 } else {
                     Modifier

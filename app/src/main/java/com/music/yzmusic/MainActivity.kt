@@ -2341,7 +2341,11 @@ private fun YZMusicApp(
                                     )
                                 }
                             }
-                            if (detail != null) {
+                            // Left of the account photo, and only on an album or
+                            // playlist page — an artist page has no single track
+                            // list to reorder, and the device folders already
+                            // carry this same control themselves.
+                            if (detail != null && !isLocalDetail && detail.type != BrowseType.ARTIST) {
                                 IconButton(onClick = { songSortMenuOpen = true }) {
                                     Icon(
                                         Icons.AutoMirrored.Rounded.Sort,
