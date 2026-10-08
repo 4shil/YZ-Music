@@ -95,15 +95,15 @@ suspend fun renderReplayPoster(
         drawBackdrop(canvas, covers[lit], page?.let(::storyHue) ?: 0f)
         var y = drawHeader(canvas, context, type, summary, holder, memberSince)
         if (page == null) {
-            y = drawTotals(canvas, type, summary, y)
-            y = drawColumns(canvas, type, songs, artists, covers, y)
-            y = drawAlbums(canvas, type, albums, covers, y)
-            drawGenres(canvas, type, summary, y)
+            y = drawTotals(canvas, context, type, summary, y)
+            y = drawColumns(canvas, context, type, songs, artists, covers, y)
+            y = drawAlbums(canvas, context, type, albums, covers, y)
+            drawGenres(canvas, context, type, summary, y)
         } else {
-            y = drawRuns(canvas, type, summary.storyHeadline(page), MARGIN, y, CONTENT_W)
-            drawCard(canvas, type, summary, page, covers, y + 56f)
+            y = drawRuns(canvas, type, summary.storyHeadline(context, page), MARGIN, y, CONTENT_W)
+            drawCard(canvas, context, type, summary, page, covers, y + 56f)
         }
-        drawFooter(canvas, type)
+        drawFooter(canvas, context, type)
         bitmap
     }
 }
@@ -121,6 +121,7 @@ suspend fun renderReplayPoster(
  */
 private fun drawCard(
     canvas: Canvas,
+    context: Context,
     type: Fonts,
     summary: ReplaySummary,
     page: ReplayStoryPage,
@@ -131,20 +132,21 @@ private fun drawCard(
         ReplayStoryPage.INTRO, ReplayStoryPage.MINUTES ->
             drawCollage(canvas, summary, covers, top)
         ReplayStoryPage.SONGS ->
-            drawLeaderboard(canvas, type, summary.songRows(CARD_ROWS), covers, top, false)
+            drawLeaderboard(canvas, context, type, summary.songRows(CARD_ROWS), covers, top, false)
         ReplayStoryPage.ARTISTS ->
-            drawLeaderboard(canvas, type, summary.artistRows(CARD_ROWS), covers, top, true)
+            drawLeaderboard(canvas, context, type, summary.artistRows(CARD_ROWS), covers, top, true)
         ReplayStoryPage.ALBUMS ->
-            drawLeaderboard(canvas, type, summary.albumRows(CARD_ROWS), covers, top, false)
-        ReplayStoryPage.GENRES -> drawBigList(canvas, type, summary.genreRows(CARD_ROWS), top)
-        ReplayStoryPage.HABITS -> drawHabits(canvas, type, summary, top)
-        ReplayStoryPage.SUMMARY -> drawRecap(canvas, type, summary, top)
+            drawLeaderboard(canvas, context, type, summary.albumRows(CARD_ROWS), covers, top, false)
+        ReplayStoryPage.GENRES -> drawBigList(canvas, context, type, summary.genreRows(CARD_ROWS), top)
+        ReplayStoryPage.HABITS -> drawHabits(canvas, context, type, summary, top)
+        ReplayStoryPage.SUMMARY -> drawRecap(canvas, context, type, summary, top)
     }
 }
 
 /** The number one, large, with its runners-up under it. */
 private fun drawLeaderboard(
     canvas: Canvas,
+    context: Context,
     type: Fonts,
     rows: List<ReplayRow>,
     covers: Map<String, Bitmap?>,
@@ -167,7 +169,7 @@ private fun drawLeaderboard(
     }
     val stats = type.body(44f, 0x8CFFFFFF.toInt())
     canvas.drawText(
-        "${formatListening(lead.ms)} · ${countOf(lead.plays, "play")}",
+        "${formatListening(context, lead.ms)} · ${context.replayCount(lead.plays, R.plurals.replay_play_count)}",
         textX,
         y + 62f,
         stats,
@@ -186,7 +188,7 @@ private fun drawLeaderboard(
         val name = type.body(48f, Color.WHITE, bold = true)
         val nameX = artX + 108f + 28f
         val stat = type.body(38f, 0x80FFFFFF.toInt())
-        val statWidth = stat.measureText(formatListening(row.ms))
+        val statWidth = stat.measureText(formatListening(context, row.ms))
         canvas.drawText(
             ellipsised(row.title, name, POSTER_W - MARGIN - nameX - statWidth - 32f),
             nameX,
@@ -194,17 +196,17 @@ private fun drawLeaderboard(
             name,
         )
         stat.textAlign = Paint.Align.RIGHT
-        canvas.drawText(formatListening(row.ms), POSTER_W - MARGIN, rowY + 72f, stat)
+        canvas.drawText(formatListening(context, row.ms), POSTER_W - MARGIN, rowY + 72f, stat)
         rowY += 148f
     }
 }
 
 /** The genre card: one word, big, then the rest as a ranked list. */
-private fun drawBigList(canvas: Canvas, type: Fonts, rows: List<ReplayRow>, top: Float) {
+private fun drawBigList(canvas: Canvas, context: Context, type: Fonts, rows: List<ReplayRow>, top: Float) {
     val lead = rows.firstOrNull() ?: return
     val word = type.heading(150f, Color.WHITE)
     canvas.drawText(ellipsised(lead.title, word, CONTENT_W), MARGIN, top + 120f, word)
-    canvas.drawText(formatListening(lead.ms), MARGIN, top + 186f, type.body(46f, 0x99FFFFFF.toInt()))
+    canvas.drawText(formatListening(context, lead.ms), MARGIN, top + 186f, type.body(46f, 0x99FFFFFF.toInt()))
 
     var y = top + 300f
     rows.drop(1).forEach { row ->
@@ -212,12 +214,12 @@ private fun drawBigList(canvas: Canvas, type: Fonts, rows: List<ReplayRow>, top:
         val name = type.body(52f, Color.WHITE, bold = true)
         canvas.drawText(row.title, MARGIN + 80f, y, name)
         val stat = type.body(38f, 0x80FFFFFF.toInt()).apply { textAlign = Paint.Align.RIGHT }
-        canvas.drawText(formatListening(row.ms), POSTER_W - MARGIN, y, stat)
+        canvas.drawText(formatListening(context, row.ms), POSTER_W - MARGIN, y, stat)
         y += 106f
     }
 }
 
-private fun drawHabits(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float) {
+private fun drawHabits(canvas: Canvas, context: Context, type: Fonts, summary: ReplaySummary, top: Float) {
     var y = top + 40f
     fun stat(value: String, label: String) {
         canvas.drawText(value, MARGIN, y, type.heading(84f, Color.WHITE))
@@ -225,15 +227,20 @@ private fun drawHabits(canvas: Canvas, type: Fonts, summary: ReplaySummary, top:
         y += 176f
     }
     if (summary.distinctAlbums > 0) {
-        stat(grouped(summary.distinctAlbums.toLong()), "different albums")
+        stat(grouped(summary.distinctAlbums.toLong()), context.getString(R.string.different_albums))
     }
     summary.busiestDay?.let {
-        stat(formatDay(it), "your biggest day — ${formatListening(summary.busiestDayMs)}")
+        stat(
+            formatDay(context, it),
+            context.getString(R.string.your_biggest_day, formatListening(context, summary.busiestDayMs)),
+        )
     }
-    summary.peakHour?.let { stat(formatHour(it), "when you listen most") }
+    summary.peakHour?.let {
+        stat(formatHour(context, it), context.getString(R.string.when_you_listen_the_most))
+    }
 }
 
-private fun drawRecap(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float) {
+private fun drawRecap(canvas: Canvas, context: Context, type: Fonts, summary: ReplaySummary, top: Float) {
     var y = top + 40f
     fun line(label: String, value: String) {
         canvas.drawText(label, MARGIN, y, type.body(42f, 0x80FFFFFF.toInt()))
@@ -241,11 +248,11 @@ private fun drawRecap(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: 
         canvas.drawText(ellipsised(value, v, CONTENT_W - 320f), MARGIN + 320f, y, v)
         y += 96f
     }
-    line("Minutes", formatMinutes(summary.totalMs))
-    summary.songs.firstOrNull()?.let { line("Top song", it.song.title) }
-    summary.artists.firstOrNull()?.let { line("Top artist", it.title) }
-    summary.albums.firstOrNull()?.let { line("Top album", it.title) }
-    summary.genres.firstOrNull()?.let { line("Top genre", it.title) }
+    line(context.getString(R.string.minutes), formatMinutes(summary.totalMs))
+    summary.songs.firstOrNull()?.let { line(context.getString(R.string.top_song), it.song.title) }
+    summary.artists.firstOrNull()?.let { line(context.getString(R.string.top_artist), it.title) }
+    summary.albums.firstOrNull()?.let { line(context.getString(R.string.top_album), it.title) }
+    summary.genres.firstOrNull()?.let { line(context.getString(R.string.top_genre), it.title) }
 }
 
 /** The scatter of covers the opening cards are built around. */
@@ -281,8 +288,19 @@ private fun drawCollage(
  * dark base and then flattened under a vertical scrim — the same recipe the
  * player's backdrop uses, at a size where the radii can simply be written down
  * instead of derived from a layout.
+ *
+ * [height] is the canvas it is being drawn on: the poster passes the full
+ * frame, a card that grows with its own contents passes whatever it turned out
+ * to be. The anchors are fractions of it, so a short card gets the same
+ * composition squeezed into its rows rather than the bottom half of a poster
+ * left blank.
  */
-private fun drawBackdrop(canvas: Canvas, lead: Bitmap?, hue: Float) {
+internal fun drawBackdrop(
+    canvas: Canvas,
+    lead: Bitmap?,
+    hue: Float,
+    height: Float = POSTER_H.toFloat(),
+) {
     val colors = paletteOf(lead).map { rotated(it, hue) }
     canvas.drawColor(dimmed(colors.first()))
 
@@ -296,7 +314,7 @@ private fun drawBackdrop(canvas: Canvas, lead: Bitmap?, hue: Float) {
     colors.forEachIndexed { index, color ->
         val (fx, fy) = anchors[index]
         val cx = POSTER_W * fx
-        val cy = POSTER_H * fy
+        val cy = height * fy
         val radius = POSTER_W * 0.95f
         paint.shader = RadialGradient(
             cx,
@@ -318,12 +336,12 @@ private fun drawBackdrop(canvas: Canvas, lead: Bitmap?, hue: Float) {
         0f,
         0f,
         0f,
-        POSTER_H.toFloat(),
+        height,
         intArrayOf(0x8C000000.toInt(), 0x59000000, 0xCC000000.toInt()),
         floatArrayOf(0f, 0.42f, 1f),
         Shader.TileMode.CLAMP,
     )
-    canvas.drawRect(0f, 0f, POSTER_W.toFloat(), POSTER_H.toFloat(), paint)
+    canvas.drawRect(0f, 0f, POSTER_W.toFloat(), height, paint)
     paint.shader = null
 }
 
@@ -333,7 +351,7 @@ private fun drawBackdrop(canvas: Canvas, lead: Bitmap?, hue: Float) {
  * same treatment `MeshGradient` gives its own palette, restated here because
  * this runs nowhere near a composition.
  */
-private fun paletteOf(bitmap: Bitmap?): List<Int> {
+internal fun paletteOf(bitmap: Bitmap?): List<Int> {
     val fallback = listOf(0xFF3A1C71.toInt(), 0xFFD76D77.toInt(), 0xFF2B5876.toInt(), 0xFFFFAF7B.toInt())
     val source = bitmap ?: return fallback
     val swatches = runCatching {
@@ -379,9 +397,9 @@ private fun drawHeader(
     holder: String,
     memberSince: String?,
 ): Float {
-    val label = summary.label
+    val label = summary.localizedLabel(context)
     val title = if (label.length == 4 && label.all { it.isDigit() }) {
-        "Replay'${label.takeLast(2)}"
+        "Replay ${label.takeLast(2)}"
     } else {
         "Replay · $label"
     }
@@ -397,14 +415,20 @@ private fun drawHeader(
     drawLogo(canvas, context, POSTER_W - MARGIN - wordWidth - LOGO_GAP, 132f)
 
     val credit = listOfNotNull(
-        holder.ifBlank { DEFAULT_HOLDER },
-        memberSince?.let { "member since $it" },
+        holder.ifBlank { context.getString(R.string.default_replay_holder) },
+        memberSince?.let { context.getString(R.string.member_since_value, it) },
     ).joinToString(" · ")
     canvas.drawText(credit.uppercase(Locale.ROOT), MARGIN, 182f, type.label(24f, 0x8CFFFFFF.toInt()))
     return 300f
 }
 
-private fun drawTotals(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float): Float {
+private fun drawTotals(
+    canvas: Canvas,
+    context: Context,
+    type: Fonts,
+    summary: ReplaySummary,
+    top: Float,
+): Float {
     canvas.drawText(
         formatMinutes(summary.totalMs),
         MARGIN,
@@ -412,15 +436,15 @@ private fun drawTotals(canvas: Canvas, type: Fonts, summary: ReplaySummary, top:
         type.heading(148f, Color.WHITE),
     )
     canvas.drawText(
-        "MINUTES LISTENED",
+        context.getString(R.string.minutes_listened).uppercase(context.resources.configuration.locales[0]),
         MARGIN,
         top + 176f,
         type.label(30f, 0xB3FFFFFF.toInt(), tracking = 0.14f),
     )
     canvas.drawText(
-        "${countOf(summary.totalPlays, "play")} · " +
-            "${countOf(summary.distinctSongs, "song")} · " +
-            countOf(summary.distinctArtists, "artist"),
+        "${context.replayCount(summary.totalPlays, R.plurals.replay_play_count)} · " +
+            "${context.replayCount(summary.distinctSongs, R.plurals.replay_song_count)} · " +
+            context.replayCount(summary.distinctArtists, R.plurals.replay_artist_count),
         MARGIN,
         top + 232f,
         type.body(30f, 0x99FFFFFF.toInt()),
@@ -437,6 +461,7 @@ private fun drawTotals(canvas: Canvas, type: Fonts, summary: ReplaySummary, top:
  */
 private fun drawColumns(
     canvas: Canvas,
+    context: Context,
     type: Fonts,
     songs: List<ReplayRow>,
     artists: List<ReplayRow>,
@@ -446,14 +471,29 @@ private fun drawColumns(
     val columnWidth = (POSTER_W - MARGIN * 2 - COLUMN_GAP) / 2f
     val right = MARGIN + columnWidth + COLUMN_GAP
 
-    canvas.drawText("TOP SONGS", MARGIN, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
-    canvas.drawText("TOP ARTISTS", right, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
+    val locale = context.resources.configuration.locales[0]
+    canvas.drawText(
+        context.getString(R.string.top_songs).uppercase(locale),
+        MARGIN,
+        top,
+        type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f),
+    )
+    canvas.drawText(
+        context.getString(R.string.top_artists).uppercase(locale),
+        right,
+        top,
+        type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f),
+    )
 
     val rows = maxOf(songs.size, artists.size)
     var y = top + 54f
     repeat(rows) { index ->
-        songs.getOrNull(index)?.let { drawRow(canvas, type, it, covers, MARGIN, y, columnWidth, false) }
-        artists.getOrNull(index)?.let { drawRow(canvas, type, it, covers, right, y, columnWidth, true) }
+        songs.getOrNull(index)?.let {
+            drawRow(canvas, context, type, it, covers, MARGIN, y, columnWidth, false)
+        }
+        artists.getOrNull(index)?.let {
+            drawRow(canvas, context, type, it, covers, right, y, columnWidth, true)
+        }
         y += ROW_HEIGHT
     }
     return y + 40f
@@ -461,6 +501,7 @@ private fun drawColumns(
 
 private fun drawRow(
     canvas: Canvas,
+    context: Context,
     type: Fonts,
     row: ReplayRow,
     covers: Map<String, Bitmap?>,
@@ -484,19 +525,25 @@ private fun drawRow(
     val title = type.body(30f, Color.WHITE, bold = true)
     canvas.drawText(ellipsised(row.title, title, textWidth), textX, y + 36f, title)
     val sub = type.body(25f, 0x99FFFFFF.toInt())
-    val detail = listOfNotNull(row.subtitle, formatListening(row.ms)).joinToString(" · ")
+    val detail = listOfNotNull(row.subtitle, formatListening(context, row.ms)).joinToString(" · ")
     canvas.drawText(ellipsised(detail, sub, textWidth), textX, y + 72f, sub)
 }
 
 private fun drawAlbums(
     canvas: Canvas,
+    context: Context,
     type: Fonts,
     albums: List<ReplayRow>,
     covers: Map<String, Bitmap?>,
     top: Float,
 ): Float {
     if (albums.isEmpty()) return top
-    canvas.drawText("TOP ALBUMS", MARGIN, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
+    canvas.drawText(
+        context.getString(R.string.top_albums).uppercase(context.resources.configuration.locales[0]),
+        MARGIN,
+        top,
+        type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f),
+    )
     val size = 200f
     val gap = (POSTER_W - MARGIN * 2 - size * POSTER_ALBUMS) / (POSTER_ALBUMS - 1)
     val y = top + 40f
@@ -507,7 +554,7 @@ private fun drawAlbums(
         canvas.drawText(ellipsised(album.title, name, size), x, y + size + 38f, name)
         val sub = type.body(22f, 0x8CFFFFFF.toInt())
         canvas.drawText(
-            ellipsised(album.subtitle ?: formatListening(album.ms), sub, size),
+            ellipsised(album.subtitle ?: formatListening(context, album.ms), sub, size),
             x,
             y + size + 70f,
             sub,
@@ -516,10 +563,15 @@ private fun drawAlbums(
     return y + size + 130f
 }
 
-private fun drawGenres(canvas: Canvas, type: Fonts, summary: ReplaySummary, top: Float) {
+private fun drawGenres(canvas: Canvas, context: Context, type: Fonts, summary: ReplaySummary, top: Float) {
     val genres = summary.genreRows(POSTER_GENRES)
     if (genres.isEmpty()) return
-    canvas.drawText("TOP GENRES", MARGIN, top, type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f))
+    canvas.drawText(
+        context.getString(R.string.top_genres).uppercase(context.resources.configuration.locales[0]),
+        MARGIN,
+        top,
+        type.label(28f, 0xB3FFFFFF.toInt(), tracking = 0.16f),
+    )
     val paint = type.body(32f, Color.WHITE, bold = true)
     val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x26FFFFFF }
     var x = MARGIN
@@ -533,9 +585,9 @@ private fun drawGenres(canvas: Canvas, type: Fonts, summary: ReplaySummary, top:
     }
 }
 
-private fun drawFooter(canvas: Canvas, type: Fonts) {
+private fun drawFooter(canvas: Canvas, context: Context, type: Fonts) {
     canvas.drawText(
-        "Counted on device with YZ Music",
+        context.getString(R.string.counted_on_device_with_yz_music),
         MARGIN,
         POSTER_H - 64f,
         type.label(24f, 0x73FFFFFF, tracking = 0.08f),
@@ -549,7 +601,7 @@ private fun drawFooter(canvas: Canvas, type: Fonts) {
  * lettered stand-in the lists use, so a missing sleeve is a deliberate-looking
  * tile rather than a hole.
  */
-private fun drawArtwork(
+internal fun drawArtwork(
     canvas: Canvas,
     bitmap: Bitmap?,
     fallback: String,
@@ -648,7 +700,7 @@ private fun drawRuns(
  * on every version this app supports, so there is nothing to be gained by
  * keeping a second copy of the logo around at a fixed size.
  */
-private fun drawLogo(canvas: Canvas, context: Context, right: Float, baseline: Float) {
+internal fun drawLogo(canvas: Canvas, context: Context, right: Float, baseline: Float) {
     val logo = runCatching {
         ResourcesCompat.getDrawable(context.resources, R.drawable.ic_logo, null)
     }.getOrNull() ?: return
@@ -660,7 +712,7 @@ private fun drawLogo(canvas: Canvas, context: Context, right: Float, baseline: F
 }
 
 /** Trims [text] to [width], with an ellipsis, the way a single-line row would. */
-private fun ellipsised(text: String, paint: Paint, width: Float): String {
+internal fun ellipsised(text: String, paint: Paint, width: Float): String {
     if (paint.measureText(text) <= width) return text
     var end = text.length
     while (end > 1 && paint.measureText(text.take(end) + "…") > width) end--
@@ -676,7 +728,7 @@ private fun ellipsised(text: String, paint: Paint, width: Float): String {
  * missing font resource a slightly plainer picture rather than a crash on the
  * share button.
  */
-private class Fonts(context: Context) {
+internal class Fonts(context: Context) {
     private val heavy = font(context, R.font.sf_pro_display_heavy) ?: Typeface.DEFAULT_BOLD
     private val semibold = font(context, R.font.sf_pro_display_semibold) ?: Typeface.DEFAULT_BOLD
     private val regular = font(context, R.font.sf_pro_display_regular) ?: Typeface.DEFAULT
@@ -700,7 +752,7 @@ private class Fonts(context: Context) {
         runCatching { ResourcesCompat.getFont(context, id) }.getOrNull()
 }
 
-private suspend fun loadBitmap(context: Context, url: String): Bitmap? = runCatching {
+internal suspend fun loadBitmap(context: Context, url: String): Bitmap? = runCatching {
     val request = ImageRequest.Builder(context)
         .data(url.artworkAt(CARD_ART_PX))
         // Palette needs pixel access, and a hardware bitmap cannot be drawn

@@ -215,4 +215,97 @@
     <string name="miscellaneous_footer">オンにすると、最近のアプリ画面からアプリを終了した際に音楽の再生も停止します。</string>
     <string name="dont_repeat_songs_subtitle">オートプレイは、このセッションで既に再生または提案された曲を再度提案しません</string>
     <string name="download_quality_subtitle">接続にかかわらず、1トラックあたり%1$s</string>
+<!-- Replay: headline copy, period labels and counted plurals. -->
+<string name="your_listening_experience">あなたの再生体験</string>
+    <string name="member_since">登録日</string>
+    <string name="default_replay_holder">YZ Musicリスナー</string>
+    <string name="minutes">分</string>
+    <string name="minutes_listened">再生時間（分）</string>
+    <string name="minutes_short">%1$d分</string>
+    <string name="minutes_grouped_short">%1$s分</string>
+    <string name="hours_minutes_short">%1$d時間%2$d分</string>
+    <string name="top_song">トップ曲</string>
+    <string name="top_artist">トップアーティスト</string>
+    <string name="top_album">トップアルバム</string>
+    <string name="top_genre">トップジャンル</string>
+    <string name="midnight">真夜中</string>
+    <string name="midday">正午</string>
+    <string name="hour_am">午前%1$d時</string>
+    <string name="hour_pm">午後%1$d時</string>
+    <string name="this_month">今月</string>
+    <string name="this_year">今年</string>
+    <string name="all_time">すべての期間</string>
+    <string name="replay_intro_start">あなたの</string>
+    <string name="replay_intro_end">の準備ができました。</string>
+    <string name="replay_minutes_start">音楽と過ごした時間は</string>
+    <string name="replay_minutes_end">です。</string>
+    <string name="replay_songs_start">合計</string>
+    <string name="replay_songs_end">があなたの1か月を彩りました。</string>
+    <string name="replay_artist_start">今月はずっと、</string>
+    <string name="replay_artist_focus">1組のアーティスト</string>
+    <string name="replay_artist_end">に何度も戻ってきました。</string>
+    <string name="replay_album_start">今回は、</string>
+    <string name="replay_album_focus">1枚のアルバム</string>
+    <string name="replay_album_end">があなたの心を掴みました。</string>
+    <string name="replay_genre_start">合わせて、</string>
+    <string name="replay_genre_focus">あなたのジャンル</string>
+    <string name="replay_genre_end">があなたのサウンドを形作りました。</string>
+    <string name="replay_habits_start">あなたが探求したのは</string>
+    <string name="replay_habits_middle">、そのきっかけは</string>
+    <string name="replay_summary_start">あなたの再生スタイルは</string>
+    <string name="replay_across">にわたって</string>
+    <string name="replay_hours_across">%1$s時間</string>
+    <string name="listening_shape">あなたの再生パターン</string>
+    <string name="listen_most_around">最もよく聴くのは%1$s頃です。</string>
+    <string name="different_albums">さまざまなアルバム</string>
+    <string name="your_biggest_day">最も聴いた日：%1$s</string>
+    <string name="biggest_day_note">最も聴いた日は%1$sで、%2$sの再生時間でした。</string>
+    <string name="when_you_listen_the_most">最もよく聴く時間帯</string>
+    <string name="genres_pending">再生履歴が増えるとジャンルが表示されます</string>
+    <string name="not_enough_listening">再生履歴がまだ十分ではありません</string>
+    <string name="not_enough_this_month">今月もう少し曲を再生するとReplayが解放されます。</string>
+    <string name="replay_empty_description">もう少し聴くと、YZ Musicがあなたの履歴からReplayを作成します。</string>
+    <string name="replay_private_counting">このデバイス内の再生履歴から非公開で集計されています</string>
+    <string name="play_your_replay">あなたのReplayを再生</string>
+    <string name="close_replay">Replayを閉じる</string>
+    <string name="share_my_replay">自分のReplayを共有</string>
+    <string name="share_your_replay">あなたのReplayを共有</string>
+    <string name="replay_share_summary_description">曲、アーティスト、アルバム、ジャンル、傾向をまとめた全体像です。</string>
+    <string name="replay_share_card_description">主な再生ハイライトをまとめた、洗練されたカードです。</string>
+    <string name="tap_share_for_picture">共有をタップして画像を作成</string>
+    <string name="couldnt_draw_picture">画像を作成できませんでした</string>
+    <string name="saved">保存済み</string>
+    <string name="member_since_value">登録日：%1$s</string>
+    <string name="counted_on_device_with_yz_music">YZ Musicでこのデバイス内で集計</string>
+    <plurals name="replay_minutes_unit">
+        <item quantity="other">%1$s分</item>
+    </plurals>
+    <plurals name="replay_song_count">
+        <item quantity="other">%1$s曲</item>
+    </plurals>
+    <plurals name="replay_artist_count">
+        <item quantity="other">%1$s組のアーティスト</item>
+    </plurals>
+    <plurals name="replay_play_count">
+        <item quantity="other">%1$s回再生</item>
+    </plurals>
+<!-- Artist page: heading, subscriber counts, release recency. -->
+<string name="about_artist">アーティストについて</string>
+    <string name="about_album">アルバムについて</string>
+    <string name="subscribers">登録者数 %1$s人</string>
+    <string name="monthly_listeners">月間リスナー数 %1$s人</string>
+    <string name="less">折りたたむ</string>
+    <string name="search_this_list">このリスト内を検索</string>
+    <string name="nothing_matches">「%1$s」に一致するものはありません</string>
+    <string name="close_search">検索を閉じる</string>
+    <string name="recent_single">最近のシングル</string>
+    <string name="recent_ep">最近の EP</string>
+    <string name="recent_album">最近のアルバム</string>
+    <string name="artist">アーティスト</string>
+    <string name="album">アルバム</string>
+    <string name="playlist">プレイリスト</string>
+    <plurals name="track_count_plural">
+        <item quantity="other">%1$d 曲</item>
+    </plurals>
+
 </resources>

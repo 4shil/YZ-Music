@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
@@ -31,6 +32,8 @@ import com.music.yzmusic.ui.components.backdrop.effects.blur
 import com.music.yzmusic.ui.components.backdrop.effects.colorControls
 import com.music.yzmusic.ui.components.backdrop.effects.lens
 import com.music.yzmusic.ui.components.backdrop.highlight.Highlight
+import com.music.yzmusic.ui.components.backdrop.highlight.HighlightElement
+import com.music.yzmusic.ui.components.backdrop.internal.ShapeProvider
 import com.music.yzmusic.ui.components.backdrop.shadow.Shadow
 
 /** Whether the liquid glass nav bar is turned on — see [AppSettings.liquidGlass]. */
@@ -96,6 +99,50 @@ fun calculateGlassBlurRadiusDp(
     if (defaultBlur <= 0f) return baseRadiusDp
     return (glassBlur.coerceIn(0f, 1f) / defaultBlur) * baseRadiusDp
 }
+/**
+ * A lightweight visual match for liquid glass over a stable background.
+ *
+ * Keeps the same translucent tint, directional highlight and hairline as
+ * [liquidGlass], but intentionally performs no backdrop capture, blur, lens
+ * refraction or shadow rendering. Over a page whose backdrop is a static wash
+ * there is nothing behind the control to refract, so the expensive half of the
+ * effect buys nothing and the small ones are what actually read as glass.
+ *
+ * When Liquid Glass is disabled or unsupported, [fallbackColor] preserves the
+ * control's existing filled appearance — so callers can move onto this
+ * unconditionally instead of branching on the setting at each site.
+ */
+@Composable
+fun Modifier.lightweightLiquidGlass(
+    shape: CornerBasedShape,
+    fallbackColor: Color,
+): Modifier {
+    val useGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
+    val glassTint = if (MaterialTheme.colorScheme.surface.luminance() > 0.5f) {
+        Color(0xFFFAFAFA)
+    } else {
+        Color(0xFF121212)
+    }
+    val shapeProvider = ShapeProvider { shape }
+
+    return clip(shape)
+        .background(
+            color = if (useGlass) glassTint.copy(alpha = SURFACE_OPACITY) else fallbackColor,
+            shape = shape,
+        )
+        .then(
+            if (useGlass) {
+                HighlightElement(
+                    shapeProvider = shapeProvider,
+                    highlight = { Highlight.Default },
+                )
+            } else {
+                Modifier
+            },
+        )
+        .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, shape)
+}
+
 private const val SURFACE_OPACITY = 0.4f
 
 /**

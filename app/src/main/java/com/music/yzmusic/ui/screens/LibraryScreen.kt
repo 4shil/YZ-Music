@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,7 +24,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -54,6 +60,7 @@ import com.music.yzmusic.ui.components.LIBRARY_GRID_SPACING
 import com.music.yzmusic.ui.components.MessageState
 import com.music.yzmusic.ui.components.PAGE_GUTTER
 import com.music.yzmusic.ui.components.PullToRefresh
+import com.music.yzmusic.ui.components.ReplayCardRowSkeleton
 import com.music.yzmusic.ui.components.SHELF_CARD_WIDTH
 import com.music.yzmusic.ui.components.libraryGrid
 import com.music.yzmusic.ui.components.librarySkeleton
@@ -107,6 +114,14 @@ fun LibraryScreen(
     /** Whose cards they are — the account's name, blank when signed out. */
     replayHolder: String,
     replayMemberSince: String?,
+    /**
+     * Whether the listening history behind those cards is still being read.
+     *
+     * Distinct from the cards being empty: that covers both "nothing has been
+     * played yet" and "not read yet", and the two want different things on
+     * screen — a skeleton for the second and the strip for the first.
+     */
+    replayLoading: Boolean = false,
     onOpenReplay: (ReplayStoryPage) -> Unit,
     refreshing: Boolean,
     onRefresh: () -> Unit,
@@ -156,12 +171,17 @@ fun LibraryScreen(
             // cards — the strip is a button that admits it has nothing to say,
             // and a row of one-item carousels is not a way to say anything.
             item(key = "replay") {
-                if (replayCards.isEmpty()) {
-                    // Keep Replay discoverable before there is enough listening
-                    // data to deal the personalised cards.
-                    ReplayBanner(null) { onOpenReplay(ReplayStoryPage.INTRO) }
-                } else {
-                    ReplayCardRow(
+                when {
+                    // Still reading the history. Drawn at the real card's size so
+                    // the shelves below do not jump a card's height the moment
+                    // the cards replace it.
+                    replayLoading -> ReplayCardRowSkeleton(Modifier.padding(vertical = 6.dp))
+                    // Nothing to summarise yet, as opposed to nothing read yet.
+                    replayCards.isEmpty() ->
+                        // Keep Replay discoverable before there is enough listening
+                        // data to deal the personalised cards.
+                        ReplayBanner(null) { onOpenReplay(ReplayStoryPage.INTRO) }
+                    else -> ReplayCardRow(
                         cards = replayCards,
                         holder = replayHolder,
                         memberSince = replayMemberSince,
@@ -171,50 +191,60 @@ fun LibraryScreen(
                     )
                 }
             }
-            item(key = "shelf:onDevice") {
-                val onDeviceShelf = HomeShelf(
-                    title = stringResource(R.string.on_device),
-                    items = listOf(
-                        ShelfItem(
-                            title = stringResource(R.string.downloads),
-                            subtitle = stringResource(R.string.downloaded_songs),
-                            thumbnailUrl = null,
-                            videoId = null,
-                            browseId = "local:downloads",
-                        ),
-                        ShelfItem(
-                            title = stringResource(R.string.local_music),
-                            subtitle = stringResource(R.string.audio_files_on_device),
-                            thumbnailUrl = null,
-                            videoId = null,
-                            browseId = "local:all",
-                        ),
-                    ) + downloadedPlaylists.map { playlist ->
-                        ShelfItem(
-                            title = playlist.title,
-                            // The credit the playlist was downloaded with,
-                            // because this is also what the page it opens
-                            // bills itself by — see `headerLines`, which
-                            // reads the kind and the owner back out of it.
-                            // Saying "Downloaded playlist" here instead would
-                            // make that header read "Downloaded playlist" over
-                            // "PLAYLIST • 12 SONGS", and the shelf this card
-                            // is on already says where it lives.
-                            subtitle = playlist.subtitle.ifBlank { stringResource(R.string.downloaded_playlist) },
-                            thumbnailUrl = playlist.thumbnailUrl,
-                            videoId = null,
-                            browseId = Downloads.pageIdFor(playlist.id),
-                        )
-                    },
-                )
-                LibraryGridShelf(
-                    shelf = onDeviceShelf,
-                    onItemClick = onShelfItemClick,
-                    onItemLongPress = onShelfItemLongPress,
-                    onShowAll = { onShowAll(onDeviceShelf) },
-                )
+            // The folders are a list and the downloads are cards, because they
+            // are not the same kind of thing: a folder has no artwork, so as a
+            // card it is a grey square that looks like every other card on the
+            // page while meaning something completely different. See
+            // [LibraryLinkList].
+            item(key = "links") {
+                LibraryLinkList(links = libraryLinks(), onClick = onShelfItemClick)
+            }
+            if (downloadedPlaylists.isNotEmpty()) {
+                item(key = "shelf:onDevice") {
+                    val onDeviceShelf = HomeShelf(
+                        title = stringResource(R.string.on_device),
+                        items = downloadedPlaylists.map { playlist ->
+                            ShelfItem(
+                                title = playlist.title,
+                                // The credit the playlist was downloaded with,
+                                // because this is also what the page it opens
+                                // bills itself by — see `headerLines`, which
+                                // reads the kind and the owner back out of it.
+                                // Saying "Downloaded playlist" here instead would
+                                // make that header read "Downloaded playlist" over
+                                // "PLAYLIST • 12 SONGS", and the shelf this card
+                                // is on already says where it lives.
+                                subtitle = playlist.subtitle.ifBlank { stringResource(R.string.downloaded_playlist) },
+                                thumbnailUrl = playlist.thumbnailUrl,
+                                videoId = null,
+                                browseId = Downloads.pageIdFor(playlist.id),
+                            )
+                        },
+                    )
+                    LibraryGridShelf(
+                        shelf = onDeviceShelf,
+                        onItemClick = onShelfItemClick,
+                        onItemLongPress = onShelfItemLongPress,
+                        onShowAll = { onShowAll(onDeviceShelf) },
+                    )
+                }
             }
             if (!signedIn) {
+                // Drawn even signed out, and even before the state below is read:
+                // a fresh account has no Playlists shelf at all, and that is
+                // exactly the account most in need of the button that makes one.
+                // Without it the only way to create a playlist is from a screen
+                // that needs the account anyway.
+                item(key = "shelf:$PLAYLISTS") {
+                    val emptyPlaylists = HomeShelf(PLAYLISTS, emptyList())
+                    PlaylistShelf(
+                        shelf = emptyPlaylists,
+                        onItemClick = onShelfItemClick,
+                        onItemLongPress = onShelfItemLongPress,
+                        onNewPlaylist = onNewPlaylist,
+                        onShowAll = { onShowAll(emptyPlaylists) },
+                    )
+                }
                 item {
                     MessageState(
                         message = stringResource(R.string.library_sign_in_description),
@@ -302,6 +332,114 @@ fun LibraryScreen(
  * and a carousel with one item in it always reads as a carousel that failed to
  * load the rest.
  */
+/**
+ * A row in the folder list at the top of the page.
+ *
+ * [logo] is a brand's own mark where there is one, because an icon standing in
+ * for a service is a guess at what it looks like; everything else gets a glyph.
+ */
+data class LibraryLink(
+    val item: ShelfItem,
+    val icon: ImageVector,
+    val logo: Int? = null,
+)
+
+/**
+ * The folders, as a plain list — icon, name, chevron, hairlines between.
+ *
+ * The way a music app's library has always opened, rather than as cards that all
+ * look alike because none of them has artwork. On a shelf, "Downloads" and "Local
+ * music" were two grey squares in a row of album covers, and nothing about the
+ * layout said they were the two things you *own* as opposed to the things you
+ * have looked at. A row with a chevron says what it is.
+ */
+@Composable
+private fun LibraryLinkList(links: List<LibraryLink>, onClick: (ShelfItem) -> Unit) {
+    Column(Modifier.padding(top = 4.dp, bottom = 22.dp)) {
+        links.forEachIndexed { index, link ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 54.dp)
+                    .clickable { onClick(link.item) }
+                    .padding(horizontal = PAGE_GUTTER),
+            ) {
+                Icon(
+                    imageVector = link.icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(LINK_ICON_SIZE),
+                )
+                Spacer(Modifier.width(LINK_ICON_GAP))
+                Text(
+                    text = link.item.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = YZMusicIcons.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .6f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            if (index < links.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(
+                        start = PAGE_GUTTER + LINK_ICON_SIZE + LINK_ICON_GAP,
+                    ),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+    }
+}
+
+private val LINK_ICON_SIZE = 24.dp
+private val LINK_ICON_GAP = 16.dp
+
+/**
+ * The folders on this device.
+ *
+ * Upstream also offers the song cache, WebDAV, SMB and the connected Spotify
+ * account here, each only once it is switched on in Settings — unconfigured they
+ * would be dead ends. None of those exist here, so this is the two folders that
+ * do. The `link` helper is kept so adding one later is a single line rather
+ * than a new block.
+ */
+@Composable
+private fun libraryLinks(): List<LibraryLink> {
+    fun link(icon: ImageVector, title: String, subtitle: String, browseId: String) = LibraryLink(
+        item = ShelfItem(
+            title = title,
+            subtitle = subtitle,
+            thumbnailUrl = null,
+            videoId = null,
+            browseId = browseId,
+        ),
+        icon = icon,
+    )
+    return listOf(
+        link(
+            Icons.Rounded.Download,
+            stringResource(R.string.downloads),
+            stringResource(R.string.downloaded_songs),
+            "local:downloads",
+        ),
+        link(
+            Icons.Rounded.Folder,
+            stringResource(R.string.local_music),
+            stringResource(R.string.audio_files_on_device),
+            "local:all",
+        ),
+    )
+}
+
 @Composable
 private fun ReplayBanner(card: ReplayHeroCard?, onClick: () -> Unit) {
     val palette = rememberArtworkColors(card?.artworkUrl)

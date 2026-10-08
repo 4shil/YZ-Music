@@ -1,9 +1,7 @@
-﻿package com.music.yzmusic.ui.replay
+package com.music.yzmusic.ui.replay
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,8 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -30,7 +26,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -41,7 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.music.yzmusic.R
-import com.music.yzmusic.ui.components.PAGE_GUTTER
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import com.music.yzmusic.ui.player.MeshGradientBackground
 import com.music.yzmusic.ui.player.rememberArtworkColors
 import java.util.Locale
@@ -56,8 +52,8 @@ import java.util.Locale
  * any of them leads anywhere. A card is a thing people already know how to read:
  * it holds one fact, it has a *front* you look at rather than a list you scan,
  * and a row of them says "there are four of these" without a heading saying so.
- * Tapping one opens the story it summarises, which is the other half of why it
- * is a card — a card is an object, and objects can be picked up.
+ * Tapping one opens Replay at the chart it summarises, which is the other half
+ * of why it is a card — a card is an object, and objects can be picked up.
  *
  * ## Why it is built like a real one
  *
@@ -96,7 +92,7 @@ fun ReplayCreditCard(
     value: String,
     detail: String?,
     artworkUrl: String?,
-    /** Whose card it is. Empty falls back to [DEFAULT_HOLDER]. */
+    /** Whose card it is. Empty falls back to the localized listener label. */
     holder: String,
     /** `MM/YY`, or null when there is nothing to date it from. */
     memberSince: String?,
@@ -140,7 +136,7 @@ fun ReplayCreditCard(
             // a card and an advert.
             Row(verticalAlignment = Alignment.Top) {
                 Text(
-                    text = "YOUR LISTENING\nEXPERIENCE",
+                    text = stringResource(R.string.your_listening_experience).uppercase(Locale.getDefault()),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.W700,
                     letterSpacing = 1.4.sp,
@@ -186,7 +182,8 @@ fun ReplayCreditCard(
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
                     Embossed(
-                        text = holder.ifBlank { DEFAULT_HOLDER }.uppercase(Locale.ROOT),
+                        text = holder.ifBlank { stringResource(R.string.default_replay_holder) }
+                            .uppercase(Locale.getDefault()),
                         size = 13.sp,
                     )
                     if (detail != null) {
@@ -203,7 +200,7 @@ fun ReplayCreditCard(
                     Spacer(Modifier.width(10.dp))
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "MEMBER\nSINCE",
+                            text = stringResource(R.string.member_since).uppercase(Locale.getDefault()),
                             style = MaterialTheme.typography.labelSmall,
                             fontSize = 7.sp,
                             lineHeight = 8.sp,
@@ -308,52 +305,8 @@ private val EmbossShadow = Shadow(
 )
 
 private val CardShape = RoundedCornerShape(20.dp)
-/**
- * The wallet of cards, wherever it is drawn.
- *
- * It lives on the Library page rather than on Replay's own — see the Library
- * screen's note on where each half of Replay belongs — but it is defined
- * alongside the page it summarises, because the two have to keep saying the
- * same thing.
- */
-@Composable
-fun ReplayCardRow(
-    cards: List<ReplayHeroCard>,
-    holder: String,
-    memberSince: String?,
-    onCardClick: (ReplayStoryPage) -> Unit,
-    modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(horizontal = PAGE_GUTTER + 10.dp),
-) {
-    LazyRow(
-        modifier = modifier,
-        contentPadding = contentPadding,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        items(cards, key = { it.label }) { card ->
-            ReplayCreditCard(
-                label = card.label,
-                value = card.value,
-                detail = card.detail,
-                artworkUrl = card.artworkUrl,
-                holder = holder,
-                memberSince = memberSince,
-                onClick = { onCardClick(card.page) },
-                modifier = Modifier.width(300.dp),
-            )
-        }
-    }
-}
 
-/**
- * Whose card it is when there is no signed-in account to name.
- *
- * Was "BITCHORD LISTENER", left over from the port this file came from. It was
- * harmless while the only card on screen was behind a Replay tap, and would
- * have put another app's name across the top of the Library page now that the
- * row is drawn there.
- */
-const val DEFAULT_HOLDER = "YZ MUSIC LISTENER"
+/** Whose card it is when there is no signed-in account to name. */
 
 /** 85.6mm × 54mm, which is what makes the shape read as a card. */
 private const val CARD_RATIO = 1.586f

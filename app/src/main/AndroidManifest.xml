@@ -163,6 +163,14 @@
               youtu.be short links, which are a bare video id and nothing else.
               Kept in their own filter because the path there *is* the id, so it
               can't share the path prefixes above.
+
+              The host is required, not decorative. <data> elements in one
+              filter are combined, so a filter carrying only schemes matches
+              every URI with that scheme — which would put YZ Music in the
+              "Open with" list for every web link on the device, and make it
+              the handler the user declines by default. Android Studio's own
+              lint flags a filter with a scheme and no host for exactly this
+              reason.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -170,6 +178,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="http" />
                 <data android:scheme="https" />
+                <data android:host="youtu.be" />
             </intent-filter>
 
             <!--

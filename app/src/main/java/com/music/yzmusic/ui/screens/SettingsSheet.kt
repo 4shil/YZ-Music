@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,6 +70,7 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.Check
@@ -167,6 +169,7 @@ import com.music.yzmusic.data.lyrics.LyricsTranslation
 import com.music.yzmusic.ui.theme.onAccent
 import com.music.yzmusic.data.settings.LocalMusicSort
 import com.music.yzmusic.data.settings.OutputPcmMode
+import com.music.yzmusic.data.settings.LoudnessBoostMode
 import com.music.yzmusic.data.sources.DeviceCodecs
 import com.music.yzmusic.playback.AudioOutputStatus
 import com.music.yzmusic.ui.components.isGlassSupported
@@ -186,6 +189,16 @@ import com.music.yzmusic.ui.performance.supportedPerformanceRefreshRates
 fun SettingsScreen(
     /** The window's width, for the gates that depend on it. */
     windowWidth: Dp,
+    /**
+     * The list's scroll position, owned by the caller.
+     *
+     * Not remembered in here on purpose. Every sub-screen this one opens is a
+     * separate AnimatedContent target, so the composition that would hold the
+     * value is disposed the moment one is entered, and the position is at the
+     * top when you come back - which is the whole complaint. The caller keeps it
+     * for the same reason it keeps everything else that has to outlive a page.
+     */
+    scrollState: ScrollState,
     signedIn: Boolean,
     account: Account?,
     onSignIn: () -> Unit,
@@ -216,6 +229,7 @@ fun SettingsScreen(
     val allowDolbyAtmos by AppSettings.allowDolbyAtmos.collectAsStateWithLifecycle()
     val dolbyAtmosSupported = DeviceCodecs.playsDolbyAtmos
     val outputPcmMode by AppSettings.outputPcmMode.collectAsStateWithLifecycle()
+    val loudnessBoostMode by AppSettings.loudnessBoostMode.collectAsStateWithLifecycle()
     val preferUsbDac by AppSettings.preferUsbDac.collectAsStateWithLifecycle()
     val outputStatus by AudioOutputStatus.current.collectAsStateWithLifecycle()
     val nerdStats by AppSettings.showNerdStats.collectAsStateWithLifecycle()
@@ -350,7 +364,7 @@ fun SettingsScreen(
         modifier = modifier
             .fillMaxWidth()
             .bouncingOverscroll()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(contentPadding),
     ) {
         Text(
@@ -446,6 +460,17 @@ fun SettingsScreen(
                 modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
             )
             RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.VolumeUp,
+                title = "Loudness boost",
+                subtitle = loudnessBoostMode.detail,
+            )
+            SegmentedControl(
+                options = LoudnessBoostMode.entries.map(LoudnessBoostMode::label),
+                selectedIndex = LoudnessBoostMode.entries.indexOf(loudnessBoostMode),
+                onSelect = { AppSettings.setLoudnessBoostMode(LoudnessBoostMode.entries[it]) },
+                modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+            )
             SettingsSubRow(
                 title = "Prefer USB DAC",
                 checked = preferUsbDac,

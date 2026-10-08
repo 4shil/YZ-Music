@@ -72,7 +72,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -82,6 +84,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
@@ -206,6 +209,19 @@ import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.data.model.artworkAt
 import com.music.yzmusic.playback.BACK_RESTARTS_AFTER_MS
 import com.music.yzmusic.playback.autoplaySectionStart
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import com.music.yzmusic.ui.player.queue.ALL_TAGS_LABEL
+import com.music.yzmusic.ui.player.queue.QueueTag
+import com.music.yzmusic.ui.player.queue.QueueTagAxis
+import com.music.yzmusic.ui.player.queue.QueueTagGroup
+import com.music.yzmusic.ui.player.queue.computeQueueTags
+import com.music.yzmusic.data.stats.ArtistFacts
+import com.music.yzmusic.ui.player.queue.loadForTag
+import com.music.yzmusic.ui.player.queue.songMatchesQuery
+import com.music.yzmusic.ui.player.queue.songMatchesTag
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
@@ -585,6 +601,10 @@ fun NowPlayingScreen(
     onRemoveFromQueue: (Int) -> Unit,
     onMoveInQueue: (Int, Int) -> Unit,
     onClearQueue: () -> Unit,
+    onPlayFetched: (Song) -> Unit = {},
+    onEnqueueTagQueue: (List<Song>) -> Unit = {},
+    onClearTagQueue: () -> Unit = {},
+    tagQueueIds: Set<String> = emptySet(),
     onOpenMenu: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
@@ -1828,6 +1848,10 @@ fun NowPlayingScreen(
                             onMove = onMoveInQueue,
                             onClear = onClearQueue,
                             onClose = closeQueueToPlayer,
+                            onPlayFetched = onPlayFetched,
+                            onEnqueueTagQueue = onEnqueueTagQueue,
+                            onClearTagQueue = onClearTagQueue,
+                            tagQueueIds = tagQueueIds,
                             listState = queueListState,
                             modifier = Modifier.weight(1f),
                         )
@@ -3434,6 +3458,27 @@ private fun Modifier.bleedHorizontally(gutter: Dp): Modifier = layout { measurab
     }
 }
 
+private fun Modifier.fadingHorizontalEdges(): Modifier = this
+    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+    .drawWithCache {
+        val fade = 24.dp.toPx()
+        val leftBrush = Brush.horizontalGradient(
+            colors = listOf(Color.Transparent, Color.Black),
+            startX = 0f,
+            endX = fade,
+        )
+        val rightBrush = Brush.horizontalGradient(
+            colors = listOf(Color.Black, Color.Transparent),
+            startX = size.width - fade,
+            endX = size.width,
+        )
+        onDrawWithContent {
+            drawContent()
+            drawRect(brush = leftBrush, blendMode = BlendMode.DstIn)
+            drawRect(brush = rightBrush, blendMode = BlendMode.DstIn)
+        }
+    }
+
 /** Softens the list where it meets the header and the scrubber. */
 private fun Modifier.fadingEdges(): Modifier = this
     .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
@@ -3473,6 +3518,10 @@ private fun InlineQueue(
     onMove: (Int, Int) -> Unit,
     onClear: () -> Unit,
     onClose: () -> Unit = {},
+    onPlayFetched: (Song) -> Unit = {},
+    onEnqueueTagQueue: (List<Song>) -> Unit = {},
+    onClearTagQueue: () -> Unit = {},
+    tagQueueIds: Set<String> = emptySet(),
     listState: LazyListState = rememberLazyListState(),
     modifier: Modifier = Modifier,
 ) {
@@ -3515,15 +3564,120 @@ private fun InlineQueue(
     // AutoPlay's section needs no such limit — [autoplaySectionStart] always
     // puts it after the current track.
     val firstMovable = (currentIndex + 1).coerceIn(0, autoplayStart)
+
+    // ---- Tags and search. Both describe what is *drawn*, never what is queued:
+    // the Media3 queue is the playback source of truth and nothing here is ever
+    // sent to it. A tag changes which rows this list is asked for; "All"
+    // restores the live queue. When a tag covers a real catalog (GENRE,
+    // MOOD_FLOW, ARTIST, MOOD) a network fetch replaces the filtered list with
+    // ~25 different songs; ALBUM/QUALITY/EXPLICIT fall back to local filtering.
+    // Single tag at once — tapping a chosen chip untaps it and restores the
+    // live queue, tapping a different chip swaps the selection (no Clear
+    // needed, "All" is the reset). Mirrors YouTube Music's single-select chips.
+    var activeTag by remember { mutableStateOf<QueueTag?>(null) }
+
+    // Genre chips come from ArtistFacts (Last.fm, cached per artist, no network here).
+    // Watch its revision so the chip row updates when a background lookup lands,
+    // and enqueue any artists that aren't known yet — YZ's existing
+    // throttled worker handles the rest. Tags are bound to the *origin* queue
+    // (the queue before any tag replaced its tail), so advancing the playing
+    // song or injecting ~25 tag songs does not reshuffle or reload the chips.
+    val genreRevision by ArtistFacts.revision.collectAsStateWithLifecycle()
+    // Origin queue — snapshot before any tag injection. Updated only when the
+    // real queue changes to something other than our own injected tail.
+    var originQueue by remember { mutableStateOf(queue.filterNot { it.videoId in tagQueueIds }) }
+    var originSignature by remember { mutableStateOf(originQueue.joinToString("|") { it.videoId }) }
+    LaunchedEffect(queue, tagQueueIds) {
+        // Our injected tail is in the queue — this is not a new origin.
+        if (tagQueueIds.isNotEmpty() && queue.any { it.videoId in tagQueueIds }) return@LaunchedEffect
+        val sig = queue.joinToString("|") { it.videoId }
+        if (sig != originSignature) {
+            originQueue = queue.toList()
+            originSignature = sig
+        }
+    }
+    val tagGroups = remember(originQueue, genreRevision) { computeQueueTags(originQueue) }
+    LaunchedEffect(originQueue) {
+        if (ArtistFacts.genresAvailable) {
+            for (a in originQueue.map { it.artist }.distinct()) ArtistFacts.noticed(a)
+        }
+    }
+    // New origin queue → new chips → reset selection and any fetched overlay.
+    // Song advance or our own tail injection does not reset.
+    val tagCache = remember { mutableMapOf<QueueTag, List<Song>>() }
+    var fetched by remember { mutableStateOf<List<Song>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    LaunchedEffect(originSignature) {
+        activeTag = null
+        fetched = null
+        tagCache.clear()
+    }
+    // Once loaded, a tag's fetch is cached by tag (per origin queue) and
+    // reused on re-tap without reloading. Tapping every tag once does not
+    // reload previously seen tags. onClearTagQueue is debounced — clearing
+    // repeatedly while already on All is a no-op (guarded in MainActivity).
+    LaunchedEffect(activeTag) {
+        val tag = activeTag
+        if (tag == null || tag.axis == QueueTagAxis.ALBUM || tag.axis == QueueTagAxis.QUALITY || tag.axis == QueueTagAxis.EXPLICIT) {
+            fetched = null
+            loading = false
+            onClearTagQueue()
+            return@LaunchedEffect
+        }
+        tagCache[tag]?.let { cached ->
+            fetched = cached
+            loading = false
+            if (activeTag == tag) onEnqueueTagQueue(cached)
+            return@LaunchedEffect
+        }
+        loading = true
+        // Fetch against the origin queue snapshot, not the live mutated tail,
+        // so each tag builds from its origin context exactly once.
+        val fetchOrigin = originQueue
+        val result = runCatching { loadForTag(tag, fetchOrigin) }.getOrElse { emptyList<Song>() }
+        if (result.isNotEmpty()) {
+            tagCache[tag] = result
+            if (activeTag == tag) {
+                fetched = result
+                onEnqueueTagQueue(result)
+            }
+        } else {
+            if (activeTag == tag) fetched = null
+        }
+        loading = false
+    }
+    // Tags that replace the tail in Media3 (GENRE/MOOD/etc) mutate the real queue,
+    // so the list shows the mutated queue directly — no overlay. Only local-only
+    // axes filter the visible rows in place.
+    val localTag = activeTag
+    val tagLocalOnly = localTag != null &&
+        (localTag.axis == QueueTagAxis.ALBUM || localTag.axis == QueueTagAxis.QUALITY || localTag.axis == QueueTagAxis.EXPLICIT)
+    val filtering = tagLocalOnly
+    val manualVisible = remember(queue, autoplayStart, activeTag, tagLocalOnly) {
+        if (!filtering) (0 until autoplayStart).toList()
+        else (0 until autoplayStart).filter { queue[it].passesFilter(activeTag) }
+    }
+    val autoplayVisible = remember(queue, autoplayStart, activeTag, tagLocalOnly) {
+        if (!filtering) (autoplayStart until queue.size).toList()
+        else (autoplayStart until queue.size).filter { queue[it].passesFilter(activeTag) }
+    }
+    val showHeading = headingShown && (!filtering || autoplayVisible.isNotEmpty())
+    val matches = manualVisible.size + autoplayVisible.size
+    // Text search filters rows in place, so reordering would move wrong songs.
+    // A tag whose batch replaced the Media3 tail is the real queue — drag stays enabled.
+    val dragDisabled = filtering
+    val manualLazyRange = if (dragDisabled) IntRange.EMPTY else (firstMovable until autoplayStart)
+    val autoplayLazyRange = if (dragDisabled) IntRange.EMPTY else (autoplayStart + headingCount) until (autoplayStart + headingCount + autoplayRows.size)
+
     val manualDrag = rememberQueueDragState(
         listState = listState,
-        lazyRange = firstMovable until autoplayStart,
+        lazyRange = manualLazyRange,
         lazyOffset = 0,
         onMove = onMove,
     )
     val autoplayDrag = rememberQueueDragState(
         listState = listState,
-        lazyRange = (autoplayStart + headingCount) until (autoplayStart + headingCount + autoplayRows.size),
+        lazyRange = autoplayLazyRange,
         lazyOffset = headingCount,
         onMove = onMove,
     )
@@ -3531,18 +3685,25 @@ private fun InlineQueue(
     // Open on what's playing, not at the top of a long queue. The heading sits
     // between the two sections, so it counts as a row once it's above this one.
     //
-    // Never mid-drag, though. A track ending while a row is held would jump the
-    // list out from under the finger, and the jump takes the list's scroll off
-    // the edge auto-scroll below — which would leave the rest of that drag
-    // unable to scroll at all. Reordering is also the one time the user is
-    // certainly looking somewhere other than at the current track.
-    LaunchedEffect(currentIndex) {
+    // While a filter is on, the row for the playing track is wherever the
+    // filtered lists put it rather than at the queue index, so the position
+    // to scroll to is read off those. A track the filter is hiding has no row
+    // to scroll to and the list is left where the user left it.
+    LaunchedEffect(currentIndex, filtering, manualVisible, autoplayVisible) {
         val holdingNow = manualDrag.draggedKey != null || autoplayDrag.draggedKey != null
-        if (!holdingNow && currentIndex in queue.indices) {
-            val target = currentIndex + if (currentIndex >= autoplayStart) 1 else 0
-            if (target != listState.firstVisibleItemIndex) {
-                listState.scrollToItem(target)
+        if (holdingNow || currentIndex !in queue.indices) return@LaunchedEffect
+        val target = if (filtering) {
+            val inManual = manualVisible.indexOf(currentIndex)
+            if (inManual >= 0) inManual
+            else {
+                val inAutoplay = autoplayVisible.indexOf(currentIndex)
+                if (inAutoplay >= 0 && headingShown) manualVisible.size + 1 + inAutoplay else -1
             }
+        } else {
+            currentIndex + if (currentIndex >= autoplayStart) 1 else 0
+        }
+        if (target >= 0 && target != listState.firstVisibleItemIndex) {
+            listState.scrollToItem(target)
         }
     }
 
@@ -3571,39 +3732,40 @@ private fun InlineQueue(
     }
 
     Column(
-        modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .queueSwipeDown(
+                enabled = true,
+                listState = listState,
+                scope = coroutineScope,
+                isReordering = holding,
+                allowScrollToTop = true,
+                consumeDownDeltas = true,
+                onClose = onClose,
+            ),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .queueSwipeDown(
-                    enabled = true,
-                    listState = listState,
-                    scope = coroutineScope,
-                    isReordering = holding,
-                    allowScrollToTop = true,
-                    consumeDownDeltas = true,
-                    onClose = onClose,
-                ),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Queue",
-                style = MaterialTheme.typography.titleLarge,
-                color = Color.White,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = "Clear",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White.copy(alpha = 0.75f),
+        // Outside the list on purpose. The list's rows are addressed by
+        // position — the drag turns a row position into a queue index by
+        // arithmetic — so nothing may be inserted between them. Everything
+        // here sits above the list and moves no row's index.
+        QueueInsightsBar(
+            tagGroups = tagGroups,
+            activeTag = activeTag,
+            onTag = { tapped -> activeTag = if (activeTag == tapped) null else tapped },
+            onClearTags = { activeTag = null; fetched = null },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (loading) {
+            Spacer(Modifier.height(6.dp))
+            androidx.compose.material3.LinearProgressIndicator(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(percent = 50))
-                    .clickable(onClick = onClear)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .fillMaxWidth()
+                    .padding(horizontal = PLAYER_GUTTER),
+                color = Color.White.copy(alpha = 0.85f),
+                trackColor = Color.White.copy(alpha = 0.14f),
             )
+            Spacer(Modifier.height(6.dp))
         }
-        Spacer(Modifier.height(4.dp))
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -3613,100 +3775,188 @@ private fun InlineQueue(
                 .nestedScroll(swallowDownOverscroll),
             contentPadding = PaddingValues(horizontal = PLAYER_GUTTER),
         ) {
-            // What was asked for: the album, playlist or station the queue was
-            // started from, plus anything queued by hand since.
-            itemsIndexed(
-                items = manualRows,
-                key = { index, _ -> manualKeys[index] },
-            ) { index, song ->
-                val key = manualKeys[index]
-                val dragging = manualDrag.draggedKey == key
-                InlineQueueRow(
-                    song = song,
-                    isCurrent = index == currentIndex,
-                    onClick = { onJumpTo(index) },
-                    onRemove = { onRemove(index) },
-                    // Only what's still queued ahead. The playing track and
-                    // everything already played sit above the line a drag
-                    // can't cross.
-                    draggable = index >= firstMovable,
-                    dragging = dragging,
-                    onDragStart = { manualDrag.onDragStart(key) },
-                    onDrag = manualDrag::onDrag,
-                    onDragEnd = manualDrag::onDragEnd,
-                    modifier = Modifier
-                        .zIndex(if (dragging) 1f else 0f)
-                        .graphicsLayer { translationY = if (dragging) manualDrag.renderOffset else 0f }
-                        // The dragged row follows the finger, so it is the one
-                        // row that must not also be animating to a slot. Its
-                        // neighbours skip the animation too, for as long as
-                        // *anything* in the section is being dragged — see the
-                        // note on [manualDrag] below for why.
-                        .then(if (manualDrag.draggedKey != null) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)),
-                )
-            }
-            // Heading first, then what AutoPlay has lined up under it. With
-            // nothing lined up yet it closes the queue as a promise instead.
-            if (headingShown) {
-                item(key = "autoplay-heading") {
-                    Row(
+                // The real queue — when a tag replaced the tail, what you see
+                // is what will play next. Draggable either way; only text/local
+                // filtering disables reorder.
+                itemsIndexed(
+                    items = manualVisible,
+                    key = { position, _ -> manualKeys[manualVisible[position]] },
+                ) { position, _ ->
+                    val index = manualVisible[position]
+                    val key = manualKeys[index]
+                    val dragging = manualDrag.draggedKey == key
+                    InlineQueueRow(
+                        song = queue[index],
+                        isCurrent = index == currentIndex,
+                        onClick = { onJumpTo(index) },
+                        onRemove = { onRemove(index) },
+                        // Only what's still queued ahead. The playing track and
+                        // everything already played sit above the line a drag
+                        // can't cross.
+                        draggable = !dragDisabled && index >= firstMovable,
+                        dragging = dragging,
+                        onDragStart = { manualDrag.onDragStart(key) },
+                        onDrag = manualDrag::onDrag,
+                        onDragEnd = manualDrag::onDragEnd,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            YZMusicIcons.Infinity,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.75f),
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "AutoPlay",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color.White,
+                            .zIndex(if (dragging) 1f else 0f)
+                            .graphicsLayer { translationY = if (dragging) manualDrag.renderOffset else 0f }
+                            .then(if (manualDrag.draggedKey != null) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)),
+                    )
+                }
+                // Heading first, then what AutoPlay has lined up under it. With
+                // nothing lined up yet it closes the queue as a promise instead.
+                if (showHeading) {
+                    item(key = "autoplay-heading") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                YZMusicIcons.Infinity,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.75f),
+                                modifier = Modifier.size(18.dp),
                             )
-                            Text(
-                                text = if (autoplayStart < queue.size) {
-                                    "Similar music, picked to follow on"
-                                } else {
-                                    "Similar music will keep playing"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(alpha = 0.55f),
-                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "AutoPlay",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White,
+                                )
+                                Text(
+                                    text = if (autoplayStart < queue.size) {
+                                        "Similar music, picked to follow on"
+                                    } else {
+                                        "Similar music will keep playing"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.White.copy(alpha = 0.55f),
+                                )
+                            }
                         }
                     }
                 }
-            }
-            itemsIndexed(
-                items = autoplayRows,
-                key = { index, _ -> autoplayKeys[index] },
-            ) { index, song ->
-                val at = autoplayStart + index
-                val key = autoplayKeys[index]
-                val dragging = autoplayDrag.draggedKey == key
-                InlineQueueRow(
-                    song = song,
-                    isCurrent = at == currentIndex,
-                    onClick = { onJumpTo(at) },
-                    onRemove = { onRemove(at) },
-                    draggable = true,
-                    dragging = dragging,
-                    onDragStart = { autoplayDrag.onDragStart(key) },
-                    onDrag = autoplayDrag::onDrag,
-                    onDragEnd = autoplayDrag::onDragEnd,
-                    modifier = Modifier
-                        .zIndex(if (dragging) 1f else 0f)
-                        .graphicsLayer { translationY = if (dragging) autoplayDrag.renderOffset else 0f }
-                        .then(if (autoplayDrag.draggedKey != null) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)),
-                )
+                itemsIndexed(
+                    items = autoplayVisible,
+                    key = { position, _ -> autoplayKeys[autoplayVisible[position] - autoplayStart] },
+                ) { position, _ ->
+                    val at = autoplayVisible[position]
+                    val key = autoplayKeys[at - autoplayStart]
+                    val dragging = autoplayDrag.draggedKey == key
+                    InlineQueueRow(
+                        song = queue[at],
+                        isCurrent = at == currentIndex,
+                        onClick = { onJumpTo(at) },
+                        onRemove = { onRemove(at) },
+                        draggable = !dragDisabled,
+                        dragging = dragging,
+                        onDragStart = { autoplayDrag.onDragStart(key) },
+                        onDrag = autoplayDrag::onDrag,
+                        onDragEnd = autoplayDrag::onDragEnd,
+                        modifier = Modifier
+                            .zIndex(if (dragging) 1f else 0f)
+                            .graphicsLayer { translationY = if (dragging) autoplayDrag.renderOffset else 0f }
+                            .then(if (autoplayDrag.draggedKey != null) Modifier else Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)),
+                    )
+                }
+                if (matches == 0 && filtering) {
+                    item(key = "queue-no-matches") {
+                        Text(
+                            text = "Nothing in the queue matches",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.55f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 22.dp),
+                        )
+                    }
+                }
+        }
+    }
+}
+
+private fun Song.passesFilter(tag: QueueTag?): Boolean =
+    tag == null || songMatchesTag(this, tag)
+
+/**
+ * The tags that describe the queue — drawn above the list rather than inside it.
+ * A tag that has a fetched catalog replaces the tail after the current track
+ * in the real Media3 queue (same screen, same playback — next tracks change).
+ * Local-only tags and text search only filter which rows are drawn.
+ *
+ * Single-select: tapping a chosen chip clears it ("All" is the reset). Tapping
+ * a different chip swaps the selection. The header holds the Search button;
+ * any extra metadata line was removed by request — the chips and the list are enough.
+ */
+@Composable
+private fun QueueInsightsBar(
+    tagGroups: List<QueueTagGroup>,
+    activeTag: QueueTag?,
+    onTag: (QueueTag) -> Unit,
+    onClearTags: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val chips = remember(tagGroups) { tagGroups.flatMap { it.tags } }
+    // Search field now lives inline in the header Row (red-marked place);
+    // this bar only draws the chip row so header + chips share the same
+    // gutter without a second stacked search row.
+    Column(modifier = modifier) {
+        if (tagGroups.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bleedHorizontally(PLAYER_GUTTER)
+                    .fadingHorizontalEdges(),
+                contentPadding = PaddingValues(horizontal = PLAYER_GUTTER),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item(key = "tag-all") {
+                    QueueTagChip(
+                        label = ALL_TAGS_LABEL,
+                        selected = activeTag == null,
+                        onClick = onClearTags,
+                    )
+                }
+                items(chips, key = { "tag/${it.axis}/${it.label}" }) { tag ->
+                    QueueTagChip(
+                        label = tag.label,
+                        selected = tag == activeTag,
+                        onClick = { onTag(tag) },
+                    )
+                }
             }
         }
     }
 }
+
+/** One tag — label only, no count badge. Ordering uses count internally. */
+@Composable
+private fun QueueTagChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(if (selected) Color.White.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.14f))
+            .then(if (!selected) Modifier.border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(percent = 50)) else Modifier)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+            color = if (selected) Color.Black.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.88f),
+        )
+    }
+}
+
 
 /**
  * A key per row, stable across a reorder and unique even when the same song
@@ -4236,6 +4486,71 @@ private fun InlineQueueRow(
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun FetchedQueueRow(
+    song: Song,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(QueueRowShape)
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val context = LocalContext.current
+        val artModel = remember(song.thumbnailUrl) {
+            ImageRequest.Builder(context)
+                .data(song.artworkAt(ROW_ART_PX) ?: song.thumbnailUrl)
+                .crossfade(false)
+                .build()
+        }
+        AsyncImage(
+            model = artModel,
+            contentDescription = null,
+            modifier = Modifier
+                .size(44.dp)
+                .clip(QueueThumbShape)
+                .thumbnailBorder(QueueThumbShape)
+                .background(QueueThumbBg),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White.copy(alpha = 0.92f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (song.isExplicit == true) {
+                    ExplicitBadge(
+                        color = Color.White.copy(alpha = 0.8f),
+                        backgroundColor = Color.White.copy(alpha = 0.18f),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Icon(
+            Icons.Rounded.PlayArrow,
+            contentDescription = "Play",
+            tint = Color.White.copy(alpha = 0.55f),
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 

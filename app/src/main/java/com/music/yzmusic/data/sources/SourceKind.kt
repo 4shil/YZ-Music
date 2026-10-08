@@ -4,14 +4,23 @@
  * The kinds of source this build knows how to talk to.
  *
  * Fixed and small on purpose. **Declaration order here is the order sources
- * are tried** — see `SourceRegistry.active()`, which sorts on `kind.ordinal` —
- * so a custom module comes before the built-in one, then JioSaavn, then
- * YouTube Music. Adding a source means adding a [MusicSource] implementation
- * and an entry here, which is the point — every protocol the app speaks is one
- * someone can read in this repo, and a source can't teach the app a new way to
- * behave after it ships.
+ * are preferred** - see `SourceRegistry.active()`, which sorts on
+ * `kind.ordinal` - so a custom module comes before the built-in one, then
+ * YouTube Music, then JioSaavn. Adding a source means adding a [MusicSource]
+ * implementation and an entry here, which is the point - every protocol the app
+ * speaks is one someone can read in this repo, and a source can't teach the app
+ * a new way to behave after it ships.
  *
- * What varies per *instance* — which index, whose module — is [SourceConfig].
+ * ## Being below YouTube is not being switched off
+ *
+ * A source ranked under YouTube Music is not merely less preferred — it is
+ * unreachable by the substitution path, which only asks what is ranked
+ * *above*. JioSaavn below YouTube is therefore reached by
+ * `SourceResolver.fallbackForYouTube`, and only when the YouTube walk for that
+ * track comes back with nothing. That is the whole meaning of "fallback" here:
+ * the default answers, and this answers when it cannot.
+ *
+ * What varies per *instance* - which index, whose module - is [SourceConfig].
  */
 enum class SourceKind(
     val label: String,
@@ -80,27 +89,42 @@ enum class SourceKind(
         canServeLossless = true,
     ),
 
-    JIOSAAVN(
-        label = "JioSaavn",
-        detail = "JioSaavn high-quality streams up to 320kbps AAC/MP4. A lossy fallback, tried before YouTube.",
-        labels = listOf("High Quality", "320kbps"),
-        needsServer = false,
-        canServeLossless = false,
-        worthPrefetching = true,
-    ),
-
     /**
      * The source the app was built on, listed here so it always has a fixed
-     * place: second, behind the module source. It cannot be removed — see
-     * [SourceRegistry]. Nothing else in the app can supply a home feed, a
-     * radio station or a related-tracks queue.
+     * place: third, behind the module sources and ahead of JioSaavn. It cannot
+     * be removed - see [SourceRegistry]. Nothing else in the app can supply a
+     * home feed, a radio station or a related-tracks queue, and it is the only
+     * one whose catalogue matches what was searched for, which is why it is the
+     * default rather than the thing everything else races to beat.
      */
     YOUTUBE(
         label = "YouTube Music",
-        detail = "The full catalogue, at Opus up to about 171 kbps. Lossy — there is no " +
-            "lossless rendition to ask for.",
+        detail = "The full catalogue, at Opus up to about 171 kbps. Lossy - there is no " +
+            "lossless rendition to ask for. The default: every other source is a " +
+            "fallback for the cases this one cannot serve.",
         labels = listOf("Lossy", "Full catalogue", "Radio"),
         needsServer = false,
         canServeLossless = false,
+    ),
+
+    /**
+     * Higher bitrate than YouTube, reached only when YouTube cannot answer.
+     *
+     * Ranked below rather than above on purpose. Both of its virtues are real
+     * and one of its costs is: its catalogue is broader and its matching is
+     * looser, so a fallback that fires on a track YouTube simply lacks will
+     * sometimes hand back a different recording under the right title. Better
+     * than silence, not better than the default — which is why it is the
+     * fallback and not the preference.
+     */
+    JIOSAAVN(
+        label = "JioSaavn",
+        detail = "High-quality streams up to 320kbps AAC/MP4 — better bitrate than " +
+            "YouTube Music, but some results may be an unrelated recording. Used " +
+            "only as a fallback, when YouTube Music cannot serve a track.",
+        labels = listOf("High Quality", "320kbps", "Fallback"),
+        needsServer = false,
+        canServeLossless = false,
+        worthPrefetching = true,
     ),
 }

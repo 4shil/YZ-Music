@@ -168,6 +168,8 @@ class PlaybackService : MediaLibraryService() {
     private val spatialAudioProcessorB = SpatialAudioProcessor()
     private val equalizerProcessorA = EqualizerProcessor()
     private val equalizerProcessorB = EqualizerProcessor()
+    private val loudnessBoostA = LoudnessBoostProcessor()
+    private val loudnessBoostB = LoudnessBoostProcessor()
     private var partySync: PartySync? = null
     @Volatile
     private var currentIsAtmos: Boolean = false
@@ -795,10 +797,13 @@ class PlaybackService : MediaLibraryService() {
             }
             // A track queued from YouTube may be held by a source the user
             // ranked above it — see [SourceResolver.substituteForYouTube] and
-            // [raceYouTubeOrModule]. Only worth the extra lookup when
-            // something actually outranks YouTube; otherwise this is the
-            // plain resolve every build before this one made.
-            if (!SourceResolver.canSubstituteForYouTube()) {
+            // [raceYouTubeOrModule] — or, failing that, by one ranked below it
+            // as a fallback. Only worth the extra lookup when something can
+            // actually answer; otherwise this is the plain resolve every build
+            // before this one made.
+            if (!SourceResolver.canSubstituteForYouTube() &&
+                !SourceResolver.canFallbackForYouTube()
+            ) {
                 val streamUrl = try {
                     runBlocking(about) {
                         withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
@@ -861,8 +866,8 @@ class PlaybackService : MediaLibraryService() {
         mediaSourceFactory = DefaultMediaSourceFactory(AudioCache.playbackFactory(defaultDataSourceFactory))
             .setLoadErrorHandlingPolicy(PermanentAwareLoadErrorPolicy())
 
-        val exoPlayer = buildPlayer(spatialAudioProcessorA, equalizerProcessorA, transitionFilterA, ownsSession = true)
-        val sparePlayer = buildPlayer(spatialAudioProcessorB, equalizerProcessorB, transitionFilterB, ownsSession = false)
+        val exoPlayer = buildPlayer(spatialAudioProcessorA, equalizerProcessorA, transitionFilterA, loudnessBoostA, ownsSession = true)
+        val sparePlayer = buildPlayer(spatialAudioProcessorB, equalizerProcessorB, transitionFilterB, loudnessBoostB, ownsSession = false)
         player = exoPlayer
         spare = sparePlayer
         // Both sinks feed the same session id, so the system equalizer and any
@@ -1170,9 +1175,10 @@ class PlaybackService : MediaLibraryService() {
         spatial: SpatialAudioProcessor,
         equalizer: EqualizerProcessor,
         filter: TransitionFilterProcessor,
+        loudness: LoudnessBoostProcessor,
         ownsSession: Boolean,
     ): ExoPlayer = ExoPlayer.Builder(this)
-        .setRenderersFactory(silenceSkippingRenderers(spatial, equalizer, filter))
+        .setRenderersFactory(silenceSkippingRenderers(spatial, equalizer, filter, loudness))
         .setMediaSourceFactory(requireNotNull(mediaSourceFactory))
         .setLoadControl(farBufferingLoadControl())
         .setAudioAttributes(AUDIO_ATTRIBUTES, /* handleAudioFocus = */ ownsSession)
@@ -2695,7 +2701,30 @@ class PlaybackService : MediaLibraryService() {
             return Resolved.Module(quick)
         }
 
-        val url = fallback.await().getOrThrow()
+        // Awaited once and inspected, rather than inspected and then awaited: this is
+        // the losing leg of the race above, so whatever it holds is the answer
+        // to "did the default manage this track at all".
+        val fromYouTube = fallback.await()
+
+        // YouTube could not serve it, so the answer now comes from whatever was
+        // ranked below it — JioSaavn, which is a fallback precisely because it
+        // is only consulted once the default has already come back empty.
+        //
+        // Asked after [lookup] in preference terms — anything ranked above
+        // YouTube was the user's own choice of a better copy and beats a lossy
+        // fallback for a track they queued — but [lookup] is still running here
+        // and is awaited below, so this costs a lookup that was going to happen
+        // either way.
+        if (fromYouTube.isFailure && SourceResolver.canFallbackForYouTube()) {
+            val below = runCatching {
+                withTimeoutOrNull(SUBSTITUTE_TIMEOUT_MS) {
+                    SourceResolver.fallbackForYouTube(target)
+                }
+            }.getOrNull()
+            if (below != null) return Resolved.Module(below)
+        }
+
+        val url = fromYouTube.getOrThrow()
         // Marked pending only here, with the fallback's own bitrate in hand:
         // that figure is the answer to "better than what?" the second look
         // measures candidates against, and it isn't known until the client
@@ -3045,6 +3074,7 @@ class PlaybackService : MediaLibraryService() {
         spatial: SpatialAudioProcessor,
         equalizer: EqualizerProcessor,
         transition: TransitionFilterProcessor,
+        loudness: LoudnessBoostProcessor,
     ) = object : DefaultRenderersFactory(this) {
         override fun buildAudioRenderers(
             context: Context,
@@ -3090,7 +3120,7 @@ class PlaybackService : MediaLibraryService() {
                         // Transition filtering last of the two: widening is a
                         // property of the track, and a bass swap that ran before it
                         // would have its own low end fed back in by the crossfeed.
-                        arrayOf(spatial, equalizer, transition),
+                        arrayOf(spatial, equalizer, transition, loudness),
                         SilenceSkippingAudioProcessor(
                             MIN_SILENCE_US,
                             SilenceSkippingAudioProcessor.DEFAULT_SILENCE_RETENTION_RATIO,
@@ -3185,6 +3215,17 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             AppSettings.spatialAudio.collect {
                 updateSpatialAudioPolicy()
+            }
+        }
+        scope.launch {
+            // Both processors, not just the audible one: the crossfade hands
+            // the session to the spare mid-track, and a boost that only landed
+            // on whichever player happened to be playing would arrive halfway
+            // through the transition. The processor reads this every buffer and
+            // ramps to it, so nothing needs flushing here.
+            AppSettings.loudnessBoostMode.collect { mode ->
+                loudnessBoostA.setTargetGainMb(mode.millibels)
+                loudnessBoostB.setTargetGainMb(mode.millibels)
             }
         }
         scope.launch {
