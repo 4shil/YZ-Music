@@ -316,5 +316,9 @@
         <item quantity="one">%1$d Titel</item>
         <item quantity="other">%1$d Titel</item>
     </plurals>
+    <!-- Browse kinds that have no label of their own; used in the header meta. -->
+    <string name="charts">Charts</string>
+    <string name="category">Category</string>
+    <string name="new_releases">New releases</string>
 
 </resources>

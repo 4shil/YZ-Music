@@ -417,6 +417,11 @@ private fun YZMusicApp(
     // A Library shelf's "Show all" — the shelf it was opened from, so its own
     // cards can be laid out again as a full-screen grid. See [LibraryGridPage].
     var libraryShowAll by remember { mutableStateOf<HomeShelf?>(null) }
+    // A detail page's own "Show all" — an artist shelf opened as a grid in place
+    // of the page rather than as a new page navigated to. Distinct from
+    // [libraryShowAll] because the two are shown by different screens and must
+    // not outlive each other's page.
+    var activeDetailShelf by remember { mutableStateOf<HomeShelf?>(null) }
     var showLyricsSources by remember { mutableStateOf(false) }
     var showAppLanguage by remember { mutableStateOf(false) }
     var showListenBrainzLogin by remember { mutableStateOf(false) }
@@ -1988,6 +1993,16 @@ private fun YZMusicApp(
                             } else {
                                 null
                             },
+                            // Which song is playing, so the artist page's Top
+                            // songs rows can mark it and animate.
+                            currentSong = player.song,
+                            isPlaying = player.isPlaying,
+                            // "Show all" on an artist shelf swaps the page for a
+                            // grid in place, so the shelf it opened has to
+                            // outlive this call — and going back has to be able
+                            // to put the page back.
+                            activeShelf = activeDetailShelf,
+                            onActiveShelfChange = { activeDetailShelf = it },
                             contentPadding = listPadding,
                         )
                     } else when (key.removePrefix(TAB_KEY).toIntOrNull() ?: selectedTab) {

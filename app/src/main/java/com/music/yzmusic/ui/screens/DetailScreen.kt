@@ -1,7 +1,12 @@
 package com.music.yzmusic.ui.screens
 
 import android.os.Build
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +31,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -44,6 +53,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.music.yzmusic.R
 import androidx.compose.runtime.Composable
@@ -122,18 +132,25 @@ import com.music.yzmusic.data.model.ShelfType
 import com.music.yzmusic.data.model.Song
 import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.artworkAt
+import com.music.yzmusic.data.model.durationMillis
+import com.music.yzmusic.data.model.isSameTrackAs
 import com.music.yzmusic.data.settings.AppSettings
 import com.music.yzmusic.ui.components.DownloadedBadge
 import com.music.yzmusic.ui.components.ExplicitBadge
+import com.music.yzmusic.ui.components.LIBRARY_GRID_SPACING
 import com.music.yzmusic.ui.components.MessageState
 import com.music.yzmusic.ui.components.PAGE_GUTTER
 import com.music.yzmusic.ui.components.ROW_DIVIDER_INSET
+import com.music.yzmusic.ui.components.RowMoreButton
 import com.music.yzmusic.ui.components.SHELF_CARD_WIDTH
+import com.music.yzmusic.ui.components.SearchPlayingBars
 import com.music.yzmusic.ui.components.SongRow
 import com.music.yzmusic.ui.components.thumbnailBorder
 import com.music.yzmusic.ui.components.detailSkeleton
+import com.music.yzmusic.ui.components.libraryGrid
 import com.music.yzmusic.ui.components.lightweightLiquidGlass
 import com.music.yzmusic.ui.components.topBarContentPadding
+import com.music.yzmusic.ui.components.trackColumnWidth
 import com.music.yzmusic.ui.haptics.Haptic
 import com.music.yzmusic.ui.haptics.rememberHaptics
 import com.music.yzmusic.ui.icons.YZMusicIcons
@@ -165,6 +182,14 @@ private val PILL_SHAPE = RoundedCornerShape(12.dp)
  * search can carry the page up to it.
  */
 private const val SEARCH_ITEM_INDEX = 1
+
+/**
+ * How many cards an artist shelf's row shows before it offers "Show all".
+ *
+ * A row that has room for everything should not offer to show everything, and
+ * one that does not is hiding cards the reader cannot reach any other way.
+ */
+private const val ARTIST_ROW_MAX_ITEMS = 5
 
 /**
  * The ways a title credits more than one artist.
@@ -375,8 +400,14 @@ fun DetailScreen(
         query = ""
     }
     // Back closes the search first — this handler is registered after the one
-    // that pops the page, so it is the one that answers while it's enabled.
-    BackHandler(enabled = searching) { closeSearch() }
+    // That pops the page, so it is the one that answers while it's enabled.
+    //
+    // The grid a shelf's "Show all" opened is closer than the page is: it was
+    // reached from inside the page, so back puts the page back rather than
+    // closing it.
+    BackHandler(enabled = searching || activeShelf != null) {
+        if (searching) closeSearch() else onActiveShelfChange(null)
+    }
 
     // Each surviving row still knows where it sat in the full running order, so
     // an album's track numbers stay the album's rather than becoming positions
@@ -402,9 +433,10 @@ fun DetailScreen(
     // The credit line the header shows is the artist as far as the catalogue
     // services are concerned. A browse card's subtitle sometimes omits it, in
     // which case the tracks themselves know who it is.
-    val credit = remember(page.subtitle, songs) {
-        page.headerLines(songs.size).first.ifBlank { songs.firstOrNull()?.artist.orEmpty() }
-    }
+    // Not remembered: [headerLines] reads string resources, so it is a composable
+    // call. The credit is one stringResource away from being free, and the effect
+    // below only re-runs when it actually changes.
+    val credit = page.headerLines(songs.size).first.ifBlank { songs.firstOrNull()?.artist.orEmpty() }
     var canvas by remember(page.browseId) { mutableStateOf<CanvasArtwork?>(null) }
     LaunchedEffect(page.browseId, page.title, credit, canvasEnabled) {
         // An artist's clip is set below, by the lookup that finds it.
@@ -436,8 +468,21 @@ fun DetailScreen(
         if (searching) listState.animateScrollToItem(SEARCH_ITEM_INDEX, -searchStop)
     }
 
-    BoxWithConstraints(modifier.fillMaxSize().background(palette.wash)) {
-        val availableWidth = maxWidth
+    // The page, or the grid a "Show all" opened in place of it. Swapped by
+    // cross-fading rather than by navigating, because the shelf is already in
+    // memory and re-opening it as a page would refetch what the row was a
+    // preview of, and put the reader a screen away from where they were.
+    AnimatedContent(
+        targetState = activeShelf,
+        transitionSpec = {
+            fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(180))
+        },
+        label = "artist_shelf_transition",
+        modifier = modifier.fillMaxSize(),
+    ) { targetShelf ->
+        if (targetShelf == null) {
+            BoxWithConstraints(Modifier.fillMaxSize().background(palette.wash)) {
+                val availableWidth = maxWidth
         // The artwork is drawn behind the list rather than in it, so both need
         // to agree on its height without being able to ask each other. The
         // width is the page's, so the ratio decides it and both can work it out
@@ -588,21 +633,34 @@ fun DetailScreen(
                     // it pages sideways four at a time and stops at twenty.
                     item {
                         val top = state.data.take(MAX_ARTIST_SONGS)
-                        SectionHeading("Top songs", palette)
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            items(top.chunked(SONGS_PER_COLUMN)) { column ->
-                                Column(Modifier.fillParentMaxWidth(0.88f)) {
-                                    column.forEach { song ->
-                                        CompactSongRow(
-                                            song = song,
-                                            palette = palette,
-                                            onClick = { onSongClick(top, top.indexOf(song)) },
-                                            onLongPress = { onSongLongPress(song) },
-                                            downloadedTint = downloadedTint,
-                                        )
+                        SectionHeading(
+                            title = stringResource(R.string.top_songs),
+                            palette = palette,
+                            horizontalPadding = ARTIST_CONTENT_GUTTER,
+                        )
+                        // Measured rather than a fixed fraction of the page: a
+                        // column four rows deep wants the same width in portrait
+                        // and in landscape, and 88% of a wide window is a column
+                        // with one song's worth of room to itself.
+                        BoxWithConstraints {
+                            val columnWidth = trackColumnWidth(maxWidth)
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = ARTIST_CONTENT_GUTTER),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(top.chunked(SONGS_PER_COLUMN)) { column ->
+                                    Column(Modifier.width(columnWidth)) {
+                                        column.forEach { song ->
+                                            CompactSongRow(
+                                                song = song,
+                                                palette = palette,
+                                                onClick = { onSongClick(top, top.indexOf(song)) },
+                                                onLongPress = { onSongLongPress(song) },
+                                                downloadedTint = downloadedTint,
+                                                isCurrent = song.isSameTrackAs(currentSong),
+                                                isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -693,7 +751,16 @@ fun DetailScreen(
                 val isSongShelf = shelf.type == ShelfType.CHART_SONGS ||
                     (shelf.title.contains("Song", ignoreCase = true) && shelf.items.any { it.customIndex != null })
 
-                val showAllAction = if (shelf.moreBrowseId != null) {
+                // On an artist page the shelf is already in memory — the row is a
+                // preview of it — so "Show all" renders that same shelf as a grid
+                // in place of the page rather than re-fetching it through
+                // [ShelfItem.moreBrowseId] and pushing a second page. See
+                // [ArtistShelfGridPage]. Every other page keeps the browse-id
+                // route, because those shelves really are a different query.
+                val canShowAll = shelf.items.size > ARTIST_ROW_MAX_ITEMS
+                val showAllAction = if (isArtist && canShowAll) {
+                    { onActiveShelfChange(shelf) }
+                } else if (shelf.moreBrowseId != null) {
                     {
                         onSectionItemClick(
                             ShelfItem(
@@ -871,6 +938,16 @@ fun DetailScreen(
 
             if (isArtist) aboutItem()
         }
+        }
+        } else {
+            ArtistShelfGridPage(
+                shelf = targetShelf,
+                palette = palette,
+                onItemClick = onSectionItemClick,
+                onItemLongPress = onSectionItemLongPress,
+                contentPadding = contentPadding,
+            )
+        }
     }
 }
 
@@ -898,7 +975,7 @@ private fun ReleaseHeader(
     onArtistClick: (String, String) -> Unit,
     onToggleLibrary: (() -> Unit)?,
 ) {
-    val (credit, meta) = page.headerLines(trackCount)
+    val (credit, meta) = page.headerLines(trackCount, songs.playtime())
     // Every row on a release carries the same credit — see [pageCredit] — so
     // the first one speaks for the whole page, the same source the rows'
     // own long-press "Open artist" already reads from.
@@ -1099,7 +1176,7 @@ private fun DetailSearchField(
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    text = "Search this ${type.label?.lowercase(Locale.ROOT) ?: "list"}",
+                    text = stringResource(R.string.search_this_list),
                     style = MaterialTheme.typography.bodyLarge,
                     color = palette.onBackgroundVariant,
                     maxLines = 1,
@@ -1577,17 +1654,6 @@ private fun CircleIconButton(
     }
 }
 
-/** Track count and running time, the way a release page signs off. */
-@Composable
-private fun ReleaseFooter(songs: List<Song>, palette: ArtworkPalette) {
-    Text(
-        text = songs.playtimeSummary(),
-        style = MaterialTheme.typography.labelMedium,
-        color = palette.onBackgroundVariant,
-        modifier = Modifier.padding(start = HEADER_GUTTER, end = HEADER_GUTTER, top = 18.dp),
-    )
-}
-
 /** "1.2M subscribers" and "3.4M monthly listeners", off the artist header. */
 @Composable
 private fun ArtistStatsRow(
@@ -1785,6 +1851,9 @@ private fun CompactSongRow(
     onClick: () -> Unit,
     onLongPress: () -> Unit,
     downloadedTint: Color? = null,
+    /** Whether this row is the track currently playing. */
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
 ) {
     Row(
         modifier = Modifier
@@ -1793,21 +1862,24 @@ private fun CompactSongRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AsyncImage(
-            model = song.artworkAt(ROW_ART_PX),
-            contentDescription = null,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .thumbnailBorder(RoundedCornerShape(7.dp))
-                .background(palette.elevated),
-        )
+        Box(Modifier.size(48.dp)) {
+            AsyncImage(
+                model = song.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .thumbnailBorder(RoundedCornerShape(7.dp))
+                    .background(palette.elevated),
+            )
+            if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.titleMedium,
-                color = palette.onBackground,
+                color = if (isCurrent) palette.accent else palette.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -2282,6 +2354,56 @@ private fun DetailRankedSongRowItem(
 }
 
 /**
+ * A shelf's worth of cards as a full-screen grid, in place of the page.
+ *
+ * Where "Show all" used to navigate to a browse id and open a second page, the
+ * shelf it was opened from is usually already in memory: the row is a preview of
+ * it. Rendering that again as a grid rather than re-fetching it means the cards
+ * arrive instantly, the hero and the header stay where they were, and going back
+ * is the same gesture that opened it.
+ *
+ * No top bar of its own — the host's back arrow and title are still up there,
+ * and a second one would be two answers to the same gesture.
+ */
+@Composable
+private fun ArtistShelfGridPage(
+    shelf: HomeShelf,
+    palette: ArtworkPalette,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)?,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+) {
+    val gridState = rememberLazyGridState()
+    BoxWithConstraints(modifier.fillMaxSize().background(palette.background)) {
+        val grid = libraryGrid(maxWidth - PAGE_GUTTER * 2)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(grid.columns),
+            state = gridState,
+            contentPadding = PaddingValues(
+                top = topBarContentPadding(),
+                bottom = contentPadding.calculateBottomPadding() + 16.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(LIBRARY_GRID_SPACING),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = PAGE_GUTTER),
+        ) {
+            items(shelf.items, key = { it.browseId ?: it.title }) { item ->
+                SectionCard(
+                    item = item,
+                    palette = palette,
+                    onClick = { onItemClick(item) },
+                    onLongPress = onItemLongPress?.let { { it(item) } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/**
  * Splits the one subtitle a browse row hands over — "Album • Travis Scott •
  * 2023", or sometimes just "Travis Scott" — into the credit line and the
  * metadata line the header shows separately.
@@ -2290,16 +2412,22 @@ private fun DetailRankedSongRowItem(
  * it: the player knows an album's artist but not its year, search knows both,
  * and a home card frequently knows neither.
  */
-private fun DetailPage.headerLines(trackCount: Int): Pair<String, String> {
+@Composable
+private fun DetailPage.headerLines(trackCount: Int, playtime: String? = null): Pair<String, String> {
     val parts = subtitle.split("•", "·").map { it.trim() }.filter { it.isNotEmpty() }
     val year = parts.lastOrNull { it.length == 4 && it.all(Char::isDigit) }
     val kind = parts.firstOrNull { it.lowercase(Locale.ROOT) in KIND_WORDS }
     val credit = parts.filter { it != year && it != kind }.joinToString(", ")
     val meta = listOfNotNull(
-        kind ?: type.label,
+        kind ?: type.localizedLabel(),
         year,
-        trackCount.takeIf { it > 0 }?.let { "$it ${if (it == 1) "song" else "songs"}" },
-    ).joinToString(" • ").uppercase(Locale.ROOT)
+        // A real plural resource, so the count reads correctly in a language
+        // where appending an "s" is not how you pluralise.
+        trackCount.takeIf { it > 0 }?.let {
+            pluralStringResource(R.plurals.track_count_plural, it, it)
+        },
+        playtime,
+    ).joinToString(" • ").uppercase(Locale.getDefault())
     return credit to meta
 }
 
@@ -2308,30 +2436,41 @@ private val KIND_WORDS = setOf(
     "album", "single", "ep", "playlist", "artist", "podcast", "episode", "song", "video",
 )
 
-private val BrowseType.label: String?
-    get() = when (this) {
-        BrowseType.ALBUM -> "Album"
-        BrowseType.PLAYLIST -> "Playlist"
-        BrowseType.ARTIST -> "Artist"
-        BrowseType.CHARTS -> "Charts"
-        BrowseType.CATEGORY -> "Category"
-        BrowseType.NEW_RELEASES_GRID -> "New Releases"
-        BrowseType.OTHER -> null
-    }
+/**
+ * The kind of page, in the app's language.
+ *
+ * [BrowseType.CHARTS], [BrowseType.CATEGORY] and
+ * [BrowseType.NEW_RELEASES_GRID] are answered here even though upstream drops
+ * them: YZ navigates to all three, and a browse id that resolves to one of them
+ * would otherwise fall through to the raw enum name in the header.
+ */
+@Composable
+private fun BrowseType.localizedLabel(): String? = when (this) {
+    BrowseType.ALBUM -> stringResource(R.string.album)
+    BrowseType.PLAYLIST -> stringResource(R.string.playlist)
+    BrowseType.ARTIST -> stringResource(R.string.artist)
+    BrowseType.CHARTS -> stringResource(R.string.charts)
+    BrowseType.CATEGORY -> stringResource(R.string.category)
+    BrowseType.NEW_RELEASES_GRID -> stringResource(R.string.new_releases)
+    BrowseType.OTHER -> null
+}
 
-/** "12 songs, 41 minutes" — omitting the time when the rows carry no durations. */
-private fun List<Song>.playtimeSummary(): String {
-    val count = "$size ${if (size == 1) "song" else "songs"}"
-    val minutes = sumOf { it.durationText.toSeconds() } / 60
+/**
+ * How long the page plays for — "41 min", "1h 25m" — summed over the rows on it,
+ * or null when none of them carry a duration. A playlist still filling in counts
+ * up with it, so the figure is never ahead of the list it sits over.
+ */
+@Composable
+private fun List<Song>.playtime(): String? {
+    val minutes = sumOf { it.durationMillis() } / 60_000
     return when {
-        minutes <= 0 -> count
-        minutes < 60 -> "$count, $minutes minutes"
-        else -> {
-            val hours = minutes / 60
-            val rest = minutes % 60
-            val hourLabel = "$hours ${if (hours == 1) "hour" else "hours"}"
-            if (rest == 0) "$count, $hourLabel" else "$count, $hourLabel $rest minutes"
-        }
+        minutes <= 0 -> null
+        minutes < 60 -> stringResource(R.string.minutes_short, minutes.toInt())
+        else -> stringResource(
+            R.string.hours_minutes_short,
+            (minutes / 60).toInt(),
+            (minutes % 60).toInt(),
+        )
     }
 }
 
