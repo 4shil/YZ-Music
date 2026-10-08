@@ -32,6 +32,7 @@ import com.music.yzmusic.data.model.DetailPage
 import com.music.yzmusic.data.model.HomeShelf
 import com.music.yzmusic.data.model.LibraryPage
 import com.music.yzmusic.data.model.LibraryState
+import com.music.yzmusic.data.model.SubscriptionState
 import com.music.yzmusic.data.model.LikeStatus
 import com.music.yzmusic.data.model.PlaylistPrivacy
 import com.music.yzmusic.data.model.SearchFilter
@@ -798,6 +799,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Restates whether the open page's artist is subscribed. By channel id. */
+    private fun setSubscriptionOnPage(channelId: String, subscribed: Boolean) {
+        _detailStack.value = _detailStack.value.map { page ->
+            val current = page.subscription
+            if (current == null || current.channelId != channelId) {
+                page
+            } else {
+                page.copy(subscription = current.copy(subscribed = subscribed))
+            }
+        }
+    }
+
     /**
      * The open track menu's account state, or null while it is still being
      * fetched. Only one menu can be open at a time, so one slot is enough.
@@ -1237,6 +1250,63 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * showing it a moment out of date.
      */
     private var libraryStale = false
+
+    private val _releaseLibrary = MutableStateFlow<Map<String, LibraryState>>(emptyMap())
+
+    /**
+     * Library state of releases that are only a card on some page — the artist
+     * page's top release — keyed by browse id. They have no page of their own on
+     * the stack to carry it, so it is read off the release and kept here.
+     */
+    val releaseLibrary: StateFlow<Map<String, LibraryState>> = _releaseLibrary.asStateFlow()
+
+    /** Reads whether the release [browseId] is saved, once; a no-op if already known. */
+    fun loadReleaseLibrary(browseId: String) {
+        if (browseId in _releaseLibrary.value) return
+        viewModelScope.launch {
+            YtMusicRepository.releaseLibraryState(browseId).getOrNull()?.let { state ->
+                _releaseLibrary.value += (browseId to state)
+            }
+        }
+    }
+
+    /** Saves the release [browseId] to the library or takes it out, as [toggleLibrary] does for a page. */
+    fun toggleReleaseLibrary(browseId: String) {
+        if (!requireSignIn()) return
+        viewModelScope.launch {
+            val current = _releaseLibrary.value[browseId]
+                ?: YtMusicRepository.releaseLibraryState(browseId).getOrNull()
+                ?: return@launch
+            val target = !current.saved
+            // Optimistic, and put back if the write is refused: the button is a
+            // toggle, and a refusal should read as "that did not happen" rather
+            // than as a card that disagrees with the library.
+            _releaseLibrary.value += (browseId to current.copy(saved = target))
+            if (YtMusicRepository.setSaved(current.playlistId, target).isFailure) {
+                _releaseLibrary.value += (browseId to current)
+            } else {
+                libraryStale = true
+            }
+        }
+    }
+
+    /**
+     * Subscribes to the artist's channel [browseId] is on, or unsubscribes.
+     *
+     * The state is read off the page that carried it rather than looked up, so
+     * this is a no-op for a page that never offered the button — a guest, or an
+     * artist YouTube shows no subscribe control for.
+     */
+    fun toggleSubscription(subscription: SubscriptionState) {
+        if (!requireSignIn()) return
+        viewModelScope.launch {
+            val target = !subscription.subscribed
+            setSubscriptionOnPage(subscription.channelId, target)
+            if (YtMusicRepository.setSubscribed(subscription.channelId, target).isFailure) {
+                setSubscriptionOnPage(subscription.channelId, subscription.subscribed)
+            }
+        }
+    }
 
     /** Call when the library tab becomes visible. */
     fun onLibraryShown() {
@@ -1721,6 +1791,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             var suggested: List<Song> = emptyList()
             /** Whether this release is already saved — see [DetailPage.library]. */
             var library: LibraryState? = null
+            /** Subscribe state for this artist — see [SubscriptionState]. */
+            var subscription: SubscriptionState? = null
             /** YouTube's own "About" blurb — see [DetailPage.description]. */
             var description: String? = null
             /** Artist header stats — see [DetailPage.subscriberCountText]. */
@@ -1756,6 +1828,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             description = page.description
                             subscriberCountText = page.subscriberCountText
                             monthlyListenerCount = page.monthlyListenerCount
+                            subscription = page.subscription
                             if (page.songs.isEmpty()) {
                                 UiState.Error(NO_TRACKS)
                             } else {
@@ -1815,6 +1888,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         description = description,
                         subscriberCountText = subscriberCountText,
                         monthlyListenerCount = monthlyListenerCount,
+                        subscription = subscription,
                     )
                 } else {
                     it

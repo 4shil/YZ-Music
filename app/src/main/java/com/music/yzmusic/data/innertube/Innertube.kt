@@ -961,6 +961,25 @@ object Innertube {
     }
 
     /**
+     * Subscribes to an artist's channel, or unsubscribes. [channelId] is the one
+     * the page's own subscribe button named — see
+     * [com.music.yzmusic.data.model.SubscriptionState].
+     */
+    suspend fun setSubscribed(channelId: String, subscribed: Boolean) {
+        requireSession()
+        val endpoint = if (subscribed) "subscription/subscribe" else "subscription/unsubscribe"
+        val response = postMusic(endpoint) {
+            putJsonArray("channelIds") { add(channelId) }
+        }
+        // As in [ratePlaylist]: a refusal arrives as HTTP 200 with an error in the body.
+        response["error"]?.let { error ->
+            val message = error.jsonObject["message"]?.jsonPrimitive?.contentOrNull
+            error("YouTube Music refused the change: ${message ?: error}")
+        }
+        Log.d(TAG, "$endpoint $channelId -> ${findString(response, "text") ?: "no confirmation"}")
+    }
+
+    /**
      * Adds or removes a track from the library, using a token minted by
      * YouTube for exactly that transition — see [com.music.yzmusic.data.model.SongMenu].
      * There is no video-id form of this call; the token *is* the request.

@@ -311,5 +311,8 @@
     <string name="charts">Charts</string>
     <string name="category">Category</string>
     <string name="new_releases">New releases</string>
+    <!-- Artist page: the subscribe toggle beside Play. -->
+    <string name="subscribe">チャンネル登録</string>
+    <string name="unsubscribe">チャンネル登録を解除</string>
 
 </resources>

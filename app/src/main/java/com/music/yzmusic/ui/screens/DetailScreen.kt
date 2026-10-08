@@ -50,6 +50,8 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -131,6 +133,7 @@ import com.music.yzmusic.data.model.ROW_ART_PX
 import com.music.yzmusic.data.model.ShelfItem
 import com.music.yzmusic.data.model.ShelfType
 import com.music.yzmusic.data.model.Song
+import com.music.yzmusic.data.model.SubscriptionState
 import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.artworkAt
 import com.music.yzmusic.data.model.durationMillis
@@ -359,6 +362,8 @@ fun DetailScreen(
     /** Reads [releaseLibrary] for one release, once the top release is known. */
     onLoadReleaseLibrary: ((String) -> Unit)? = null,
     onToggleReleaseLibrary: ((String) -> Unit)? = null,
+    /** The artist page's subscribe control; null hides the star. */
+    onToggleSubscription: (() -> Unit)? = null,
 ) {
     val rawSongs = (page.songs as? UiState.Success)?.data.orEmpty()
     val songs = remember(rawSongs, songSort) { rawSongs.sortedForDetail(songSort) }
@@ -590,6 +595,8 @@ fun DetailScreen(
                         // Apple's own fill for the Play circle, where the
                         // photograph published one.
                         playColor = appleArt?.keyColor?.let { Color(it) },
+                        subscription = page.subscription?.takeIf { onToggleSubscription != null },
+                        onToggleSubscription = onToggleSubscription,
                     )
                 }
             }
@@ -1525,6 +1532,9 @@ private fun ActionRow(
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     bottomSpace: Dp = 22.dp,
+    /** The artist header's subscribe state, or null where it isn't offered. */
+    subscription: SubscriptionState? = null,
+    onToggleSubscription: (() -> Unit)? = null,
     /** Apple's fill for the Play circle; null leaves it white. */
     playColor: Color? = null,
 ) {
@@ -1556,7 +1566,21 @@ private fun ActionRow(
 
         // Balances the Shuffle button so Play stays in the middle rather than
         // sitting off to one side of a row that is only half full.
-        Spacer(Modifier.size(ARTIST_SIDE_BUTTON))
+        if (subscription != null) {
+            CircleIconButton(
+                icon = if (subscription.subscribed) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                contentDescription = stringResource(
+                    if (subscription.subscribed) R.string.unsubscribe else R.string.subscribe,
+                ),
+                palette = palette,
+                onClick = { onToggleSubscription?.invoke() },
+                haptic = if (subscription.subscribed) Haptic.ToggleOff else Haptic.ToggleOn,
+                size = ARTIST_SIDE_BUTTON,
+                lightFill = true,
+            )
+        } else {
+            Spacer(Modifier.size(ARTIST_SIDE_BUTTON))
+        }
     }
     Spacer(Modifier.height(bottomSpace))
 }

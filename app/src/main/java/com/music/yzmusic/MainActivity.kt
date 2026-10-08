@@ -54,6 +54,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -510,6 +511,7 @@ private fun YZMusicApp(
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()
     val libraryState by viewModel.library.collectAsStateWithLifecycle()
+    val releaseLibraryStates by viewModel.releaseLibrary.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
     val account by viewModel.account.collectAsStateWithLifecycle()
@@ -2003,6 +2005,24 @@ private fun YZMusicApp(
                             // to put the page back.
                             activeShelf = activeDetailShelf,
                             onActiveShelfChange = { activeDetailShelf = it },
+                            // The top release card has no page of its own on the
+                            // stack to carry its save state, so it is read off
+                            // the release and kept by the view model.
+                            releaseLibrary = releaseLibraryStates,
+                            onLoadReleaseLibrary = viewModel::loadReleaseLibrary,
+                            onToggleReleaseLibrary = if (signedIn) {
+                                viewModel::toggleReleaseLibrary
+                            } else {
+                                null
+                            },
+                            // Saving is an account action, so the star is not
+                            // offered to a guest at all — the same rule the
+                            // page's own save button follows.
+                            onToggleSubscription = if (signedIn && page.subscription != null) {
+                                { page.subscription?.let(viewModel::toggleSubscription) }
+                            } else {
+                                null
+                            },
                             contentPadding = listPadding,
                         )
                     } else when (key.removePrefix(TAB_KEY).toIntOrNull() ?: selectedTab) {
@@ -2292,6 +2312,35 @@ private fun YZMusicApp(
                             }
                         }
                         if (!showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass && !showEqualizer && !showListenTogether) {
+                            // Share an artist as their channel link — the one
+                            // YouTube Music itself shares for an artist. Gated
+                            // on a UC browse id, because that is what makes it a
+                            // channel rather than a browse alias with no public
+                            // page to point at.
+                            if (detail != null && activeDetailShelf == null &&
+                                detail.type == BrowseType.ARTIST && detail.browseId.startsWith("UC")
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(
+                                                Intent.EXTRA_TEXT,
+                                                "https://music.youtube.com/channel/${detail.browseId}",
+                                            )
+                                        }
+                                        context.startActivity(
+                                            Intent.createChooser(sendIntent, detail.title),
+                                        )
+                                    },
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.IosShare,
+                                        contentDescription = stringResource(R.string.share),
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
                             if (detail != null) {
                                 IconButton(onClick = { songSortMenuOpen = true }) {
                                     Icon(

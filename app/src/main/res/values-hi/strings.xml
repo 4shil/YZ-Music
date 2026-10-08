@@ -320,5 +320,8 @@
     <string name="charts">Charts</string>
     <string name="category">Category</string>
     <string name="new_releases">New releases</string>
+    <!-- Artist page: the subscribe toggle beside Play. -->
+    <string name="subscribe">सदस्यता लें</string>
+    <string name="unsubscribe">सदस्यता छोड़ें</string>
 
 </resources>

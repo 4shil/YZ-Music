@@ -226,7 +226,14 @@ fun FrostedTopBar(
                     .padding(end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                actions()
+                if (artworkPageChrome) {
+                    // Grouped on one glass surface, so the controls read as a
+                    // single control over the artwork rather than as several
+                    // unrelated icons floating on it.
+                    ArtworkPageActions(hazeState = backButtonHazeState, content = actions)
+                } else {
+                    actions()
+                }
             }
         }
         // The divider and the loader line share the bar's bottom edge; the box
@@ -277,6 +284,29 @@ private fun artworkPageSurface(
         // own refractive highlight, but these surfaces retain the edge anyway
         // so every floating control on the page reads as the same material.
         .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, shape)
+}
+
+/**
+ * The bar's trailing controls on one glass surface.
+ *
+ * Individually they each wanted their own pill, which reads as several unrelated
+ * things hovering over the artwork. On one surface they read as a single group,
+ * and it grows leftwards as controls are added rather than jumping to its new
+ * width in one frame.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+private fun ArtworkPageActions(
+    hazeState: HazeState?,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Row(
+        modifier = modifier.then(artworkPageSurface(shape = CircleShape, hazeState = hazeState)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        content()
+    }
 }
 
 /**

@@ -335,5 +335,8 @@
     <string name="charts">Charts</string>
     <string name="category">Category</string>
     <string name="new_releases">New releases</string>
+    <!-- Artist page: the subscribe toggle beside Play. -->
+    <string name="subscribe">Подписаться</string>
+    <string name="unsubscribe">Отписаться</string>
 
 </resources>
