@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Person
@@ -48,6 +50,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.music.yzmusic.BuildConfig
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
+import dev.chrisbanes.haze.materials.HazeMaterials
 import com.music.yzmusic.R
 import com.music.yzmusic.data.model.Account
 import com.music.yzmusic.data.settings.AppSettings
@@ -110,6 +115,10 @@ fun FrostedTopBar(
     title: String,
     scrolled: Boolean,
     modifier: Modifier = Modifier,
+    /** Circular back surface and no collapsing title, for artwork-led pages. */
+    artworkPageChrome: Boolean = false,
+    /** Source sampled by floating top-bar surfaces when liquid glass is off. */
+    backButtonHazeState: HazeState? = null,
     onBack: (() -> Unit)? = null,
     refreshing: Boolean = false,
     // A lambda, not a value: the drag changes every frame, and reading it in
@@ -166,15 +175,23 @@ fun FrostedTopBar(
             // On a pushed page the back affordance is always visible, since
             // there is no large in-list header to fall back on.
             if (onBack != null) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = stringResource(R.string.back),
-                        tint = MaterialTheme.colorScheme.onSurface,
+                if (artworkPageChrome) {
+                    ArtworkPageBackButton(
+                        onClick = onBack,
+                        hazeState = backButtonHazeState,
+                        modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
                     )
+                } else {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                 }
             } else {
                 Row(
@@ -222,6 +239,81 @@ fun FrostedTopBar(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
+    }
+}
+
+/**
+ * The one material choice every floating control on an artwork-led page uses.
+ *
+ * Liquid glass where it is switched on and the device can draw it, Haze over
+ * whatever the page registered as a source where it is not, and a solid fill
+ * under "reduce dynamic blur" — the setting's whole promise is that nothing
+ * samples a moving backdrop, so a surface that still tried would be sampling a
+ * layer nothing is drawing into.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+private fun artworkPageSurface(
+    shape: CornerBasedShape,
+    hazeState: HazeState?,
+): Modifier {
+    val container = MaterialTheme.colorScheme.surface
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val useLiquidGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
+
+    return Modifier
+        .clip(shape)
+        .then(
+            when {
+                useLiquidGlass -> Modifier.liquidGlass(shape)
+                reduceDynamicBlur || hazeState == null -> Modifier.background(container)
+                else -> Modifier.optimizedHazeEffect(
+                    state = hazeState,
+                    style = HazeMaterials.regular(container),
+                )
+            },
+        )
+        // The same explicit hairline the nav bar keeps. Liquid glass has its
+        // own refractive highlight, but these surfaces retain the edge anyway
+        // so every floating control on the page reads as the same material.
+        .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, shape)
+}
+
+/**
+ * Circular floating back affordance, material-matched to the nav bar.
+ *
+ * On an artwork-led page the artwork runs edge to edge under the bar, so a back
+ * arrow drawn straight onto it has whatever contrast the photograph happens to
+ * give it. Giving it the nav bar's own surface is what makes it legible against
+ * any artwork, and is the same reason the page's own controls are on glass.
+ */
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+private fun ArtworkPageBackButton(
+    onClick: () -> Unit,
+    hazeState: HazeState?,
+    modifier: Modifier = Modifier,
+) {
+    val shape = CircleShape
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    val useLiquidGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
+    val contentColor = if (useLiquidGlass && !reduceDynamicBlur) {
+        glassContentColor()
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(44.dp)
+            .then(artworkPageSurface(shape = shape, hazeState = hazeState)),
+    ) {
+        Icon(
+            Icons.AutoMirrored.Rounded.ArrowBack,
+            contentDescription = stringResource(R.string.back),
+            tint = contentColor,
+        )
     }
 }
 

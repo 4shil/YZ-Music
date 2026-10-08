@@ -43,6 +43,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -468,6 +469,17 @@ fun DetailScreen(
         if (searching) listState.animateScrollToItem(SEARCH_ITEM_INDEX, -searchStop)
     }
 
+    // The artist's newest release, above the songs. Derived from the shelves
+    // rather than fetched: the release is already on the page, and picking the
+    // newest among them costs nothing.
+    val topRelease = if (isArtist) page.sections.topRelease() else null
+    // Whether the top release card's release is already saved isn't on the shelf
+    // item; it is read off the album once, as soon as the card is known.
+    val topReleaseId = topRelease?.browseId
+    LaunchedEffect(topReleaseId) {
+        topReleaseId?.let { onLoadReleaseLibrary?.invoke(it) }
+    }
+
     // The page, or the grid a "Show all" opened in place of it. Swapped by
     // cross-fading rather than by navigating, because the shelf is already in
     // memory and re-opening it as a page would refetch what the row was a
@@ -578,6 +590,20 @@ fun DetailScreen(
                         // Apple's own fill for the Play circle, where the
                         // photograph published one.
                         playColor = appleArt?.keyColor?.let { Color(it) },
+                    )
+                }
+            }
+            if (topRelease != null) {
+                item(key = "top-release") {
+                    TopReleaseCard(
+                        item = topRelease,
+                        palette = palette,
+                        onClick = { onSectionItemClick(topRelease) },
+                        onLongPress = onSectionItemLongPress?.let { { it(topRelease) } },
+                        saved = topReleaseId?.let { releaseLibrary[it]?.saved },
+                        onToggleSaved = topReleaseId?.let { id ->
+                            onToggleReleaseLibrary?.let { toggle -> { toggle(id) } }
+                        },
                     )
                 }
             }
@@ -783,6 +809,31 @@ fun DetailScreen(
                         )
                     }
                     when {
+                        // An artist page draws every shelf one way: a row of
+                        // square cards. The typed carousels below are kept for
+                        // the page types that still use them, but not here —
+                        // five different row shapes for five shelf kinds is five
+                        // things to learn before reading an artist page, and the
+                        // artwork is what identifies the card anyway.
+                        isArtist -> {
+                            val displayItems = remember(shelf.items) {
+                                if (canShowAll) shelf.items.take(ARTIST_ROW_MAX_ITEMS) else shelf.items
+                            }
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = ARTIST_CONTENT_GUTTER),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                items(displayItems) { item ->
+                                    SectionCard(
+                                        item = item,
+                                        palette = palette,
+                                        onClick = { onSectionItemClick(item) },
+                                        onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                        showRank = false,
+                                    )
+                                }
+                            }
+                        }
                         isMoodGenreShelf -> {
                             val gridColumns = maxOf(2, (availableWidth / 160.dp).toInt())
                             val chunkedItems = remember(shelf.items, gridColumns) { shelf.items.chunked(gridColumns) }
@@ -2003,6 +2054,15 @@ private fun SectionCard(
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
+    /**
+     * Whether to stamp the card's rank on its sleeve.
+     *
+     * True where the row *is* a ranking, and the number is the reason to read
+     * it. False on an artist page, whose shelves are not rankings and whose
+     * cards are artwork-led — a `#2` there says the artist is second at
+     * something the row never claimed.
+     */
+    showRank: Boolean = true,
 ) {
     Column(
         modifier = modifier
@@ -2022,7 +2082,7 @@ private fun SectionCard(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-            if (!item.customIndex.isNullOrBlank()) {
+            if (showRank && !item.customIndex.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
                         .padding(6.dp)
@@ -2354,6 +2414,136 @@ private fun DetailRankedSongRowItem(
 }
 
 /**
+ * The newest release on an artist's shelves — an album, or a single or EP that
+ * came out after it. Playlists, videos and related artists share these shelves
+ * and are skipped: only an `MPRE…` browse id is a release.
+ *
+ * Newest by the year in the card's subtitle, which is all a shelf item says
+ * about when. Ties and releases with no year keep the shelf's own order, which
+ * lists albums first.
+ */
+private fun List<HomeShelf>.topRelease(): ShelfItem? =
+    asSequence()
+        .flatMap { it.items.asSequence() }
+        .filter { it.browseId?.startsWith("MPRE") == true }
+        .withIndex()
+        .maxWithOrNull(
+            compareBy<IndexedValue<ShelfItem>> { it.value.releaseYear() ?: 0 }
+                .thenByDescending { it.index },
+        )?.value
+
+private val RELEASE_YEAR = Regex("""\b(19|20)\d{2}\b""")
+
+private fun ShelfItem.releaseYear(): Int? =
+    RELEASE_YEAR.find(subtitle)?.value?.toIntOrNull()
+
+/** "Recent Single" and "Recent EP" where the card says so, otherwise "Recent Album". */
+@androidx.annotation.StringRes
+private fun ShelfItem.recentLabel(): Int {
+    val kind = subtitle.lowercase(Locale.getDefault())
+    return when {
+        kind.contains("single") -> R.string.recent_single
+        Regex("""\bep\b""").containsMatchIn(kind) -> R.string.recent_ep
+        else -> R.string.recent_album
+    }
+}
+
+/**
+ * The artist page's top-release card: sleeve, what it is and when, and its
+ * title, in a rounded panel the width of the page.
+ *
+ * [onToggleSaved] is null whenever the save state is unknown, which hides the
+ * button rather than drawing it in a state it might not be — a card that says
+ * "add" about something already saved is worse than a card with no button.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TopReleaseCard(
+    item: ShelfItem,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)?,
+    saved: Boolean?,
+    onToggleSaved: (() -> Unit)?,
+) {
+    val shape = RoundedCornerShape(28.dp)
+    val coverShape = RoundedCornerShape(12.dp)
+    val haptics = rememberHaptics()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = ARTIST_CONTENT_GUTTER)
+            .padding(bottom = 22.dp)
+            // A light veil rather than dark glass: Apple's containers read
+            // slightly white against the page, and a dark panel reads as a hole.
+            .clip(shape)
+            .background(Color.White.copy(alpha = LIGHT_FILL_ALPHA), shape)
+            .border(1.dp, Color.White.copy(alpha = TOP_RELEASE_EDGE_ALPHA), shape)
+            .clip(shape)
+            .combinedClickable(onClick = onClick, onLongClick = { onLongPress?.invoke() })
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = item.thumbnailUrl.artworkAt(CARD_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .size(88.dp)
+                .clip(coverShape)
+                .border(1.dp, Color.White.copy(alpha = TOP_RELEASE_COVER_EDGE_ALPHA), coverShape)
+                .background(palette.elevated),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = item.subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.onBackgroundVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleLarge,
+                color = palette.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = stringResource(item.recentLabel()),
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.onBackgroundVariant,
+                maxLines = 1,
+            )
+        }
+        if (onToggleSaved != null && saved != null) {
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = LIGHT_FILL_ALPHA), CircleShape)
+                    .border(1.dp, Color.White.copy(alpha = TOP_RELEASE_EDGE_ALPHA), CircleShape)
+                    .clickable {
+                        haptics.play(if (saved) Haptic.ToggleOff else Haptic.ToggleOn)
+                        onToggleSaved()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (saved) Icons.Rounded.Check else Icons.Rounded.Add,
+                    contentDescription = stringResource(
+                        if (saved) R.string.remove_from_library else R.string.add_to_library,
+                    ),
+                    tint = palette.onBackground,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
  * A shelf's worth of cards as a full-screen grid, in place of the page.
  *
  * Where "Show all" used to navigate to a browse id and open a second page, the
@@ -2397,6 +2587,7 @@ private fun ArtistShelfGridPage(
                     onClick = { onItemClick(item) },
                     onLongPress = onItemLongPress?.let { { it(item) } },
                     modifier = Modifier.fillMaxWidth(),
+                    showRank = false,
                 )
             }
         }

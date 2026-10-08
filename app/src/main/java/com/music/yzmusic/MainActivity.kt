@@ -2256,6 +2256,10 @@ private fun YZMusicApp(
                         else -> scrolled || selectedTab == TAB_SEARCH
                     },
                     refreshing = currentFeed != null && currentFeed in refreshing,
+                    // The artwork runs edge to edge under the bar on these
+                    // pages, so the back arrow needs the nav bar's own surface
+                    // to stay legible against any photograph.
+                    artworkPageChrome = detail != null || activeDetailShelf != null || showReplay,
                     pullFraction = { currentPull?.distanceFraction ?: 0f },
                     onBack = when {
                         showEqualizer -> ({ showEqualizer = false })
