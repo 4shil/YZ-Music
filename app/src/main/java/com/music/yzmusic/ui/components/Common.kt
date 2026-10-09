@@ -48,6 +48,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.ui.layout.layout
+import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -685,5 +692,106 @@ fun PillTextField(
             keyboardActions = keyboardActions,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/**
+ * The ⌄r at the end of a row. Its circle is a touch target nobody sees, so it
+ * hangs [ROW_MORE_OUTSET] into the page gutter: the dots end at the row's
+ * content edge, mirroring the artwork on the left, rather than a whole button's
+ * width short of it — and the row's text gets that width back.
+ */
+@Composable
+fun RowMoreButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    iconSize: Dp = 20.dp,
+) {
+    Box(
+        modifier = modifier
+            .hangIntoGutter(ROW_MORE_OUTSET)
+            .size(36.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Rounded.MoreVert,
+            contentDescription = stringResource(R.string.more),
+            tint = tint,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
+
+/** How far a row's [RowMoreButton] reaches past the content edge into the gutter. */
+val ROW_MORE_OUTSET = 14.dp
+
+/**
+ * Lays a trailing control out [outset] narrower than it draws, so it overhangs
+ * its row's end edge by that much: for buttons whose glyph is far smaller than
+ * their touch target, which would otherwise sit visibly inset from the edge.
+ */
+fun Modifier.hangIntoGutter(outset: Dp): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val width = (placeable.width - outset.roundToPx()).coerceAtLeast(0)
+    layout(width, placeable.height) { placeable.place(0, 0) }
+}
+
+/** The accent a current song's title takes in lists that mark it with [SearchPlayingBars]. */
+val PlayingAccent = Color(0xFFFB4A62)
+
+/**
+ * Three bars rising and falling over a song's artwork.
+ *
+ * A row has to say *which* song this is without giving up its artwork, and the
+ * artwork is what identifies a song. So the bars sit on a plate over the art
+ * rather than replacing it — the picture stays recognisable and the movement
+ * says "this one, now".
+ */
+@Composable
+fun SearchPlayingBars(modifier: Modifier = Modifier) {
+    val heights = listOf(0.38f, 0.78f, 0.52f).mapIndexed { index, minimum ->
+        val transition = rememberInfiniteTransition(label = "search playing bar $index")
+        val height by transition.animateFloat(
+            initialValue = minimum,
+            targetValue = 1f - (index * 0.12f),
+            animationSpec = infiniteRepeatable(
+                animation = keyframes {
+                    durationMillis = 520 + index * 130
+                    minimum at 0
+                    1f at (260 + index * 50)
+                    minimum at durationMillis
+                },
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "search bar height $index",
+        )
+        height
+    }
+    // The plate is a fixed square so only the bars move, never the box around them.
+    Box(
+        modifier = modifier
+            .size(24.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color.Black.copy(alpha = 0.52f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier.height(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            heights.forEach { height ->
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .height(14.dp * height)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White),
+                )
+            }
+        }
     }
 }

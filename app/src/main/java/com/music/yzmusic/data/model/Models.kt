@@ -291,6 +291,8 @@ data class DetailPage(
     val subscriberCountText: String? = null,
     /** "3.4M monthly listeners" off an artist page's header. */
     val monthlyListenerCount: String? = null,
+    /** Subscribe state for this artist's channel, when the page offers the action. */
+    val subscription: SubscriptionState? = null,
     val params: String? = null,
 )
 
@@ -306,6 +308,20 @@ data class DetailPage(
 data class LibraryState(
     val playlistId: String,
     val saved: Boolean,
+)
+
+/**
+ * Whether the signed-in account subscribes to an artist's channel, and which
+ * channel that is.
+ *
+ * Read off the artist page's own subscribe button rather than assumed from the
+ * browse id, because the button is also what says whether YouTube offers the
+ * action here at all: absent on a signed-out response, where it is only ever an
+ * invitation to sign in.
+ */
+data class SubscriptionState(
+    val channelId: String,
+    val subscribed: Boolean,
 )
 
 /** Parsed artist landing page. */
@@ -324,6 +340,8 @@ data class ArtistPage(
     val subscriberCountText: String? = null,
     /** "3.4M monthly listeners", off the same header. */
     val monthlyListenerCount: String? = null,
+    /** Subscribe state for this artist's channel, when the page offers the action. */
+    val subscription: SubscriptionState? = null,
 )
 
 /**

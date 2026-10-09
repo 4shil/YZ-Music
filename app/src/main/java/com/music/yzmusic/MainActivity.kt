@@ -20,6 +20,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -353,11 +355,32 @@ private fun YZMusicApp(
     }
     var showLogin by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    // Settings' scroll position, held here rather than inside SettingsScreen.
+    //
+    // Settings is one target of the AnimatedContent below, so every sub-screen
+    // (Sources, Equalizer, Liquid Glass, Listen Together) is a *different*
+    // target and disposes it. Anything remembered inside SettingsScreen is gone
+    // by the time you come back - and `rememberSaveable` inside it would be
+    // gone too, because its SaveableStateRegistry entry goes with the
+    // composition. This one outlives that: MainActivity never leaves
+    // composition, and rememberSaveable additionally carries it across the
+    // Activity recreation that a theme or font-size change causes.
+    val settingsScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
     // Replay: the page, the stories over it, and the share sheet over those.
     // Three states rather than one enum because they stack — the stories are
     // opened from the page and the share sheet from either, and closing one
     // has to reveal what it was opened from.
     var showReplay by remember { mutableStateOf(false) }
+    /**
+     * Which chart the Replay page should open scrolled to.
+     *
+     * A category card on the Library does not open the Replay at the top and
+     * leave the reader to find the chart they just tapped: it opens the Replay
+     * *on* that chart, because the card was a summary of it and the ranked list
+     * under it is the same fact in full. Kept across the open so the page lands
+     * where it was asked to rather than wherever it was last left.
+     */
+    var replayLandingPage by rememberSaveable { mutableStateOf(ReplayStoryPage.INTRO) }
     var replayStory by remember { mutableStateOf<ReplayStoryPage?>(null) }
     var showReplayShare by remember { mutableStateOf(false) }
     /** Which story card the share sheet is for, or null for the whole Replay. */
@@ -395,6 +418,11 @@ private fun YZMusicApp(
     // A Library shelf's "Show all" — the shelf it was opened from, so its own
     // cards can be laid out again as a full-screen grid. See [LibraryGridPage].
     var libraryShowAll by remember { mutableStateOf<HomeShelf?>(null) }
+    // A detail page's own "Show all" — an artist shelf opened as a grid in place
+    // of the page rather than as a new page navigated to. Distinct from
+    // [libraryShowAll] because the two are shown by different screens and must
+    // not outlive each other's page.
+    var activeDetailShelf by remember { mutableStateOf<HomeShelf?>(null) }
     var showLyricsSources by remember { mutableStateOf(false) }
     var showAppLanguage by remember { mutableStateOf(false) }
     var showListenBrainzLogin by remember { mutableStateOf(false) }
@@ -483,6 +511,7 @@ private fun YZMusicApp(
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()
     val libraryState by viewModel.library.collectAsStateWithLifecycle()
+    val releaseLibraryStates by viewModel.releaseLibrary.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
     val account by viewModel.account.collectAsStateWithLifecycle()
@@ -566,6 +595,11 @@ private fun YZMusicApp(
 
     val controller = rememberMediaController()
     val player = rememberPlayerState(controller)
+    var tagQueueIds by remember { mutableStateOf(setOf<String>()) }
+    // Original tail before any tag swapped it — restored on clear/switch so only
+    // the continuation is swapped, not dropped. Null means nothing was swapped.
+    var savedTail by remember { mutableStateOf<List<androidx.media3.common.MediaItem>?>(null) }
+    var savedTailAt by remember { mutableIntStateOf(-1) }
     val shuffleEnabled by QueueShuffle.enabled.collectAsStateWithLifecycle()
 
     // Lyrics follow whatever is playing; duration lands a beat after the track.
@@ -643,7 +677,10 @@ private fun YZMusicApp(
     // As [detailListState], for Replay: its own large heading owns the title
     // until it is scrolled away, and the bar lives out here rather than on the
     // page. Rebuilt per opening so reopening starts at the top.
-    val replayListState = rememberLazyListState()
+    // Rebuilt per opening so reopening starts at the top, and again when the
+    // landing chart changes so a card tapped on the Library arrives at its own
+    // chart rather than at wherever the page was last left.
+    val replayListState = remember(showReplay, replayLandingPage) { LazyListState() }
     val replayScrolled by remember(replayListState) {
         derivedStateOf {
             replayListState.firstVisibleItemIndex > 0 ||
@@ -1275,7 +1312,7 @@ private fun YZMusicApp(
         (selectedTab == TAB_LIBRARY && detail == null && !showSettings)
     val (replay, setReplayPeriod) = rememberReplayState(replayOpen)
     val replayCards = remember(replay.summary) {
-        replay.summary?.takeUnless { it.isEmpty }?.cards().orEmpty()
+        replay.summary?.takeUnless { it.isEmpty }?.cards(context).orEmpty()
     }
 
     // ---- The track in the player ----
@@ -1450,12 +1487,78 @@ private fun YZMusicApp(
             docked = docked,
             onClearQueue = {
                 // Keep what's playing; drop everything queued after it.
+                // If a tag had replaced the tail, its stash is now stale.
+                tagQueueIds = emptySet()
+                savedTail = null
+                savedTailAt = -1
                 controller?.let { c ->
                     if (c.mediaItemCount > c.currentMediaItemIndex + 1) {
                         c.removeMediaItems(c.currentMediaItemIndex + 1, c.mediaItemCount)
                     }
                 }
             },
+            onPlayFetched = { song ->
+                // Fetched overlay is display-only; tapping inserts after current and plays.
+                scope.launch {
+                    val resolved = YtMusicRepository.resolveAudio(song)
+                    controller?.let { c ->
+                        val at = (c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount)
+                        c.addMediaItem(at, resolved.toMediaItem())
+                        c.seekToDefaultPosition(at)
+                        c.play()
+                    }
+                }
+            },
+            onEnqueueTagQueue = enqueue@{ songs ->
+                // On tag: replace the tail after current with the tag batch.
+                // Same screen, same playback — next track changes to the tag.
+                // The original tail is stashed and restored on clear/switch.
+                if (songs.isEmpty()) return@enqueue
+                scope.launch {
+                    val c = controller
+                    if (c == null) {
+                        tagQueueIds = songs.map { it.videoId }.toSet()
+                        return@launch
+                    }
+                    // Stash original tail once, before first swap.
+                    if (savedTail == null) {
+                        val at = (c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount)
+                        savedTailAt = at
+                        savedTail = (at until c.mediaItemCount).map { c.getMediaItemAt(it) }
+                    }
+                    // Remove whatever tail is there now (original or previous tag batch).
+                    val at = (c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount)
+                    if (c.mediaItemCount > at) c.removeMediaItems(at, c.mediaItemCount)
+                    val ids = songs.map { it.videoId }.toSet()
+                    c.addMediaItems(at, songs.map { it.toMediaItem() })
+                    tagQueueIds = ids
+                }
+            },
+            onClearTagQueue = clearTag@{
+                val prevIds = tagQueueIds
+                val st = savedTail
+                val at = savedTailAt
+                // Nothing to restore and nothing was inserted — don't touch the
+                // real queue. This guards the initial composition where
+                // LaunchedEffect(activeTag=null) fires and would otherwise wipe
+                // the tail before any tag was ever chosen.
+                if (prevIds.isEmpty() && st == null) return@clearTag
+                tagQueueIds = emptySet()
+                savedTail = null
+                savedTailAt = -1
+                val c = controller ?: return@clearTag
+                // Remove tag batch tail (it occupies everything after current).
+                val curAt = (c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount)
+                if (prevIds.isNotEmpty() && c.mediaItemCount > curAt) {
+                    c.removeMediaItems(curAt, c.mediaItemCount)
+                }
+                // Restore original tail exactly where it was.
+                if (st != null && st.isNotEmpty()) {
+                    val restoreAt = at.coerceIn(0, c.mediaItemCount)
+                    c.addMediaItems(restoreAt, st)
+                }
+            },
+            tagQueueIds = tagQueueIds,
         )
     }
 
@@ -1653,6 +1756,7 @@ private fun YZMusicApp(
                         ReplayScreen(
                             state = replay,
                             holder = account?.name.orEmpty(),
+                            landingPage = replayLandingPage,
                             onPeriodChange = setReplayPeriod,
                             onOpenStory = { replayStory = it },
                             // A track tapped on a chart is one the user already
@@ -1721,6 +1825,7 @@ private fun YZMusicApp(
                     } else if (key == "settings") {
                         SettingsScreen(
                             windowWidth = windowWidth,
+                            scrollState = settingsScrollState,
                             signedIn = signedIn,
                             account = account,
                             onSignIn = {
@@ -1731,6 +1836,7 @@ private fun YZMusicApp(
                             onAccountScrobbling = { showAccountScrobbling = true },
                             onOpenReplay = {
                                 showSettings = false
+                                replayLandingPage = ReplayStoryPage.INTRO
                                 showReplay = true
                             },
                             onLyricsSources = { showLyricsSources = true },
@@ -1886,6 +1992,34 @@ private fun YZMusicApp(
                             // in the track menu.
                             onToggleLibrary = if (signedIn) {
                                 { viewModel.toggleLibrary(page.browseId) }
+                            } else {
+                                null
+                            },
+                            // Which song is playing, so the artist page's Top
+                            // songs rows can mark it and animate.
+                            currentSong = player.song,
+                            isPlaying = player.isPlaying,
+                            // "Show all" on an artist shelf swaps the page for a
+                            // grid in place, so the shelf it opened has to
+                            // outlive this call — and going back has to be able
+                            // to put the page back.
+                            activeShelf = activeDetailShelf,
+                            onActiveShelfChange = { activeDetailShelf = it },
+                            // The top release card has no page of its own on the
+                            // stack to carry its save state, so it is read off
+                            // the release and kept by the view model.
+                            releaseLibrary = releaseLibraryStates,
+                            onLoadReleaseLibrary = viewModel::loadReleaseLibrary,
+                            onToggleReleaseLibrary = if (signedIn) {
+                                viewModel::toggleReleaseLibrary
+                            } else {
+                                null
+                            },
+                            // Saving is an account action, so the star is not
+                            // offered to a guest at all — the same rule the
+                            // page's own save button follows.
+                            onToggleSubscription = if (signedIn && page.subscription != null) {
+                                { page.subscription?.let(viewModel::toggleSubscription) }
                             } else {
                                 null
                             },
@@ -2072,7 +2206,15 @@ private fun YZMusicApp(
                             replayCards = replayCards,
                             replayHolder = account?.name.orEmpty(),
                             replayMemberSince = replay.memberSince,
-                            onOpenReplay = { page -> replayStory = page },
+                            replayLoading = replay.loading,
+                            // A category card opens the Replay page at that chart
+                            // rather than starting the stories at it: the ranked
+                            // list is the same fact in full, and the stories are
+                            // one tap further on under "Play your Replay".
+                            onOpenReplay = { page ->
+                                replayLandingPage = page
+                                showReplay = true
+                            },
                             onSignIn = { showLogin = true },
                             onRetry = viewModel::loadLibrary,
                             refreshing = MainViewModel.Feed.LIBRARY in refreshing,
@@ -2134,6 +2276,10 @@ private fun YZMusicApp(
                         else -> scrolled || selectedTab == TAB_SEARCH
                     },
                     refreshing = currentFeed != null && currentFeed in refreshing,
+                    // The artwork runs edge to edge under the bar on these
+                    // pages, so the back arrow needs the nav bar's own surface
+                    // to stay legible against any photograph.
+                    artworkPageChrome = detail != null || activeDetailShelf != null || showReplay,
                     pullFraction = { currentPull?.distanceFraction ?: 0f },
                     onBack = when {
                         showEqualizer -> ({ showEqualizer = false })
@@ -2166,7 +2312,40 @@ private fun YZMusicApp(
                             }
                         }
                         if (!showSettings && !showAccountScrobbling && !showSources && !showLiquidGlass && !showEqualizer && !showListenTogether) {
-                            if (detail != null) {
+                            // Share an artist as their channel link — the one
+                            // YouTube Music itself shares for an artist. Gated
+                            // on a UC browse id, because that is what makes it a
+                            // channel rather than a browse alias with no public
+                            // page to point at.
+                            if (detail != null && activeDetailShelf == null &&
+                                detail.type == BrowseType.ARTIST && detail.browseId.startsWith("UC")
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(
+                                                Intent.EXTRA_TEXT,
+                                                "https://music.youtube.com/channel/${detail.browseId}",
+                                            )
+                                        }
+                                        context.startActivity(
+                                            Intent.createChooser(sendIntent, detail.title),
+                                        )
+                                    },
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.IosShare,
+                                        contentDescription = stringResource(R.string.share),
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                            // Left of the account photo, and only on an album or
+                            // playlist page — an artist page has no single track
+                            // list to reorder, and the device folders already
+                            // carry this same control themselves.
+                            if (detail != null && !isLocalDetail && detail.type != BrowseType.ARTIST) {
                                 IconButton(onClick = { songSortMenuOpen = true }) {
                                     Icon(
                                         Icons.AutoMirrored.Rounded.Sort,

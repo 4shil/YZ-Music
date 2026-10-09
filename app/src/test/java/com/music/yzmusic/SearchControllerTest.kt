@@ -310,13 +310,17 @@ class SearchControllerTest {
         search.onQueryChange("m83")
         settle()
 
+        val cap = SearchController.TYPEAHEAD_MAX_RESULTS
+        // The duplicates are inside the window on purpose: capping to [cap]
+        // rows has to happen *after* the de-duplication, or a repeated id eats a
+        // slot and the dropdown comes up short of what it asked to show.
         val rows = listOf(page("page_1"), track("vid_001"), page("page_1"), track("vid_001")) +
-            (2..10).map { track("vid_%03d".format(it)) }
+            (2..(cap + 5)).map { track("vid_%03d".format(it)) }
         typeahead.answerSuccess("m83", rows)
 
         val shown = search.typeaheadResults.first { it.isNotEmpty() }
-        assertEquals(8, shown.size)
-        assertEquals(8, shown.map(::searchResultKey).toSet().size)
+        assertEquals(cap, shown.size)
+        assertEquals(cap, shown.map(::searchResultKey).toSet().size)
     }
 
     @Test

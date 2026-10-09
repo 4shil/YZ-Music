@@ -212,6 +212,30 @@ fun LazyListScope.feedMoreSkeleton() {
     item(key = "skeleton:more") { ShelfSkeleton() }
 }
 
+/**
+ * The replay cards, while the listening history behind them is still being read.
+ *
+ * Without this the row is simply absent for that first moment, so the shelves
+ * below jump up a card's height once the data lands. Drawn at the real card's
+ * size so the layout it sits in does not move when it is replaced.
+ */
+@Composable
+fun ReplayCardRowSkeleton(modifier: Modifier = Modifier) {
+    LazyRow(
+        modifier = modifier.padding(vertical = 6.dp),
+        contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        userScrollEnabled = false,
+    ) {
+        items(2) {
+            ShimmerBox(
+                modifier = Modifier.width(300.dp).aspectRatio(1.586f),
+                shape = RoundedCornerShape(20.dp),
+            )
+        }
+    }
+}
+
 /** The signed-in library: saved collections, then the run of liked tracks. */
 fun LazyListScope.librarySkeleton() {
     item(key = "skeleton:library:shelf") { ShelfSkeleton() }

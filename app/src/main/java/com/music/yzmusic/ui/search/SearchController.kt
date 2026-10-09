@@ -555,8 +555,14 @@ class SearchController(
          */
         const val TYPEAHEAD_MEDIA_DEBOUNCE_MS = 350L
 
-        /** Maximum number of live media results shown in the typeahead dropdown. */
-        const val TYPEAHEAD_MAX_RESULTS = 8
+        /**
+         * Maximum number of live media results shown in the typeahead dropdown.
+         *
+         * Fifteen rather than eight because that is roughly what fits without the
+         * dropdown reaching the keyboard on a short screen, and eight rows left a
+         * visible gap that read as "there's more" while offering nothing more.
+         */
+        const val TYPEAHEAD_MAX_RESULTS = 15
 
         const val SEARCH_CACHE_ENTRIES = 100
     }

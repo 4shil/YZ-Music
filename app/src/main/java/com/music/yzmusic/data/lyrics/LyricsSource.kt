@@ -18,11 +18,19 @@ enum class LyricsSource(
     // Declaration order is the default priority — [AppSettings.lyricsSourceOrder]
     // and [AppSettings.lyricsSources] both fall back to [LyricsSource.entries]
     // verbatim, so this list *is* the out-of-the-box experience.
-    LYRICS_PLUS(
-        label = "LyricsPlus",
-        detail = "Syllable by syllable, on community mirrors",
-        wordSynced = true,
-    ),
+    //
+    // LyricsPlus sits third rather than first, which is a change: it has the
+    // finest timing of any source here, and also the least reliable hosting -
+    // volunteer mirrors that come and go. Asked first, a track whose LyricsPlus
+    // mirror happens to be down waits on it before three hosts that carry the
+    // same Apple catalogue are consulted at all. Behind them, its timing is
+    // still what gets used whenever it answers.
+    //
+    // The three Apple hosts lead because they are asked for the same underlying
+    // documents, so a track answered by any of them has word-level timing rather
+    // than whole lines, which is the difference between the syllables lighting
+    // up individually and the line lighting up as a whole. Among those three the
+    // order is not load-bearing; they are independent hosts for one catalogue.
     PAXSENIX(
         label = "PaxSenix",
         detail = "Apple Music timings again, on a second host",
@@ -31,6 +39,11 @@ enum class LyricsSource(
     BETTER_LYRICS(
         label = "BetterLyrics",
         detail = "Apple Music timings, word by word",
+        wordSynced = true,
+    ),
+    LYRICS_PLUS(
+        label = "LyricsPlus",
+        detail = "Syllable by syllable, on community mirrors",
         wordSynced = true,
     ),
     SIMP_MUSIC(

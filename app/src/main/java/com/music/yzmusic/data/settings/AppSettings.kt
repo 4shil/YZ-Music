@@ -77,6 +77,22 @@ enum class OutputPcmMode(val label: String) {
 }
 
 /**
+ * Output gain applied to the whole mix, for lifting a quiet recording by hand.
+ *
+ * NOT loudness normalization: that needs each track's integrated loudness
+ * measured, and nothing in this app measures it — see [LoudnessBoostProcessor]
+ * for why the setting is named for what it actually does. Off is the default,
+ * and at off the processor is skipped outright rather than run at unity gain.
+ */
+enum class LoudnessBoostMode(val label: String, val detail: String, val millibels: Int) {
+    OFF("Off", "No change to the audio", 0),
+    // 1 dB is 100 millibels, so +6 dB is 600 — not 6_000, which would be
+    // +60 dB and a thousandfold gain on a setting labelled "+6 dB".
+    SUBTLE("Subtle", "+6 dB · enough for a quiet mix", 600),
+    STRONG("Strong", "+12 dB · clips quiet peaks softly", 1_200),
+}
+
+/**
  * CPU and thread budget for on-device Automix DSP analysis.
  */
 enum class AutomixPerformanceMode(val label: String, val detail: String, val threads: Int) {
@@ -495,6 +511,7 @@ object AppSettings {
         }
 
     val outputPcmMode = MutableStateFlow(OutputPcmMode.PCM_16)
+    val loudnessBoostMode = MutableStateFlow(LoudnessBoostMode.OFF)
     val highPerformance = MutableStateFlow(false)
     val highPerformanceMode: MutableStateFlow<Boolean> get() = highPerformance
     val performanceRefreshRate = MutableStateFlow(DEFAULT_PERFORMANCE_REFRESH_RATE)
@@ -635,6 +652,15 @@ object AppSettings {
         outputPcmMode.value = runCatching {
             OutputPcmMode.valueOf(prefs.getString(KEY_OUTPUT_PCM_MODE, OutputPcmMode.PCM_16.name) ?: OutputPcmMode.PCM_16.name)
         }.getOrDefault(OutputPcmMode.PCM_16)
+        // An unrecognised name is a downgrade to Off rather than a crash: the
+        // default is also the safe one, since a boost left on by a build that
+        // no longer exists is not something to discover on next launch.
+        loudnessBoostMode.value = runCatching {
+            LoudnessBoostMode.valueOf(
+                prefs.getString(KEY_LOUDNESS_BOOST_MODE, LoudnessBoostMode.OFF.name)
+                    ?: LoudnessBoostMode.OFF.name,
+            )
+        }.getOrDefault(LoudnessBoostMode.OFF)
         preferUsbDac.value = prefs.getBoolean(KEY_PREFER_USB_DAC, false)
         highPerformance.value = prefs.getBoolean(KEY_HIGH_PERFORMANCE, false)
         performanceRefreshRate.value = normalizePerformanceRefreshRate(
@@ -1121,6 +1147,13 @@ object AppSettings {
         }
     }
 
+    fun setLoudnessBoostMode(value: LoudnessBoostMode) {
+        loudnessBoostMode.value = value
+        if (::prefs.isInitialized) {
+            prefs.edit().putString(KEY_LOUDNESS_BOOST_MODE, value.name).apply()
+        }
+    }
+
     fun setPreferUsbDac(value: Boolean) {
         preferUsbDac.value = value
         if (::prefs.isInitialized) {
@@ -1543,6 +1576,7 @@ object AppSettings {
     private const val KEY_SPOTIFY_SPDC_TOKEN = "spotify_spdc_token"
     private const val KEY_OUTPUT_PCM_MODE = "output_pcm_mode"
     private const val KEY_PREFER_USB_DAC = "prefer_usb_dac"
+    private const val KEY_LOUDNESS_BOOST_MODE = "loudness_boost_mode"
     private const val KEY_HIGH_PERFORMANCE = "high_performance"
     private const val KEY_PERFORMANCE_REFRESH_RATE = "performance_refresh_rate"
     private const val KEY_EXPORT_DOWNLOADS = "export_downloads"

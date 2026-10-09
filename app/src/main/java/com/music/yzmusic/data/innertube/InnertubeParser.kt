@@ -6,6 +6,7 @@ import com.music.yzmusic.data.model.ArtistPage
 import com.music.yzmusic.data.model.BrowseItem
 import com.music.yzmusic.data.model.BrowseType
 import com.music.yzmusic.data.model.HomeShelf
+import com.music.yzmusic.data.model.SubscriptionState
 import com.music.yzmusic.data.model.LibraryState
 import com.music.yzmusic.data.model.LikeStatus
 import com.music.yzmusic.data.model.SearchResult
@@ -436,7 +437,39 @@ object InnertubeParser {
             description = parseDescription(response),
             subscriberCountText = subscriberCount(header),
             monthlyListenerCount = monthlyListeners(header),
+            subscription = parseSubscription(header),
         )
+    }
+
+    /**
+     * Whether the account subscribes to this artist, and which channel to act on.
+     *
+     * Off the header's own subscribe button — the same two nodes
+     * [subscriberCount] reads the count from, in both of the shapes YouTube
+     * ships. Both are tried because whether the state sits on one or the other
+     * depends on how the page was served.
+     *
+     * Null when there is nothing to read: a signed-out response carries the
+     * button but no state on it, and offering the action there would be a write
+     * with nothing behind it.
+     */
+    private fun parseSubscription(header: JsonElement?): SubscriptionState? {
+        val immersive = header.o("musicImmersiveHeaderRenderer") ?: return null
+        return listOfNotNull(
+            immersive.o("subscriptionButton2").o("subscribeButtonRenderer"),
+            immersive.o("subscriptionButton").o("subscribeButtonRenderer"),
+        ).firstNotNullOfOrNull { button ->
+            val subscribed = (button["subscribed"] as? JsonPrimitive)?.contentOrNull
+                ?.toBooleanStrictOrNull()
+                ?: return@firstNotNullOfOrNull null
+            val channelId = button.s("channelId")
+                ?: button.a("serviceEndpoints")?.firstNotNullOfOrNull { endpoint ->
+                    (endpoint.o("subscribeEndpoint").a("channelIds")?.firstOrNull()
+                        as? JsonPrimitive)?.contentOrNull
+                }
+                ?: return@firstNotNullOfOrNull null
+            SubscriptionState(channelId = channelId, subscribed = subscribed)
+        }
     }
 
     /**

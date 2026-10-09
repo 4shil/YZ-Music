@@ -637,6 +637,55 @@ object SourceResolver {
         SourceRegistry.active().indexOfFirst { it.kind == SourceKind.YOUTUBE } > 0
 
     /**
+     * Whether anything is left that can answer for a track YouTube cannot.
+     *
+     * Distinct from [canSubstituteForYouTube], and not a weaker version of it.
+     * Substitution asks only what is ranked *above* YouTube, so a source ranked
+     * below it is invisible there — which is what makes the two independent: a
+     * build with no modules has nothing to substitute with and something to
+     * fall back to, and needs the fallback path exactly when the substitution
+     * path has nothing to do.
+     *
+     * Without this the gate that decides whether to bother cross-resolving a
+     * YouTube track would read "no modules configured" as "nothing else can
+     * help", and JioSaavn would never be reached at all.
+     */
+    fun canFallbackForYouTube(): Boolean =
+        SourceRegistry.active().any { it.kind != SourceKind.YOUTUBE }
+
+    /**
+     * A stream for a YouTube track from a source ranked *below* YouTube, or
+     * null when none of them has the recording.
+     *
+     * The counterpart to [substituteForYouTube], and deliberately not a
+     * substitution: nothing here is raced against YouTube or preferred over it.
+     * This is asked only once YouTube has already come back empty for the
+     * track, so JioSaavn's higher bitrate cannot cost anything the default
+     * would otherwise have played.
+     *
+     * The match is the same strict one, for the same reason — this stands in
+     * for a track the user picked, and a loose match plays the wrong song under
+     * the right title.
+     */
+    suspend fun fallbackForYouTube(target: TrackMatcher.Target): SourceStream? {
+        if (target.title.isBlank()) return null
+        val active = SourceRegistry.active()
+        if (!canFallbackForYouTube()) return null
+        val request = requestForNow()
+        val (source, stream) = bestAcross(
+            active.filterNot { it.kind == SourceKind.YOUTUBE },
+            target,
+            request,
+        ) ?: return null
+        TrackLog.d(
+            TAG,
+            "fallback for YouTube: '${target.title}' served by ${source.displayName}" +
+                " at ${stream.format.summary}" + if (stream.belowRequest) " (below request)" else "",
+        )
+        return stream
+    }
+
+    /**
      * The sources ranked above [configId], in order.
      *
      * A config that isn't in [active] ranks last: it is disabled or incomplete,

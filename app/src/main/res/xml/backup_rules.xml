@@ -1,13 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+   Auto-backup rules for Android 11 and older; data_extraction_rules.xml
+   replaces these from Android 12.
+
+   The credential stores are excluded because their keysets are wrapped by an
+   Android Keystore key that never leaves the device: restored anywhere else
+   they cannot be decrypted (see auth/AuthStore.kt). Their plain fallbacks are
+   excluded because they hold the same credentials in cleartext, and that is
+   the case that actually leaks.
+
+   auth is still named `bitchord_auth` — carry-over from the fork. Renaming it
+   would sign every existing user out, so the names here are the ones
+   AuthStore.kt and SourceRegistry.kt really use, not ideal ones.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- AuthStore: EncryptedSharedPreferences, and the cleartext file it
+         degrades to when the Keystore is unusable. -->
+    <exclude domain="sharedpref" path="bitchord_auth.xml" />
+    <exclude domain="sharedpref" path="bitchord_auth_plain.xml" />
+
+    <!-- SourceRegistry: the same pair, for source endpoints and their tokens. -->
+    <exclude domain="sharedpref" path="yzmusic_sources.xml" />
+    <exclude domain="sharedpref" path="yzmusic_sources_plain.xml" />
 </full-backup-content>

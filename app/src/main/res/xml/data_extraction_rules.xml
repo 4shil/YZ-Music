@@ -1,19 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+   Backup and device-transfer rules for Android 12 and newer.
+
+   See backup_rules.xml for why these files are excluded. The one thing that
+   differs from Android 11 and older is that this file has two independent
+   blocks: <cloud-backup> and <device-transfer>. A file excluded from only one
+   of them still travels by the other route, which for a cleartext session
+   cookie is the whole point of the exercise.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="bitchord_auth.xml" />
+        <exclude domain="sharedpref" path="bitchord_auth_plain.xml" />
+        <exclude domain="sharedpref" path="yzmusic_sources.xml" />
+        <exclude domain="sharedpref" path="yzmusic_sources_plain.xml" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="bitchord_auth.xml" />
+        <exclude domain="sharedpref" path="bitchord_auth_plain.xml" />
+        <exclude domain="sharedpref" path="yzmusic_sources.xml" />
+        <exclude domain="sharedpref" path="yzmusic_sources_plain.xml" />
     </device-transfer>
-    -->
 </data-extraction-rules>

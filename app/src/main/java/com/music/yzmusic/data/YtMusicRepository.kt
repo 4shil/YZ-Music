@@ -899,6 +899,25 @@ object YtMusicRepository {
         call("library:$playlistId") { Innertube.ratePlaylist(playlistId, saved) }
 
     /**
+     * Whether the release at [browseId] is in the library, and the playlist that
+     * saving it acts on — read off the release's own page, since a card that
+     * only knows the browse id has neither. Null where the page offers no save
+     * button (a signed-out response, or a release YouTube marks unsaveable).
+     */
+    suspend fun releaseLibraryState(browseId: String): Result<LibraryState?> =
+        call("library-state:$browseId") {
+            InnertubeParser.parseLibraryState(Innertube.browse(browseId))
+        }
+
+    /**
+     * Subscribes to an artist's channel, or unsubscribes. [channelId] is the one
+     * the page's own subscribe button named — see
+     * [com.music.yzmusic.data.model.SubscriptionState].
+     */
+    suspend fun setSubscribed(channelId: String, subscribed: Boolean): Result<Unit> =
+        call("subscription:$channelId") { Innertube.setSubscribed(channelId, subscribed) }
+
+    /**
      * The playlists a track can be added to. Paged because accounts with long
      * playlist collections otherwise lose everything past YouTube's first
      * library-feed response.

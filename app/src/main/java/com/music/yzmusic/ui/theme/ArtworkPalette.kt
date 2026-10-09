@@ -68,6 +68,22 @@ data class ArtworkPalette(
 )
 
 /**
+ * A palette the artwork's own source published, rather than one read out of it.
+ *
+ * Apple Music publishes a background and a text colour for every artist
+ * photograph, and hands them over with it — which is the whole point of this
+ * type: those are the colours the picture was composed against, so passing them
+ * to [rememberArtworkPalette] skips the decode and the quantise entirely.
+ *
+ * [background] becomes the page's dominant, [accent] its vibrant. The edge —
+ * what the wash settles into — is the background again, because there is no
+ * measured bottom edge to work from and a blur of a flat field lands on the
+ * field's own colour.
+ */
+@Immutable
+data class ArtworkKeyColors(val background: Color, val accent: Color)
+
+/**
  * Pulls [ArtworkPalette] out of the artwork at [imageUrl].
  *
  * Artwork that has already been read once is tinted on the very first frame,
@@ -90,20 +106,37 @@ fun rememberArtworkPalette(
      * out of the cache or off the network.
      */
     artPx: Int = CARD_ART_PX,
+    /**
+     * Colours the source already published for this artwork, in preference to
+     * reading them out of the picture.
+     *
+     * Some artwork arrives with its own palette attached — Apple Music publishes
+     * a background and a text colour for every artist photograph. Those are the
+     * colours the picture was composed against, so handing them over beats
+     * guessing them from pixels: the page is tinted correctly on its very first
+     * frame instead of after a decode and a quantise, and a monochrome
+     * photograph no longer reduces to whatever antialiased fringe survived.
+     *
+     * Null for the ordinary case, where the artwork still has to be read.
+     */
+    keyColors: ArtworkKeyColors? = null,
 ): ArtworkPalette {
     val context = LocalContext.current
     val scheme = MaterialTheme.colorScheme
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
 
     // The two swatches everything else is derived from, or null until read.
-    var seed by remember(imageUrl) { mutableStateOf(imageUrl?.let(seedCache::get)) }
+    // Always asked for, so the composable call stays unconditional; simply
+    // handed nothing to read when the colours are already in hand.
+    var decoded by remember(imageUrl) { mutableStateOf(imageUrl?.let(seedCache::get)) }
+    val seed = keyColors?.toSeed() ?: decoded
     // Whether the colours were there from the first frame. If they were, there
     // is nothing to crossfade *from* and animating would only put a delay in
     // front of a surface that could already be right.
-    val knownUpFront = remember(imageUrl) { seed != null }
+    val knownUpFront = remember(imageUrl, keyColors) { keyColors != null || decoded != null }
 
     LaunchedEffect(imageUrl, artPx) {
-        if (imageUrl == null || seed != null) return@LaunchedEffect
+        if (imageUrl == null || keyColors != null || decoded != null) return@LaunchedEffect
         val request = ImageRequest.Builder(context)
             // The size the artwork is *displayed* at, deliberately: the fetch
             // then shares a disk-cache entry with the row, card or backdrop
@@ -120,7 +153,7 @@ fun rememberArtworkPalette(
         // dispatcher — left there it stutters whatever is animating the surface in.
         val found = withContext(Dispatchers.Default) { seedOf(bitmap) } ?: return@LaunchedEffect
         seedCache[imageUrl] = found
-        seed = found
+        decoded = found
     }
 
     val target = seed?.toPalette(dark) ?: ArtworkPalette(
@@ -176,6 +209,20 @@ private const val TINT_FADE_MS = 260
  * note, and what its bottom edge averages out to.
  */
 private data class Seed(val dominant: Color, val vibrant: Color, val edge: Color)
+
+/**
+ * The same three answers, taken from a source that published them.
+ *
+ * The edge repeats [background] rather than being left to be measured: the
+ * whole reason this path exists is to avoid decoding the picture, so there is no
+ * bottom edge to average — and a flat field's blur lands on its own colour
+ * anyway, which is what repeating the background produces.
+ */
+private fun ArtworkKeyColors.toSeed() = Seed(
+    dominant = background,
+    vibrant = accent,
+    edge = background,
+)
 
 private fun seedOf(bitmap: Bitmap): Seed? {
     fun swatches(builder: Palette.Builder) =

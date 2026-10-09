@@ -219,4 +219,109 @@
     <string name="miscellaneous_footer">Une fois activé, fermer l\'application depuis les applications récentes arrête aussi la musique.</string>
     <string name="dont_repeat_songs_subtitle">La lecture automatique ne proposera pas une chanson déjà jouée ou suggérée pendant cette session</string>
     <string name="download_quality_subtitle">%1$s par piste, quelle que soit la connexion</string>
+<!-- Replay: headline copy, period labels and counted plurals. -->
+<string name="your_listening_experience">Votre expérience d\'écoute</string>
+    <string name="member_since">Membre depuis</string>
+    <string name="default_replay_holder">Auditeur YZ Music</string>
+    <string name="minutes">Minutes</string>
+    <string name="minutes_listened">Minutes écoutées</string>
+    <string name="minutes_short">%1$d min</string>
+    <string name="minutes_grouped_short">%1$s min</string>
+    <string name="hours_minutes_short">%1$dh %2$dmin</string>
+    <string name="top_song">Meilleure chanson</string>
+    <string name="top_artist">Meilleur artiste</string>
+    <string name="top_album">Meilleur album</string>
+    <string name="top_genre">Meilleur genre</string>
+    <string name="midnight">minuit</string>
+    <string name="midday">midi</string>
+    <string name="hour_am">%1$d AM</string>
+    <string name="hour_pm">%1$d PM</string>
+    <string name="this_month">Ce mois-ci</string>
+    <string name="this_year">Cette année</string>
+    <string name="all_time">Depuis toujours</string>
+    <string name="replay_intro_start">Votre </string>
+    <string name="replay_intro_end"> est prêt.</string>
+    <string name="replay_minutes_start">Vous avez passé </string>
+    <string name="replay_minutes_end"> avec la musique.</string>
+    <string name="replay_songs_start">Au total, </string>
+    <string name="replay_songs_end"> ont rempli votre mois.</string>
+    <string name="replay_artist_start">Tout au long du mois, </string>
+    <string name="replay_artist_focus">Un artiste</string>
+    <string name="replay_artist_end"> est revenu sans cesse.</string>
+    <string name="replay_album_start">Cette fois, </string>
+    <string name="replay_album_focus">Un album</string>
+    <string name="replay_album_end"> a retenu toute votre attention.</string>
+    <string name="replay_genre_start">Ensemble, </string>
+    <string name="replay_genre_focus">Vos genres</string>
+    <string name="replay_genre_end"> ont façonné votre style.</string>
+    <string name="replay_habits_start">Vous avez exploré </string>
+    <string name="replay_habits_middle"> de </string>
+    <string name="replay_summary_start">Votre écoute avait un style </string>
+    <string name="replay_across"> sur </string>
+    <string name="replay_hours_across">%1$s heures</string>
+    <string name="listening_shape">Votre profil d\'écoute</string>
+    <string name="listen_most_around">Vous écoutez surtout vers %1$s.</string>
+    <string name="different_albums">Albums différents</string>
+    <string name="your_biggest_day">Votre plus grosse journée : %1$s</string>
+    <string name="biggest_day_note">Votre plus grosse journée était le %1$s, avec %2$s d\'écoute.</string>
+    <string name="when_you_listen_the_most">Quand vous écoutez le plus</string>
+    <string name="genres_pending">Les genres apparaîtront à mesure que votre historique d\'écoute grandit</string>
+    <string name="not_enough_listening">Pas encore assez d\'écoute</string>
+    <string name="not_enough_this_month">Écoutez encore quelques chansons ce mois-ci pour débloquer votre Replay.</string>
+    <string name="replay_empty_description">Écoutez encore un peu et YZ Music transformera votre historique en Replay.</string>
+    <string name="replay_private_counting">Calculé de façon privée à partir de l\'historique d\'écoute sur cet appareil</string>
+    <string name="play_your_replay">Lire votre Replay</string>
+    <string name="close_replay">Fermer Replay</string>
+    <string name="share_my_replay">Partager mon Replay</string>
+    <string name="share_your_replay">Partagez votre Replay</string>
+    <string name="replay_share_summary_description">Un aperçu complet avec chansons, artistes, albums, genres et habitudes.</string>
+    <string name="replay_share_card_description">Une carte soignée avec vos principaux temps forts d\'écoute.</string>
+    <string name="tap_share_for_picture">Appuyez sur Partager pour créer une image</string>
+    <string name="couldnt_draw_picture">Impossible de créer l\'image</string>
+    <string name="saved">Enregistré</string>
+    <string name="member_since_value">Membre depuis %1$s</string>
+    <string name="counted_on_device_with_yz_music">Calculé sur cet appareil avec YZ Music</string>
+    <plurals name="replay_minutes_unit">
+        <item quantity="one">%1$s minute</item>
+        <item quantity="other">%1$s minutes</item>
+    </plurals>
+    <plurals name="replay_song_count">
+        <item quantity="one">%1$s chanson</item>
+        <item quantity="other">%1$s chansons</item>
+    </plurals>
+    <plurals name="replay_artist_count">
+        <item quantity="one">%1$s artiste</item>
+        <item quantity="other">%1$s artistes</item>
+    </plurals>
+    <plurals name="replay_play_count">
+        <item quantity="one">%1$s écoute</item>
+        <item quantity="other">%1$s écoutes</item>
+    </plurals>
+<!-- Artist page: heading, subscriber counts, release recency. -->
+<string name="about_artist">À propos de l\'artiste</string>
+    <string name="about_album">À propos de l\'album</string>
+    <string name="subscribers">%1$s abonnés</string>
+    <string name="monthly_listeners">%1$s auditeurs mensuels</string>
+    <string name="less">Moins</string>
+    <string name="search_this_list">Rechercher dans cette liste</string>
+    <string name="nothing_matches">Rien ne correspond à “%1$s”</string>
+    <string name="close_search">Fermer la recherche</string>
+    <string name="recent_single">Single récent</string>
+    <string name="recent_ep">EP récent</string>
+    <string name="recent_album">Album récent</string>
+    <string name="artist">artiste</string>
+    <string name="album">album</string>
+    <string name="playlist">playlist</string>
+    <plurals name="track_count_plural">
+        <item quantity="one">%1$d piste</item>
+        <item quantity="other">%1$d pistes</item>
+    </plurals>
+    <!-- Browse kinds that have no label of their own; used in the header meta. -->
+    <string name="charts">Charts</string>
+    <string name="category">Category</string>
+    <string name="new_releases">New releases</string>
+    <!-- Artist page: the subscribe toggle beside Play. -->
+    <string name="subscribe">S\'abonner</string>
+    <string name="unsubscribe">Se désabonner</string>
+
 </resources>

@@ -1,6 +1,12 @@
 package com.music.yzmusic.ui.screens
 
+import android.os.Build
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,8 +28,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -32,40 +43,62 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.music.yzmusic.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -74,6 +107,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.request.ImageRequest
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
@@ -89,30 +124,44 @@ import com.music.yzmusic.data.model.BrowseType
 import com.music.yzmusic.data.model.DetailPage
 import com.music.yzmusic.data.model.CARD_ART_PX
 import com.music.yzmusic.data.model.HEADER_ART_PX
+import com.music.yzmusic.data.canvas.AppleArtistArt
+import com.music.yzmusic.data.canvas.AppleArtistArtRepository
+import com.music.yzmusic.data.canvas.keyColors
+import com.music.yzmusic.data.model.HomeShelf
+import com.music.yzmusic.data.model.LibraryState
 import com.music.yzmusic.data.model.ROW_ART_PX
 import com.music.yzmusic.data.model.ShelfItem
 import com.music.yzmusic.data.model.ShelfType
 import com.music.yzmusic.data.model.Song
+import com.music.yzmusic.data.model.SubscriptionState
 import com.music.yzmusic.data.model.UiState
 import com.music.yzmusic.data.model.artworkAt
+import com.music.yzmusic.data.model.durationMillis
+import com.music.yzmusic.data.model.isSameTrackAs
 import com.music.yzmusic.data.settings.AppSettings
-import com.music.yzmusic.ui.components.ArtworkWash
 import com.music.yzmusic.ui.components.DownloadedBadge
 import com.music.yzmusic.ui.components.ExplicitBadge
+import com.music.yzmusic.ui.components.LIBRARY_GRID_SPACING
 import com.music.yzmusic.ui.components.MessageState
 import com.music.yzmusic.ui.components.PAGE_GUTTER
 import com.music.yzmusic.ui.components.ROW_DIVIDER_INSET
+import com.music.yzmusic.ui.components.RowMoreButton
 import com.music.yzmusic.ui.components.SHELF_CARD_WIDTH
+import com.music.yzmusic.ui.components.SearchPlayingBars
 import com.music.yzmusic.ui.components.SongRow
 import com.music.yzmusic.ui.components.thumbnailBorder
 import com.music.yzmusic.ui.components.detailSkeleton
+import com.music.yzmusic.ui.components.libraryGrid
+import com.music.yzmusic.ui.components.lightweightLiquidGlass
 import com.music.yzmusic.ui.components.topBarContentPadding
+import com.music.yzmusic.ui.components.trackColumnWidth
 import com.music.yzmusic.ui.haptics.Haptic
 import com.music.yzmusic.ui.haptics.rememberHaptics
 import com.music.yzmusic.ui.icons.YZMusicIcons
 import com.music.yzmusic.ui.player.CanvasArtworkPlayer
 import com.music.yzmusic.ui.theme.ArtworkPalette
 import com.music.yzmusic.ui.theme.rememberArtworkPalette
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import java.util.Locale
 
@@ -138,8 +187,91 @@ private val PILL_SHAPE = RoundedCornerShape(12.dp)
  */
 private const val SEARCH_ITEM_INDEX = 1
 
+/**
+ * How many cards an artist shelf's row shows before it offers "Show all".
+ *
+ * A row that has room for everything should not offer to show everything, and
+ * one that does not is hiding cards the reader cannot reach any other way.
+ */
+private const val ARTIST_ROW_MAX_ITEMS = 5
+
+/**
+ * The ways a title credits more than one artist.
+ *
+ * Matched on the separator rather than the name, because there is no list of
+ * artists that do this — "Tyler, The Creator" is one artist with a comma in the
+ * name and "Sam Smith, Kim Petras" is two people.
+ */
+private val CREDIT_SEPARATOR =
+    Regex(""",\s|\s&\s|\s(?:x|and|feat\.?|ft\.?|with)\s""", RegexOption.IGNORE_CASE)
+
+/** Whether this reads as several artists credited together rather than one name. */
+private fun String.looksLikeCredit() = CREDIT_SEPARATOR.containsMatchIn(this)
+
 /** The inset the header text and the action pills share. */
 private val HEADER_GUTTER = PAGE_GUTTER + 14.dp
+
+/**
+ * How far the artist title block sits above the foot of the photograph.
+ *
+ * A release header is a caption for a sleeve: it belongs on the picture, and
+ * the sleeve is a rectangle that ends where it ends. An artist photo is a
+ * photograph, and a name laid across the bottom of one reads as a watermark on
+ * the picture rather than as the page's own heading — so the block is lifted to
+ * sit inside the frame, clear of the foot the artwork dissolves into.
+ */
+private val ARTIST_HEADER_LIFT = 64.dp
+
+/** How wide a title logo may get, as a fraction of the page. */
+private const val ARTIST_LOGO_WIDTH = 0.82f
+
+/**
+ * And how tall, as a fraction of the artwork's height.
+ *
+ * The one that actually does work: an aspect-ratio clamp alone lets a logo set
+ * on three lines — nearly square — take a quarter of the screen's width and a
+ * third of the photo's height with it.
+ */
+private const val ARTIST_LOGO_MAX_HEIGHT = 0.30f
+
+/** A dropped logo fetch is tried this many more times before the name stands in. */
+private const val LOGO_RETRIES = 2
+
+/** And how long it waits between them. */
+private const val LOGO_RETRY_DELAY_MS = 800L
+
+/** The Play circle on an artist page — the one control the page is for. */
+private val ARTIST_PLAY_BUTTON = 70.dp
+
+/** The Shuffle button beside it. */
+private val ARTIST_SIDE_BUTTON = 52.dp
+
+/**
+ * And the space between the three.
+ *
+ * Wide, because the Play circle is 70dp and the gap has to read as deliberate
+ * around something that size: at the 10dp a release header's controls sit at,
+ * a circle that much larger than its neighbours looks like a mistake.
+ */
+private val ARTIST_ACTION_GAP = 24.dp
+
+/** The glyph inside that circle, as a fraction of its diameter. */
+private const val ARTIST_PLAY_ICON_SCALE = 0.56f
+
+/** How much of the action row's content gutter an artist page's rows use. */
+private val ARTIST_CONTENT_GUTTER = PAGE_GUTTER
+
+/** The inset the About block uses, which is wider than the gutter around it. */
+private val ABOUT_GUTTER = PAGE_GUTTER + 6.dp
+
+/** A control's pale fill over the artist page's own photograph. */
+private const val LIGHT_FILL_ALPHA = 0.07f
+
+/** And the rim around it. */
+private const val TOP_RELEASE_EDGE_ALPHA = 0.10f
+
+/** A cover on the top release card, whose rim has to read against a filled panel. */
+private const val TOP_RELEASE_COVER_EDGE_ALPHA = 0.215f
 
 /**
  * How far past the foot of the artwork the title block is allowed to hang.
@@ -209,11 +341,53 @@ fun DetailScreen(
      */
     onToggleLibrary: (() -> Unit)? = null,
     songSort: com.music.yzmusic.data.settings.SongSort = com.music.yzmusic.data.settings.SongSort.DEFAULT,
+    /**
+     * The shelf a "Show all" has opened, or null for the page itself.
+     *
+     * Held by the caller so the choice outlives this page: "Show all" swaps the
+     * page for a grid of the shelf it was on, and going back has to be able to
+     * put the page back rather than leave the grid standing as the destination.
+     */
+    activeShelf: HomeShelf? = null,
+    onActiveShelfChange: (HomeShelf?) -> Unit = {},
+    /** The track playing right now, so a song row can say so. */
+    currentSong: Song? = null,
+    isPlaying: Boolean = false,
+    /**
+     * Whether the top release card's release is already in the library, by
+     * browse id. Null for a release whose saved state has not been read, which
+     * hides the card's save button rather than showing it wrong.
+     */
+    releaseLibrary: Map<String, LibraryState> = emptyMap(),
+    /** Reads [releaseLibrary] for one release, once the top release is known. */
+    onLoadReleaseLibrary: ((String) -> Unit)? = null,
+    onToggleReleaseLibrary: ((String) -> Unit)? = null,
+    /** The artist page's subscribe control; null hides the star. */
+    onToggleSubscription: (() -> Unit)? = null,
 ) {
     val rawSongs = (page.songs as? UiState.Success)?.data.orEmpty()
     val songs = remember(rawSongs, songSort) { rawSongs.sortedForDetail(songSort) }
     val isArtist = page.type == BrowseType.ARTIST
-    val palette = rememberArtworkPalette(page.thumbnailUrl)
+    // Apple Music's hero photo and title logo for this artist, found by name.
+    // Null until (and unless) it arrives; the YouTube header stands in meanwhile.
+    var appleArt by remember(page.browseId) {
+        mutableStateOf(if (isArtist) AppleArtistArtRepository.cached(page.title) else null)
+    }
+    // Opened from a track, the title is the whole credit ("A, B & C") until the
+    // page loads and swaps in the one artist's name. Searching a credit finds
+    // nobody, so a title that reads as several artists waits for that swap; any
+    // other name starts the moment the page opens.
+    val nameSettled = !page.title.looksLikeCredit() || page.songs !is UiState.Loading
+    LaunchedEffect(page.browseId, page.title, nameSettled) {
+        if (isArtist && nameSettled) appleArt = AppleArtistArtRepository.artFor(page.title) ?: appleArt
+    }
+    val palette = rememberArtworkPalette(
+        imageUrl = appleArt?.heroUrl ?: page.thumbnailUrl,
+        // Apple's own colours for the photograph, so the page is tinted from
+        // what the picture was composed against rather than from whatever the
+        // quantiser makes of it — and is tinted on the first frame.
+        keyColors = appleArt?.keyColors(),
+    )
 
     // Narrowing the running order in place — the release equivalent of the
     // filter box on the Local Music tab, and the one thing a long track list
@@ -232,8 +406,14 @@ fun DetailScreen(
         query = ""
     }
     // Back closes the search first — this handler is registered after the one
-    // that pops the page, so it is the one that answers while it's enabled.
-    BackHandler(enabled = searching) { closeSearch() }
+    // That pops the page, so it is the one that answers while it's enabled.
+    //
+    // The grid a shelf's "Show all" opened is closer than the page is: it was
+    // reached from inside the page, so back puts the page back rather than
+    // closing it.
+    BackHandler(enabled = searching || activeShelf != null) {
+        if (searching) closeSearch() else onActiveShelfChange(null)
+    }
 
     // Each surviving row still knows where it sat in the full running order, so
     // an album's track numbers stay the album's rather than becoming positions
@@ -259,11 +439,14 @@ fun DetailScreen(
     // The credit line the header shows is the artist as far as the catalogue
     // services are concerned. A browse card's subtitle sometimes omits it, in
     // which case the tracks themselves know who it is.
-    val credit = remember(page.subtitle, songs) {
-        page.headerLines(songs.size).first.ifBlank { songs.firstOrNull()?.artist.orEmpty() }
-    }
+    // Not remembered: [headerLines] reads string resources, so it is a composable
+    // call. The credit is one stringResource away from being free, and the effect
+    // below only re-runs when it actually changes.
+    val credit = page.headerLines(songs.size).first.ifBlank { songs.firstOrNull()?.artist.orEmpty() }
     var canvas by remember(page.browseId) { mutableStateOf<CanvasArtwork?>(null) }
     LaunchedEffect(page.browseId, page.title, credit, canvasEnabled) {
+        // An artist's clip is set below, by the lookup that finds it.
+        if (isArtist) return@LaunchedEffect
         if (!canvasEnabled || page.type != BrowseType.ALBUM) {
             canvas = null
             return@LaunchedEffect
@@ -272,6 +455,11 @@ fun DetailScreen(
         // can run twice. Keep a clip that is already playing if the second
         // pass comes back empty.
         canvas = CanvasRepository.canvasForAlbum(page.title, credit) ?: canvas
+    }
+    // An artist's clip comes with the same Apple lookup as its photograph.
+    val artistVideo = appleArt?.videoUrl
+    LaunchedEffect(artistVideo, canvasEnabled) {
+        if (isArtist) canvas = artistVideo?.takeIf { canvasEnabled }?.let { CanvasArtwork(url = it) }
     }
 
     val pageHaze = remember { HazeState() }
@@ -286,8 +474,32 @@ fun DetailScreen(
         if (searching) listState.animateScrollToItem(SEARCH_ITEM_INDEX, -searchStop)
     }
 
-    BoxWithConstraints(modifier.fillMaxSize()) {
-        val availableWidth = maxWidth
+    // The artist's newest release, above the songs. Derived from the shelves
+    // rather than fetched: the release is already on the page, and picking the
+    // newest among them costs nothing.
+    val topRelease = if (isArtist) page.sections.topRelease() else null
+    // Whether the top release card's release is already saved isn't on the shelf
+    // item; it is read off the album once, as soon as the card is known.
+    val topReleaseId = topRelease?.browseId
+    LaunchedEffect(topReleaseId) {
+        topReleaseId?.let { onLoadReleaseLibrary?.invoke(it) }
+    }
+
+    // The page, or the grid a "Show all" opened in place of it. Swapped by
+    // cross-fading rather than by navigating, because the shelf is already in
+    // memory and re-opening it as a page would refetch what the row was a
+    // preview of, and put the reader a screen away from where they were.
+    AnimatedContent(
+        targetState = activeShelf,
+        transitionSpec = {
+            fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(180))
+        },
+        label = "artist_shelf_transition",
+        modifier = modifier.fillMaxSize(),
+    ) { targetShelf ->
+        if (targetShelf == null) {
+            BoxWithConstraints(Modifier.fillMaxSize().background(palette.wash)) {
+                val availableWidth = maxWidth
         // The artwork is drawn behind the list rather than in it, so both need
         // to agree on its height without being able to ask each other. The
         // width is the page's, so the ratio decides it and both can work it out
@@ -310,15 +522,8 @@ fun DetailScreen(
                 canvas = canvas,
                 artHeight = artHeight,
                 listState = listState,
-                hazeState = pageHaze,
+                heroUrl = appleArt?.heroUrl,
                 modifier = Modifier.matchParentSize(),
-            )
-
-            MergeBand(
-                palette = palette,
-                artHeight = artHeight,
-                listState = listState,
-                hazeState = pageHaze,
             )
         }
 
@@ -336,7 +541,12 @@ fun DetailScreen(
                         palette = palette,
                     )
                 } else if (isArtist) {
-                    ArtistHeader(page = page, palette = palette, artHeight = artHeight)
+                    ArtistHeader(
+                        page = page,
+                        palette = palette,
+                        artHeight = artHeight,
+                        appleArt = appleArt,
+                    )
                 } else {
                     ReleaseHeader(
                         page = page,
@@ -362,16 +572,6 @@ fun DetailScreen(
                 }
             }
 
-            if (isArtist && (page.subscriberCountText != null || page.monthlyListenerCount != null)) {
-                item(key = "artist-stats") {
-                    ArtistStatsRow(
-                        subscriberCountText = page.subscriberCountText,
-                        monthlyListenerCount = page.monthlyListenerCount,
-                        palette = palette,
-                    )
-                }
-            }
-
             if (searching) {
                 item(key = "search") {
                     DetailSearchField(
@@ -392,10 +592,25 @@ fun DetailScreen(
                         palette = palette,
                         onPlay = { onSongClick(songs, 0) },
                         onShuffle = { onShuffle(songs) },
-                        // Halved when an About section follows directly — see
-                        // [AboutSection]'s own top inset, which makes up the
-                        // rest of that shorter gap.
-                        bottomSpace = if (page.description.isNullOrBlank()) 22.dp else 11.dp,
+                        // Apple's own fill for the Play circle, where the
+                        // photograph published one.
+                        playColor = appleArt?.keyColor?.let { Color(it) },
+                        subscription = page.subscription?.takeIf { onToggleSubscription != null },
+                        onToggleSubscription = onToggleSubscription,
+                    )
+                }
+            }
+            if (topRelease != null) {
+                item(key = "top-release") {
+                    TopReleaseCard(
+                        item = topRelease,
+                        palette = palette,
+                        onClick = { onSectionItemClick(topRelease) },
+                        onLongPress = onSectionItemLongPress?.let { { it(topRelease) } },
+                        saved = topReleaseId?.let { releaseLibrary[it]?.saved },
+                        onToggleSaved = topReleaseId?.let { id ->
+                            onToggleReleaseLibrary?.let { toggle -> { toggle(id) } }
+                        },
                     )
                 }
             }
@@ -403,17 +618,45 @@ fun DetailScreen(
             // YouTube's own editorial blurb — an album or an artist only, per
             // [DetailPage.description]. A playlist never carries one, and the
             // section is skipped for it even on the rare response that does.
-            if (!page.description.isNullOrBlank() &&
-                (page.type == BrowseType.ALBUM || isArtist)
-            ) {
+            //
+            // Drawn after the songs on an artist page rather than before them:
+            // a bio is a footnote on an artist, and under the header it read as
+            // the thing the page was about. The two are emitted in opposite
+            // orders so the artist page can close with its own prose.
+            val hasStats = isArtist &&
+                (page.subscriberCountText != null || page.monthlyListenerCount != null)
+            val showAbout = !page.description.isNullOrBlank() &&
+                (page.type == BrowseType.ALBUM || isArtist) || hasStats
+            fun LazyListScope.aboutItem() {
+                if (!showAbout) return
                 item(key = "about") {
-                    AboutSection(
-                        title = if (isArtist) "About the artist" else "About the album",
-                        text = page.description,
-                        palette = palette,
-                    )
+                    Box(Modifier.padding(top = if (isArtist) 28.dp else 0.dp)) {
+                        AboutSection(
+                            title = stringResource(
+                                if (isArtist) R.string.about_artist else R.string.about_album,
+                            ),
+                            // An artist with a blank bio but real numbers still
+                            // gets the section — the stats are the content, and
+                            // a heading over them with no prose reads fine.
+                            text = page.description?.takeIf { it.isNotBlank() },
+                            palette = palette,
+                            horizontalPadding = if (isArtist) ARTIST_CONTENT_GUTTER else ABOUT_GUTTER,
+                            stats = if (hasStats) {
+                                {
+                                    ArtistStatsRow(
+                                        subscriberCountText = page.subscriberCountText,
+                                        monthlyListenerCount = page.monthlyListenerCount,
+                                        palette = palette,
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                        )
+                    }
                 }
             }
+            if (!isArtist) aboutItem()
 
             when (val state = page.songs) {
                 is UiState.Loading -> detailSkeleton(isArtist)
@@ -423,21 +666,34 @@ fun DetailScreen(
                     // it pages sideways four at a time and stops at twenty.
                     item {
                         val top = state.data.take(MAX_ARTIST_SONGS)
-                        SectionHeading("Top songs", palette)
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            items(top.chunked(SONGS_PER_COLUMN)) { column ->
-                                Column(Modifier.fillParentMaxWidth(0.88f)) {
-                                    column.forEach { song ->
-                                        CompactSongRow(
-                                            song = song,
-                                            palette = palette,
-                                            onClick = { onSongClick(top, top.indexOf(song)) },
-                                            onLongPress = { onSongLongPress(song) },
-                                            downloadedTint = downloadedTint,
-                                        )
+                        SectionHeading(
+                            title = stringResource(R.string.top_songs),
+                            palette = palette,
+                            horizontalPadding = ARTIST_CONTENT_GUTTER,
+                        )
+                        // Measured rather than a fixed fraction of the page: a
+                        // column four rows deep wants the same width in portrait
+                        // and in landscape, and 88% of a wide window is a column
+                        // with one song's worth of room to itself.
+                        BoxWithConstraints {
+                            val columnWidth = trackColumnWidth(maxWidth)
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = ARTIST_CONTENT_GUTTER),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(top.chunked(SONGS_PER_COLUMN)) { column ->
+                                    Column(Modifier.width(columnWidth)) {
+                                        column.forEach { song ->
+                                            CompactSongRow(
+                                                song = song,
+                                                palette = palette,
+                                                onClick = { onSongClick(top, top.indexOf(song)) },
+                                                onLongPress = { onSongLongPress(song) },
+                                                downloadedTint = downloadedTint,
+                                                isCurrent = song.isSameTrackAs(currentSong),
+                                                isPlaying = song.isSameTrackAs(currentSong) && isPlaying,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -528,7 +784,16 @@ fun DetailScreen(
                 val isSongShelf = shelf.type == ShelfType.CHART_SONGS ||
                     (shelf.title.contains("Song", ignoreCase = true) && shelf.items.any { it.customIndex != null })
 
-                val showAllAction = if (shelf.moreBrowseId != null) {
+                // On an artist page the shelf is already in memory — the row is a
+                // preview of it — so "Show all" renders that same shelf as a grid
+                // in place of the page rather than re-fetching it through
+                // [ShelfItem.moreBrowseId] and pushing a second page. See
+                // [ArtistShelfGridPage]. Every other page keeps the browse-id
+                // route, because those shelves really are a different query.
+                val canShowAll = shelf.items.size > ARTIST_ROW_MAX_ITEMS
+                val showAllAction = if (isArtist && canShowAll) {
+                    { onActiveShelfChange(shelf) }
+                } else if (shelf.moreBrowseId != null) {
                     {
                         onSectionItemClick(
                             ShelfItem(
@@ -551,6 +816,31 @@ fun DetailScreen(
                         )
                     }
                     when {
+                        // An artist page draws every shelf one way: a row of
+                        // square cards. The typed carousels below are kept for
+                        // the page types that still use them, but not here —
+                        // five different row shapes for five shelf kinds is five
+                        // things to learn before reading an artist page, and the
+                        // artwork is what identifies the card anyway.
+                        isArtist -> {
+                            val displayItems = remember(shelf.items) {
+                                if (canShowAll) shelf.items.take(ARTIST_ROW_MAX_ITEMS) else shelf.items
+                            }
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = ARTIST_CONTENT_GUTTER),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                items(displayItems) { item ->
+                                    SectionCard(
+                                        item = item,
+                                        palette = palette,
+                                        onClick = { onSectionItemClick(item) },
+                                        onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                        showRank = false,
+                                    )
+                                }
+                            }
+                        }
                         isMoodGenreShelf -> {
                             val gridColumns = maxOf(2, (availableWidth / 160.dp).toInt())
                             val chunkedItems = remember(shelf.items, gridColumns) { shelf.items.chunked(gridColumns) }
@@ -703,6 +993,18 @@ fun DetailScreen(
                     }
                 }
             }
+
+            if (isArtist) aboutItem()
+        }
+        }
+        } else {
+            ArtistShelfGridPage(
+                shelf = targetShelf,
+                palette = palette,
+                onItemClick = onSectionItemClick,
+                onItemLongPress = onSectionItemLongPress,
+                contentPadding = contentPadding,
+            )
         }
     }
 }
@@ -731,7 +1033,7 @@ private fun ReleaseHeader(
     onArtistClick: (String, String) -> Unit,
     onToggleLibrary: (() -> Unit)?,
 ) {
-    val (credit, meta) = page.headerLines(trackCount)
+    val (credit, meta) = page.headerLines(trackCount, songs.playtime())
     // Every row on a release carries the same credit — see [pageCredit] — so
     // the first one speaks for the whole page, the same source the rows'
     // own long-press "Open artist" already reads from.
@@ -847,13 +1149,9 @@ private fun ReleaseHeader(
                         size = circleSize,
                     )
                     PlayPill(
-                        palette = palette,
                         onClick = onPlay,
-                        horizontalPadding = when (circles) {
-                            1, 2 -> 32.dp
-                            3 -> 24.dp
-                            else -> 14.dp
-                        },
+                        iconOnly = true,
+                        size = circleSize,
                     )
                     // Where the download circle used to be. Downloading a
                     // release is a thing done once and then not thought about;
@@ -936,7 +1234,7 @@ private fun DetailSearchField(
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    text = "Search this ${type.label?.lowercase(Locale.ROOT) ?: "list"}",
+                    text = stringResource(R.string.search_this_list),
                     style = MaterialTheme.typography.bodyLarge,
                     color = palette.onBackgroundVariant,
                     maxLines = 1,
@@ -994,10 +1292,72 @@ private fun List<Song>.matching(query: String): List<IndexedValue<Song>> {
  * drawing behind this. See [ReleaseHeader] for why the picture isn't here.
  */
 @Composable
-private fun ArtistHeader(page: DetailPage, palette: ArtworkPalette, artHeight: Dp) {
+private fun ArtistHeader(
+    page: DetailPage,
+    palette: ArtworkPalette,
+    artHeight: Dp,
+    appleArt: AppleArtistArt?,
+) {
     Box(Modifier.fillMaxWidth()) {
-        Spacer(Modifier.fillMaxWidth().height(artHeight + HEADER_DROP))
-        Text(
+        Spacer(Modifier.fillMaxWidth().height(artHeight + HEADER_DROP - ARTIST_HEADER_LIFT))
+        val logoUrl = appleArt?.logoUrl
+        // Whether the logo has actually been drawn. Until it has — a first fetch
+        // of an Apple logo is a few hundred KB the CDN may still be resizing —
+        // the name stands in for it, so the header is never left with nothing
+        // in it.
+        var logoShown by remember(logoUrl) { mutableStateOf(false) }
+        if (appleArt != null && logoUrl != null) {
+            val context = LocalContext.current
+            var attempt by remember(logoUrl) { mutableIntStateOf(0) }
+            var failed by remember(logoUrl) { mutableStateOf(false) }
+            // Remembered, and at the size the URL already names: nothing about
+            // the load waits on layout to decide how big to decode, and a
+            // recomposition can't hand Coil a new request that cancels the one
+            // in flight.
+            val request = remember(logoUrl, attempt) {
+                ImageRequest.Builder(context).data(logoUrl).size(coil3.size.Size.ORIGINAL).build()
+            }
+            // A dropped fetch gets two more tries before the name is left in
+            // place.
+            LaunchedEffect(failed) {
+                if (failed && attempt < LOGO_RETRIES) {
+                    delay(LOGO_RETRY_DELAY_MS)
+                    failed = false
+                    attempt++
+                }
+            }
+            // Apple's own title logo stands in for the name, laid over its
+            // photo. Capped in height as well as width: a logo set on two or
+            // three lines is nearly square, and by width alone it would swallow
+            // the photograph it is meant to sit on.
+            val aspect = appleArt.logoAspect.coerceIn(0.4f, 6f)
+            val maxLogoHeight = artHeight * ARTIST_LOGO_MAX_HEIGHT
+            AsyncImage(
+                model = request,
+                contentDescription = page.title,
+                contentScale = ContentScale.Fit,
+                onState = { state ->
+                    when (state) {
+                        is AsyncImagePainter.State.Success -> logoShown = true
+                        is AsyncImagePainter.State.Error -> failed = true
+                        else -> Unit
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(top = 14.dp, bottom = 20.dp)
+                    // Sized from the incoming width in layout rather than through
+                    // a BoxWithConstraints, which would subcompose the image.
+                    .layout { measurable, constraints ->
+                        val widest = constraints.maxWidth * ARTIST_LOGO_WIDTH
+                        val height = minOf(widest / aspect, maxLogoHeight.toPx()).roundToInt()
+                        val width = (height * aspect).roundToInt()
+                        val placeable = measurable.measure(Constraints.fixed(width, height))
+                        layout(width, height) { placeable.place(0, 0) }
+                    },
+            )
+        }
+        if (!logoShown) Text(
             text = page.title,
             style = MaterialTheme.typography.displayLarge,
             color = palette.onBackground,
@@ -1006,9 +1366,8 @@ private fun ArtistHeader(page: DetailPage, palette: ArtworkPalette, artHeight: D
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                // Bottom is half the top inset — the stats pills (or, absent
-                // those, the action row) sit closer under the name than the
-                // name sits under the artwork.
+                // Bottom is half the top inset — the action row sits closer under
+                // the name than the name sits under the artwork.
                 .padding(start = HEADER_GUTTER, end = HEADER_GUTTER, top = 14.dp, bottom = 7.dp),
         )
     }
@@ -1029,6 +1388,22 @@ private fun ArtistHeader(page: DetailPage, palette: ArtworkPalette, artHeight: D
  * the list did with item zero. Read in a layer block, so a scroll moves it
  * without recomposing anything.
  */
+/**
+ * Everything on a detail page that is colour rather than words: the artwork,
+ * with its foot dissolved into the solid [ArtworkPalette.wash] the page is
+ * painted in.
+ *
+ * A layer of its own so the list can be scrolled over it rather than carry it.
+ * It follows the scroll instead of being scrolled: the list owns the gesture
+ * and reserves the room, and the picture is offset to follow whatever the list
+ * did with item zero. Read in a placement block, so a scroll moves it without
+ * recomposing anything.
+ *
+ * The join used to be hidden by a live blur laid across it, re-run on every
+ * frame of every scroll. A blurred copy of the sleeve does the same job here
+ * drawn once: nothing about it changes as the page moves, so it is rasterised
+ * on the first frame and only composited after that.
+ */
 @Composable
 private fun PageBackground(
     page: DetailPage,
@@ -1036,16 +1411,22 @@ private fun PageBackground(
     canvas: CanvasArtwork?,
     artHeight: Dp,
     listState: LazyListState,
-    hazeState: HazeState,
+    /**
+     * A photograph to use instead of the page's own thumbnail, where the source
+     * published a better one — Apple Music's artist hero shots. Null falls back
+     * to the thumbnail, which is every other page.
+     */
+    heroUrl: String? = null,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier
-            .clipToBounds()
-            .hazeSource(hazeState),
-    ) {
-        ArtworkWash(palette = palette, modifier = Modifier.matchParentSize())
+    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    // Not under a canvas: a still blurred over the foot of a moving clip would
+    // freeze the bottom of the video into the wrong picture.
+    val softenFoot = canvas == null && !reduceDynamicBlur &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val art = heroUrl ?: page.thumbnailUrl.artworkAt(HEADER_ART_PX)
 
+    Box(modifier.clipToBounds()) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -1053,7 +1434,7 @@ private fun PageBackground(
                 .offset { IntOffset(0, listState.headerTop(artHeight.toPx()).roundToInt()) },
         ) {
             AsyncImage(
-                model = page.thumbnailUrl.artworkAt(HEADER_ART_PX),
+                model = art,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -1061,10 +1442,10 @@ private fun PageBackground(
                     .background(palette.elevated),
             )
 
-            // Above the still art but below both gradients, so the scrim and
-            // the wash that blend the header into the page still sit over it.
-            // Always running: unlike the player's sleeve there is no transport
-            // here to follow, and the page is only up while it's being read.
+            // Above the still art but below the scrim, so the scrim that
+            // settles the header into the page still sits over it. Always
+            // running: unlike the player's sleeve there is no transport here
+            // to follow, and the page is only up while it's being read.
             canvas?.let { clip ->
                 CanvasArtworkPlayer(
                     canvas = clip,
@@ -1073,35 +1454,44 @@ private fun PageBackground(
                 )
             }
 
-            // Shade under the glass bar. Drawn in the page's own tint rather
-            // than in black, so the back arrow — which is themed, not always
-            // white — keeps its contrast in light mode as well as dark.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.28f)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(palette.background.copy(alpha = 0.55f), Color.Transparent),
-                        ),
-                    ),
-            )
+            // The same sleeve, blurred and faded in over the lower half, so the
+            // picture loses its detail before it loses its colour — a merge
+            // rather than a fade to a flat tint. The same request as the sharp
+            // copy, so it is a memory-cache hit and lands on the same frame.
+            if (softenFoot) {
+                AsyncImage(
+                    model = art,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .matchParentSize()
+                        // Offscreen so the mask cuts the blurred result rather
+                        // than each draw beneath it.
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(SOFT_FOOT_MASK, blendMode = BlendMode.DstIn)
+                        }
+                        // Rectangle keeps the edges clamped to the picture's own
+                        // colour rather than fading to transparent at the foot.
+                        .blur(SOFT_FOOT_BLUR, BlurredEdgeTreatment.Rectangle),
+                )
+            }
 
-            // Settles the foot of the picture onto the colour the page is made
-            // of, so the two sides of the join are already close before the
-            // glass goes over them — a blur averages what it is given and
-            // cannot invent agreement that isn't there. It matters most on a
-            // monochrome sleeve, where the wash is the only thing with a hue.
-            //
-            // Inside this layer, deliberately: drawn above the glass it would
-            // be a hard-edged rectangle of its own.
+            // Ends on the page colour at full strength, so there is no edge
+            // left where the artwork stops. Eased rather than run straight: a
+            // gradient that changes slope at a stop shows a line at that stop,
+            // however close the colours either side of it are.
             Box(
                 Modifier
                     .matchParentSize()
                     .background(
                         Brush.verticalGradient(
-                            0.55f to Color.Transparent,
-                            1.00f to palette.wash.copy(alpha = 0.88f),
+                            0.45f to Color.Transparent,
+                            0.65f to palette.wash.copy(alpha = 0.30f),
+                            0.82f to palette.wash.copy(alpha = 0.72f),
+                            0.94f to palette.wash.copy(alpha = 0.95f),
+                            1.00f to palette.wash,
                         ),
                     ),
             )
@@ -1109,89 +1499,18 @@ private fun PageBackground(
     }
 }
 
-/**
- * One pane of glass laid across the join, blurring [PageBackground] through it.
- *
- * Centred on the bottom edge of the artwork, so half of it is over the picture
- * and half over the page below — which is what makes it a merge rather than a
- * fade. A blur samples across its own footprint, so colour from the sleeve is
- * carried down past where the sleeve ends and the page's colour is carried up
- * into it, and the line that used to be there has nothing left to be a line
- * between.
- *
- * Its own two edges are the only ones left to hide, and the mask does that: the
- * band arrives from nothing and leaves to nothing over [MERGE_BAND]'s full
- * height, which is long enough that there is no moment where it starts.
- *
- * Sits between the background and the list, so the title, the buttons and the
- * song rows are drawn on top of it and stay sharp.
- */
-@Composable
-private fun MergeBand(
-    palette: ArtworkPalette,
-    artHeight: Dp,
-    listState: LazyListState,
-    hazeState: HazeState,
-) {
-    val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
-    // Asked for no dynamic blur, the page falls back to what the background
-    // does on its own: the sleeve settling onto the wash it is drawn over.
-    if (reduceDynamicBlur) return
+/** Where the blurred copy starts to show and where it has fully taken over. */
+private val SOFT_FOOT_MASK = Brush.verticalGradient(
+    0.35f to Color.Transparent,
+    0.75f to Color.Black,
+)
 
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(MERGE_BAND)
-            // Placed rather than translated, which for this one matters a great
-            // deal: haze records where it is when it is *placed*, and a
-            // graphicsLayer moves content at draw time, long after. Translated,
-            // the band went on believing it was at the top of the screen — so
-            // it blurred the top of the screen and painted that down here,
-            // which is a blur of the wrong thing and leaves the join intact.
-            .offset {
-                IntOffset(
-                    x = 0,
-                    y = (
-                        listState.headerTop(artHeight.toPx()) +
-                            artHeight.toPx() - MERGE_BAND.toPx() / 2f
-                        ).roundToInt(),
-                )
-            }
-            .hazeEffect(hazeState) {
-                // Without this the band draws nothing at all.
-                //
-                // Haze defaults to only blurring sources *below* it, which it
-                // decides with `area.zIndex < hazeZIndex` — where hazeZIndex
-                // comes from the nearest enclosing source. This page sits
-                // inside the app's own full-window source, so that value is
-                // 0f; our source is nested inside the same one, so its zIndex
-                // is 0f as well; and `0 < 0` is false. The page's own
-                // background was being filtered out of its own effect, leaving
-                // it with no areas to blur. The bottom fade behind the tab bar
-                // escapes this only because it is drawn outside that source
-                // and so has no zIndex to be compared against.
-                //
-                // [hazeState] is private to this page and holds exactly one
-                // area, so there is nothing here to filter.
-                canDrawArea = { true }
-                blurRadius = MERGE_BLUR
-                // Haze's film grain is uniform across the layer, so it would
-                // show up at the ends as texture over content the mask has
-                // otherwise left alone — exactly the edges it is hiding.
-                noiseFactor = 0f
-                // An empty list falls through to whatever style is in scope, so
-                // "no tint" has to be said as a transparent one. The band is
-                // here to move colour around, not to add any.
-                tints = listOf(HazeTint(Color.Transparent))
-                backgroundColor = palette.wash
-                mask = Brush.verticalGradient(
-                    0.00f to Color.Transparent,
-                    0.50f to Color.Black,
-                    1.00f to Color.Transparent,
-                )
-            },
-    )
-}
+/**
+ * Wide enough that no shapes survive where the blurred copy is at full
+ * strength, and small enough that the sharp copy above it still reads as sharp.
+ */
+private val SOFT_FOOT_BLUR = 48.dp
+
 
 /**
  * Where the top of the artwork currently is.
@@ -1205,20 +1524,6 @@ private fun MergeBand(
 private fun LazyListState.headerTop(artHeightPx: Float): Float =
     if (firstVisibleItemIndex == 0) -firstVisibleItemScrollOffset.toFloat() else -artHeightPx * 2f
 
-/**
- * How tall the glass is — generous, because half of its run is spent arriving
- * and half leaving, and a band that reaches full strength quickly has an edge
- * again.
- */
-private val MERGE_BAND = 320.dp
-
-/**
- * Wide enough that nothing of the picture survives where the band is at full
- * strength — not softened detail, none. A blur that leaves shapes behind reads
- * as a blurred photograph, and a blurred photograph next to a flat colour is
- * still two surfaces.
- */
-private val MERGE_BLUR = 100.dp
 
 /** Shuffle • Play • Download — the Apple Music action row. */
 @Composable
@@ -1227,27 +1532,55 @@ private fun ActionRow(
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     bottomSpace: Dp = 22.dp,
+    /** The artist header's subscribe state, or null where it isn't offered. */
+    subscription: SubscriptionState? = null,
+    onToggleSubscription: (() -> Unit)? = null,
+    /** Apple's fill for the Play circle; null leaves it white. */
+    playColor: Color? = null,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = HEADER_GUTTER),
-        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(ARTIST_ACTION_GAP, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Circular Shuffle button
         CircleIconButton(
             icon = YZMusicIcons.Shuffle,
-            contentDescription = "Shuffle",
+            contentDescription = stringResource(R.string.shuffle),
             palette = palette,
             onClick = onShuffle,
             haptic = Haptic.Resume,
+            size = ARTIST_SIDE_BUTTON,
+            lightFill = true,
         )
 
         PlayPill(
-            palette = palette,
             onClick = onPlay,
+            iconOnly = true,
+            size = ARTIST_PLAY_BUTTON,
+            iconScale = ARTIST_PLAY_ICON_SCALE,
+            containerColor = playColor ?: Color.White,
+            cutout = true,
         )
+
+        // Balances the Shuffle button so Play stays in the middle rather than
+        // sitting off to one side of a row that is only half full.
+        if (subscription != null) {
+            CircleIconButton(
+                icon = if (subscription.subscribed) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                contentDescription = stringResource(
+                    if (subscription.subscribed) R.string.unsubscribe else R.string.subscribe,
+                ),
+                palette = palette,
+                onClick = { onToggleSubscription?.invoke() },
+                haptic = if (subscription.subscribed) Haptic.ToggleOff else Haptic.ToggleOn,
+                size = ARTIST_SIDE_BUTTON,
+                lightFill = true,
+            )
+        } else {
+            Spacer(Modifier.size(ARTIST_SIDE_BUTTON))
+        }
     }
     Spacer(Modifier.height(bottomSpace))
 }
@@ -1258,40 +1591,88 @@ private fun ActionRow(
  */
 @Composable
 private fun PlayPill(
-    palette: ArtworkPalette,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     horizontalPadding: Dp = 32.dp,
+    iconOnly: Boolean = false,
+    size: Dp = 50.dp,
+    iconScale: Float = 0.44f,
+    containerColor: Color = Color.White,
+    /** Punch the triangle out of the circle, so the page shows through it, as Apple's does. */
+    cutout: Boolean = false,
 ) {
+    // Black on the light fills Apple picks, white on the rare dark one.
+    val contentColor = if (containerColor.luminance() > 0.35f) Color.Black else Color.White
     // Resume rather than a flat tap: this button starts a queue, and the rising
     // pair says so.
     val haptics = rememberHaptics()
+    if (iconOnly && cutout) {
+        Box(
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape)
+                .clickable {
+                    haptics.play(Haptic.Resume)
+                    onClick()
+                }
+                // Offscreen so the clear below cuts the circle drawn under it,
+                // not whatever the page has behind.
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawCircle(containerColor)
+                    val box = this.size.minDimension * iconScale
+                    val unit = box / 24f
+                    val origin = Offset((this.size.width - box) / 2f, (this.size.height - box) / 2f)
+                    val triangle = Path().apply {
+                        moveTo(origin.x + 6.8f * unit, origin.y + 4.8f * unit)
+                        lineTo(origin.x + 19.2f * unit, origin.y + 12f * unit)
+                        lineTo(origin.x + 6.8f * unit, origin.y + 19.2f * unit)
+                        close()
+                    }
+                    drawPath(triangle, Color.Black, blendMode = BlendMode.Clear)
+                    // The same round-joined pen the icon is drawn with.
+                    drawPath(
+                        triangle,
+                        Color.Black,
+                        style = Stroke(
+                            width = 2f * unit,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round,
+                        ),
+                        blendMode = BlendMode.Clear,
+                    )
+                }
+                .semantics { contentDescription = "Play" },
+        )
+        return
+    }
     Row(
         modifier = modifier
-            .height(50.dp)
+            .then(if (iconOnly) Modifier.size(size) else Modifier.height(size))
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+            .background(containerColor)
             .clickable {
                 haptics.play(Haptic.Resume)
                 onClick()
             }
-            .padding(horizontal = horizontalPadding),
+            .then(if (iconOnly) Modifier else Modifier.padding(horizontal = horizontalPadding)),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = YZMusicIcons.Play,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.size(18.dp),
+            contentDescription = if (iconOnly) stringResource(R.string.play) else null,
+            tint = contentColor,
+            modifier = Modifier.size(if (iconOnly) size * iconScale else 18.dp),
         )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = "Play",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+        if (!iconOnly) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.play),
+                style = MaterialTheme.typography.titleMedium,
+                color = contentColor,
+            )
+        }
     }
 }
 
@@ -1307,14 +1688,34 @@ private fun CircleIconButton(
     onClick: () -> Unit,
     haptic: Haptic = Haptic.Tap,
     size: Dp = 50.dp,
+    /**
+     * A pale fill with a brighter rim, rather than the glass treatment.
+     *
+     * Over an artist page's own photograph there is no backdrop worth
+     * refracting — the surface behind is a still image that does not move — so
+     * the expensive half of the glass effect buys nothing, while the hairline
+     * and the tint are the part that actually reads as a button.
+     */
+    lightFill: Boolean = false,
 ) {
     val haptics = rememberHaptics()
     Box(
         modifier = Modifier
             .size(size)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+            .then(
+                if (lightFill) {
+                    Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = LIGHT_FILL_ALPHA), CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = TOP_RELEASE_EDGE_ALPHA), CircleShape)
+                } else {
+                    Modifier
+                        .lightweightLiquidGlass(
+                            shape = CircleShape,
+                            fallbackColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                        )
+                },
+            )
             .clickable {
                 haptics.play(haptic)
                 onClick()
@@ -1330,17 +1731,6 @@ private fun CircleIconButton(
     }
 }
 
-/** Track count and running time, the way a release page signs off. */
-@Composable
-private fun ReleaseFooter(songs: List<Song>, palette: ArtworkPalette) {
-    Text(
-        text = songs.playtimeSummary(),
-        style = MaterialTheme.typography.labelMedium,
-        color = palette.onBackgroundVariant,
-        modifier = Modifier.padding(start = HEADER_GUTTER, end = HEADER_GUTTER, top = 18.dp),
-    )
-}
-
 /** "1.2M subscribers" and "3.4M monthly listeners", off the artist header. */
 @Composable
 private fun ArtistStatsRow(
@@ -1348,28 +1738,30 @@ private fun ArtistStatsRow(
     monthlyListenerCount: String?,
     palette: ArtworkPalette,
 ) {
-    Row(
+    // Stacked and left-aligned with the text under it, since this now sits in
+    // the About section rather than across the header.
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            // Top padding is left to the header's own bottom inset (7.dp).
-            .padding(start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            .padding(start = ARTIST_CONTENT_GUTTER, end = ARTIST_CONTENT_GUTTER, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.Start,
     ) {
         // YouTube's own count text already reads "1.2M subscribers" in full,
         // so only the number is kept and the label re-said in the app's own
-        // words — the one way to fit both stats on one line on a narrow
-        // screen without either wrapping into two.
+        // words — the one way to fit both stats on a narrow screen without
+        // either wrapping into two.
         subscriberCountText?.let {
             StatChip(
                 icon = Icons.Rounded.Person,
-                text = "${it.substringBefore(' ')} subscribers",
+                text = stringResource(R.string.subscribers, it.substringBefore(' ')),
                 palette = palette,
             )
         }
         monthlyListenerCount?.let {
             StatChip(
                 icon = Icons.Rounded.GraphicEq,
-                text = "${it.substringBefore(' ')} monthly listeners",
+                text = stringResource(R.string.monthly_listeners, it.substringBefore(' ')),
                 palette = palette,
             )
         }
@@ -1381,9 +1773,10 @@ private fun StatChip(icon: ImageVector, text: String, palette: ArtworkPalette) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .border(0.5.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+            .lightweightLiquidGlass(
+                shape = CircleShape,
+                fallbackColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+            )
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Icon(
@@ -1413,7 +1806,14 @@ private fun StatChip(icon: ImageVector, text: String, palette: ArtworkPalette) {
  * behind it to reveal.
  */
 @Composable
-private fun AboutSection(title: String, text: String, palette: ArtworkPalette) {
+private fun AboutSection(
+    title: String,
+    text: String?,
+    palette: ArtworkPalette,
+    horizontalPadding: Dp = ABOUT_GUTTER,
+    /** Drawn under the text. */
+    stats: (@Composable () -> Unit)? = null,
+) {
     var expanded by remember(text) { mutableStateOf(false) }
     var clipped by remember(text) { mutableStateOf(false) }
     Column {
@@ -1422,10 +1822,13 @@ private fun AboutSection(title: String, text: String, palette: ArtworkPalette) {
             style = MaterialTheme.typography.titleMedium,
             color = palette.onBackground,
             modifier = Modifier.padding(
-                start = PAGE_GUTTER, end = PAGE_GUTTER, top = 2.dp, bottom = 6.dp,
+                start = horizontalPadding,
+                end = horizontalPadding,
+                top = 2.dp,
+                bottom = 6.dp,
             ),
         )
-        Text(
+        if (text != null) Text(
             text = text,
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Medium,
@@ -1436,18 +1839,22 @@ private fun AboutSection(title: String, text: String, palette: ArtworkPalette) {
             modifier = Modifier
                 .fillMaxWidth()
                 .animateContentSize()
-                .padding(horizontal = PAGE_GUTTER)
+                .padding(horizontal = horizontalPadding)
                 .let { m -> if (clipped || expanded) m.clickable { expanded = !expanded } else m },
         )
         if (clipped || expanded) {
             Text(
-                text = if (expanded) "Less" else "More",
+                text = stringResource(if (expanded) R.string.less else R.string.more),
                 style = MaterialTheme.typography.labelLarge,
                 color = palette.accent,
                 modifier = Modifier
-                    .padding(horizontal = PAGE_GUTTER, vertical = 4.dp)
+                    .padding(horizontal = horizontalPadding, vertical = 4.dp)
                     .clickable { expanded = !expanded },
             )
+        }
+        if (stats != null) {
+            Spacer(Modifier.height(if (text != null) 12.dp else 4.dp))
+            stats()
         }
     }
 }
@@ -1456,15 +1863,28 @@ private fun AboutSection(title: String, text: String, palette: ArtworkPalette) {
 private fun SectionHeading(
     title: String,
     palette: ArtworkPalette,
+    /**
+     * The line under the title, where there is one.
+     *
+     * Kept, though the layout below is the one where "Show all" sits hard
+     * against the edge: the shelves on this page carry real subtitles — "The
+     * most played songs globally" under Trending — and dropping them would
+     * quietly delete that copy rather than restyle it.
+     */
     subtitle: String = "",
     onShowAll: (() -> Unit)? = null,
+    horizontalPadding: Dp = PAGE_GUTTER,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                start = PAGE_GUTTER, end = PAGE_GUTTER, top = 10.dp, bottom = 8.dp,
+                start = horizontalPadding,
+                end = horizontalPadding,
+                top = 10.dp,
+                bottom = 8.dp,
             ),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -1486,28 +1906,14 @@ private fun SectionHeading(
             }
         }
         if (onShowAll != null) {
-            Row(
+            Text(
+                text = stringResource(R.string.show_all),
+                style = MaterialTheme.typography.titleSmall,
+                color = palette.accent,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
                     .clickable(onClick = onShowAll)
-                    .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.show_all),
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(2.dp))
-                Icon(
-                    imageVector = Icons.Rounded.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
+                    .padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
+            )
         }
     }
 }
@@ -1522,6 +1928,9 @@ private fun CompactSongRow(
     onClick: () -> Unit,
     onLongPress: () -> Unit,
     downloadedTint: Color? = null,
+    /** Whether this row is the track currently playing. */
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
 ) {
     Row(
         modifier = Modifier
@@ -1530,21 +1939,24 @@ private fun CompactSongRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AsyncImage(
-            model = song.artworkAt(ROW_ART_PX),
-            contentDescription = null,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .thumbnailBorder(RoundedCornerShape(7.dp))
-                .background(palette.elevated),
-        )
+        Box(Modifier.size(48.dp)) {
+            AsyncImage(
+                model = song.artworkAt(ROW_ART_PX),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .thumbnailBorder(RoundedCornerShape(7.dp))
+                    .background(palette.elevated),
+            )
+            if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.titleMedium,
-                color = palette.onBackground,
+                color = if (isCurrent) palette.accent else palette.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1668,6 +2080,15 @@ private fun SectionCard(
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier.width(SHELF_CARD_WIDTH),
+    /**
+     * Whether to stamp the card's rank on its sleeve.
+     *
+     * True where the row *is* a ranking, and the number is the reason to read
+     * it. False on an artist page, whose shelves are not rankings and whose
+     * cards are artwork-led — a `#2` there says the artist is second at
+     * something the row never claimed.
+     */
+    showRank: Boolean = true,
 ) {
     Column(
         modifier = modifier
@@ -1687,7 +2108,7 @@ private fun SectionCard(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-            if (!item.customIndex.isNullOrBlank()) {
+            if (showRank && !item.customIndex.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
                         .padding(6.dp)
@@ -2019,6 +2440,187 @@ private fun DetailRankedSongRowItem(
 }
 
 /**
+ * The newest release on an artist's shelves — an album, or a single or EP that
+ * came out after it. Playlists, videos and related artists share these shelves
+ * and are skipped: only an `MPRE…` browse id is a release.
+ *
+ * Newest by the year in the card's subtitle, which is all a shelf item says
+ * about when. Ties and releases with no year keep the shelf's own order, which
+ * lists albums first.
+ */
+private fun List<HomeShelf>.topRelease(): ShelfItem? =
+    asSequence()
+        .flatMap { it.items.asSequence() }
+        .filter { it.browseId?.startsWith("MPRE") == true }
+        .withIndex()
+        .maxWithOrNull(
+            compareBy<IndexedValue<ShelfItem>> { it.value.releaseYear() ?: 0 }
+                .thenByDescending { it.index },
+        )?.value
+
+private val RELEASE_YEAR = Regex("""\b(19|20)\d{2}\b""")
+
+private fun ShelfItem.releaseYear(): Int? =
+    RELEASE_YEAR.find(subtitle)?.value?.toIntOrNull()
+
+/** "Recent Single" and "Recent EP" where the card says so, otherwise "Recent Album". */
+@androidx.annotation.StringRes
+private fun ShelfItem.recentLabel(): Int {
+    val kind = subtitle.lowercase(Locale.getDefault())
+    return when {
+        kind.contains("single") -> R.string.recent_single
+        Regex("""\bep\b""").containsMatchIn(kind) -> R.string.recent_ep
+        else -> R.string.recent_album
+    }
+}
+
+/**
+ * The artist page's top-release card: sleeve, what it is and when, and its
+ * title, in a rounded panel the width of the page.
+ *
+ * [onToggleSaved] is null whenever the save state is unknown, which hides the
+ * button rather than drawing it in a state it might not be — a card that says
+ * "add" about something already saved is worse than a card with no button.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TopReleaseCard(
+    item: ShelfItem,
+    palette: ArtworkPalette,
+    onClick: () -> Unit,
+    onLongPress: (() -> Unit)?,
+    saved: Boolean?,
+    onToggleSaved: (() -> Unit)?,
+) {
+    val shape = RoundedCornerShape(28.dp)
+    val coverShape = RoundedCornerShape(12.dp)
+    val haptics = rememberHaptics()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = ARTIST_CONTENT_GUTTER)
+            .padding(bottom = 22.dp)
+            // A light veil rather than dark glass: Apple's containers read
+            // slightly white against the page, and a dark panel reads as a hole.
+            .clip(shape)
+            .background(Color.White.copy(alpha = LIGHT_FILL_ALPHA), shape)
+            .border(1.dp, Color.White.copy(alpha = TOP_RELEASE_EDGE_ALPHA), shape)
+            .clip(shape)
+            .combinedClickable(onClick = onClick, onLongClick = { onLongPress?.invoke() })
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = item.thumbnailUrl.artworkAt(CARD_ART_PX),
+            contentDescription = null,
+            modifier = Modifier
+                .size(88.dp)
+                .clip(coverShape)
+                .border(1.dp, Color.White.copy(alpha = TOP_RELEASE_COVER_EDGE_ALPHA), coverShape)
+                .background(palette.elevated),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = item.subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.onBackgroundVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleLarge,
+                color = palette.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = stringResource(item.recentLabel()),
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.onBackgroundVariant,
+                maxLines = 1,
+            )
+        }
+        if (onToggleSaved != null && saved != null) {
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = LIGHT_FILL_ALPHA), CircleShape)
+                    .border(1.dp, Color.White.copy(alpha = TOP_RELEASE_EDGE_ALPHA), CircleShape)
+                    .clickable {
+                        haptics.play(if (saved) Haptic.ToggleOff else Haptic.ToggleOn)
+                        onToggleSaved()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (saved) Icons.Rounded.Check else Icons.Rounded.Add,
+                    contentDescription = stringResource(
+                        if (saved) R.string.remove_from_library else R.string.add_to_library,
+                    ),
+                    tint = palette.onBackground,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A shelf's worth of cards as a full-screen grid, in place of the page.
+ *
+ * Where "Show all" used to navigate to a browse id and open a second page, the
+ * shelf it was opened from is usually already in memory: the row is a preview of
+ * it. Rendering that again as a grid rather than re-fetching it means the cards
+ * arrive instantly, the hero and the header stay where they were, and going back
+ * is the same gesture that opened it.
+ *
+ * No top bar of its own — the host's back arrow and title are still up there,
+ * and a second one would be two answers to the same gesture.
+ */
+@Composable
+private fun ArtistShelfGridPage(
+    shelf: HomeShelf,
+    palette: ArtworkPalette,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)?,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+) {
+    val gridState = rememberLazyGridState()
+    BoxWithConstraints(modifier.fillMaxSize().background(palette.background)) {
+        val grid = libraryGrid(maxWidth - PAGE_GUTTER * 2)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(grid.columns),
+            state = gridState,
+            contentPadding = PaddingValues(
+                top = topBarContentPadding(),
+                bottom = contentPadding.calculateBottomPadding() + 16.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(LIBRARY_GRID_SPACING),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = PAGE_GUTTER),
+        ) {
+            items(shelf.items, key = { it.browseId ?: it.title }) { item ->
+                SectionCard(
+                    item = item,
+                    palette = palette,
+                    onClick = { onItemClick(item) },
+                    onLongPress = onItemLongPress?.let { { it(item) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    showRank = false,
+                )
+            }
+        }
+    }
+}
+
+/**
  * Splits the one subtitle a browse row hands over — "Album • Travis Scott •
  * 2023", or sometimes just "Travis Scott" — into the credit line and the
  * metadata line the header shows separately.
@@ -2027,16 +2629,22 @@ private fun DetailRankedSongRowItem(
  * it: the player knows an album's artist but not its year, search knows both,
  * and a home card frequently knows neither.
  */
-private fun DetailPage.headerLines(trackCount: Int): Pair<String, String> {
+@Composable
+private fun DetailPage.headerLines(trackCount: Int, playtime: String? = null): Pair<String, String> {
     val parts = subtitle.split("•", "·").map { it.trim() }.filter { it.isNotEmpty() }
     val year = parts.lastOrNull { it.length == 4 && it.all(Char::isDigit) }
     val kind = parts.firstOrNull { it.lowercase(Locale.ROOT) in KIND_WORDS }
     val credit = parts.filter { it != year && it != kind }.joinToString(", ")
     val meta = listOfNotNull(
-        kind ?: type.label,
+        kind ?: type.localizedLabel(),
         year,
-        trackCount.takeIf { it > 0 }?.let { "$it ${if (it == 1) "song" else "songs"}" },
-    ).joinToString(" • ").uppercase(Locale.ROOT)
+        // A real plural resource, so the count reads correctly in a language
+        // where appending an "s" is not how you pluralise.
+        trackCount.takeIf { it > 0 }?.let {
+            pluralStringResource(R.plurals.track_count_plural, it, it)
+        },
+        playtime,
+    ).joinToString(" • ").uppercase(Locale.getDefault())
     return credit to meta
 }
 
@@ -2045,30 +2653,41 @@ private val KIND_WORDS = setOf(
     "album", "single", "ep", "playlist", "artist", "podcast", "episode", "song", "video",
 )
 
-private val BrowseType.label: String?
-    get() = when (this) {
-        BrowseType.ALBUM -> "Album"
-        BrowseType.PLAYLIST -> "Playlist"
-        BrowseType.ARTIST -> "Artist"
-        BrowseType.CHARTS -> "Charts"
-        BrowseType.CATEGORY -> "Category"
-        BrowseType.NEW_RELEASES_GRID -> "New Releases"
-        BrowseType.OTHER -> null
-    }
+/**
+ * The kind of page, in the app's language.
+ *
+ * [BrowseType.CHARTS], [BrowseType.CATEGORY] and
+ * [BrowseType.NEW_RELEASES_GRID] are answered here even though upstream drops
+ * them: YZ navigates to all three, and a browse id that resolves to one of them
+ * would otherwise fall through to the raw enum name in the header.
+ */
+@Composable
+private fun BrowseType.localizedLabel(): String? = when (this) {
+    BrowseType.ALBUM -> stringResource(R.string.album)
+    BrowseType.PLAYLIST -> stringResource(R.string.playlist)
+    BrowseType.ARTIST -> stringResource(R.string.artist)
+    BrowseType.CHARTS -> stringResource(R.string.charts)
+    BrowseType.CATEGORY -> stringResource(R.string.category)
+    BrowseType.NEW_RELEASES_GRID -> stringResource(R.string.new_releases)
+    BrowseType.OTHER -> null
+}
 
-/** "12 songs, 41 minutes" — omitting the time when the rows carry no durations. */
-private fun List<Song>.playtimeSummary(): String {
-    val count = "$size ${if (size == 1) "song" else "songs"}"
-    val minutes = sumOf { it.durationText.toSeconds() } / 60
+/**
+ * How long the page plays for — "41 min", "1h 25m" — summed over the rows on it,
+ * or null when none of them carry a duration. A playlist still filling in counts
+ * up with it, so the figure is never ahead of the list it sits over.
+ */
+@Composable
+private fun List<Song>.playtime(): String? {
+    val minutes = sumOf { it.durationMillis() } / 60_000
     return when {
-        minutes <= 0 -> count
-        minutes < 60 -> "$count, $minutes minutes"
-        else -> {
-            val hours = minutes / 60
-            val rest = minutes % 60
-            val hourLabel = "$hours ${if (hours == 1) "hour" else "hours"}"
-            if (rest == 0) "$count, $hourLabel" else "$count, $hourLabel $rest minutes"
-        }
+        minutes <= 0 -> null
+        minutes < 60 -> stringResource(R.string.minutes_short, minutes.toInt())
+        else -> stringResource(
+            R.string.hours_minutes_short,
+            (minutes / 60).toInt(),
+            (minutes % 60).toInt(),
+        )
     }
 }
 
