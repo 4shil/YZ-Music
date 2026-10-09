@@ -50,3 +50,7 @@ generate_synthetic_history.js
 test_beat.onnx
 *.onnx
 app/src/test/java/com/music/yzmusic/CustomModuleValidationTest.kt
+
+# APKs staged for GitHub Release uploads - binaries are attached to the
+# release, never committed.
+release-artifacts/
