@@ -33,9 +33,10 @@ internal object DesktopUpdateChecker {
     )
 
     private const val LATEST_RELEASE_URL =
-        "https://api.github.com/repos/kushagrasinghx/BitChord/releases/latest"
+        "https://api.github.com/repos/4shil/YZ-Music/releases/latest"
 
-    val currentVersion: String = System.getProperty("bitchord.version") ?: "1.8-beta1"
+    val currentVersion: String =
+        System.getProperty("yzmusic.version") ?: System.getProperty("bitchord.version") ?: "1.8"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -66,14 +67,12 @@ internal object DesktopUpdateChecker {
     }.getOrNull()
 
     /**
-     * The release names its files `BitChord-<version>-windows-x64-setup.exe` and
-     * `BitChord-<version>-linux-x86_64.AppImage` (see .github/workflows/release.yml); match on the
-     * platform part so a version change does not matter.
+     * Finds the installer matching this platform from the release assets.
      */
     private fun installerUrl(release: JsonObject): String? {
         val suffixes = when {
-            DesktopPlatform.isWindows -> listOf("-windows-x64-setup.exe")
-            DesktopPlatform.isLinux -> listOf(".AppImage", "-linux-amd64.deb")
+            DesktopPlatform.isWindows -> listOf("-windows-x64-setup.exe", ".exe", ".zip")
+            DesktopPlatform.isLinux -> listOf(".AppImage", "-linux-amd64.deb", ".deb", ".tar.gz")
             else -> return null
         }
         val assets = release["assets"]?.jsonArray?.mapNotNull { it as? JsonObject }.orEmpty()

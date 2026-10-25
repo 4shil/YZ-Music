@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * Blank — the default — means "whatever the app is set to", and is stored as blank rather than
  * resolved once: someone who has never touched this has expressed no preference, and switching
- * BitChord to Spanish should carry their lyrics with it rather than leaving them on the English
+ * YZ Music to Spanish should carry their lyrics with it rather than leaving them on the English
  * they happened to be reading the day the setting was written.
  */
 internal object DesktopTranslationSetting {

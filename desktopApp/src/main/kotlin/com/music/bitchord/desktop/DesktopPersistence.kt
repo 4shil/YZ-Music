@@ -12,7 +12,19 @@ import java.util.prefs.Preferences
 
 /** Small OS-backed store for desktop state; no Android Context is required. */
 class DesktopPersistence {
-    internal val preferences = Preferences.userRoot().node("com.music.bitchord.desktop")
+    internal val preferences = run {
+        val node = Preferences.userRoot().node("com.music.yzmusic.desktop")
+        val legacy = Preferences.userRoot().node("com.music.bitchord.desktop")
+        if (node.keys().isEmpty() && legacy.keys().isNotEmpty()) {
+            runCatching {
+                for (key in legacy.keys()) {
+                    val value = legacy.get(key, null)
+                    if (value != null) node.put(key, value)
+                }
+            }
+        }
+        node
+    }
     private val sourceJson = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true

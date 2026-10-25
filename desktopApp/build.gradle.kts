@@ -52,6 +52,9 @@ val desktopModuleIndexUrl = localProperty("MODULE_INDEX_URL")
 // Last.fm signs every request with these, so signing in from inside the app
 // needs them at hand. Supplied locally and never committed, as on Android.
 val listenTogetherServer = localProperty("LISTEN_TOGETHER_SERVER")
+    .ifBlank { System.getenv("LISTEN_TOGETHER_SERVER").orEmpty() }
+    .ifBlank { "https://yz-music-party.onrender.com" }
+    .trim().trimEnd('/')
 val lastfmApiKey = localProperty("LASTFM_API_KEY")
 val lastfmSecret = localProperty("LASTFM_SECRET")
 
@@ -389,7 +392,7 @@ val windowsPortableAssemble by tasks.registering {
     group = "distribution"
     description = "Lays out a Windows-runnable folder: application jars, Windows natives, launcher."
     dependsOn(tasks.named("jar"))
-    val stage = windowsPortableDir.map { it.dir("BitChord") }
+    val stage = windowsPortableDir.map { it.dir("YZ-Music") }
     val appJar = tasks.named<Jar>("jar").flatMap { it.archiveFile }
     val runtime = configurations.named("runtimeClasspath")
     val version = appVersion
@@ -418,22 +421,22 @@ val windowsPortableAssemble by tasks.registering {
             val name = if (group.isNullOrBlank()) artifact.file.name else "$group.${artifact.file.name}"
             artifact.file.copyTo(File(lib, name), overwrite = true)
         }
-        appJar.get().asFile.copyTo(File(lib, "bitchord-app.jar"), overwrite = true)
+        appJar.get().asFile.copyTo(File(lib, "yzmusic-app.jar"), overwrite = true)
 
         // `lib\*` rather than a spelled-out classpath: the wildcard is what keeps this working when
         // a dependency is added, and the JVM is what expands it.
-        File(target, "BitChord.bat").writeText(
+        File(target, "YZ-Music.bat").writeText(
             buildString {
                 appendLine("@echo off")
                 appendLine("setlocal")
-                appendLine("rem BitChord, portable. Needs a Java 21+ runtime on PATH or in JAVA_HOME.")
+                appendLine("rem YZ Music, portable. Needs a Java 21+ runtime on PATH or in JAVA_HOME.")
                 appendLine("set \"HERE=%~dp0\"")
                 appendLine("set \"RUNNER=java\"")
                 appendLine("if defined JAVA_HOME set \"RUNNER=%JAVA_HOME%\\bin\\java\"")
-                append("\"%RUNNER%\" -Dbitchord.version=$version")
-                if (moduleIndex.isNotBlank()) append(" -Dbitchord.module.index=$moduleIndex")
+                append("\"%RUNNER%\" -Dyzmusic.version=$version -Dbitchord.version=$version")
+                if (moduleIndex.isNotBlank()) append(" -Dyzmusic.module.index=$moduleIndex -Dbitchord.module.index=$moduleIndex")
                 if (lastfmKey.isNotBlank() && lastfmSharedSecret.isNotBlank()) {
-                    append(" -Dbitchord.lastfm.key=$lastfmKey -Dbitchord.lastfm.secret=$lastfmSharedSecret")
+                    append(" -Dyzmusic.lastfm.key=$lastfmKey -Dyzmusic.lastfm.secret=$lastfmSharedSecret -Dbitchord.lastfm.key=$lastfmKey -Dbitchord.lastfm.secret=$lastfmSharedSecret")
                 }
                 appendLine(" -cp \"%HERE%lib\\*\" $mainClass %*")
                 appendLine("endlocal")
@@ -484,7 +487,7 @@ val windowsPortable by tasks.registering(Zip::class) {
     description = "Zips the portable Windows folder for copying to a Windows machine."
     dependsOn(windowsPortableAssemble)
     from(windowsPortableDir)
-    archiveFileName.set("BitChord-$appVersion-windows-portable.zip")
+    archiveFileName.set("YZ-Music-$appVersion-windows-portable.zip")
     destinationDirectory.set(layout.buildDirectory.dir("distributions"))
     doLast { logger.lifecycle("windowsPortable: ${archiveFile.get().asFile.absolutePath}") }
 }
@@ -499,15 +502,15 @@ compose.desktop {
         mainClass = composeMainClass
         jvmArgs("-Xmx512m")
         jvmArgs("-XX:+UseG1GC", "-XX:G1PeriodicGCInterval=20000", "-XX:G1PeriodicGCSystemLoadThreshold=0")
-        jvmArgs("-Dbitchord.version=$appVersion")
+        jvmArgs("-Dyzmusic.version=$appVersion", "-Dbitchord.version=$appVersion")
         if (desktopModuleIndexUrl.isNotBlank()) {
-            jvmArgs("-Dbitchord.module.index=$desktopModuleIndexUrl")
+            jvmArgs("-Dyzmusic.module.index=$desktopModuleIndexUrl", "-Dbitchord.module.index=$desktopModuleIndexUrl")
         }
         if (lastfmApiKey.isNotBlank() && lastfmSecret.isNotBlank()) {
-            jvmArgs("-Dbitchord.lastfm.key=$lastfmApiKey", "-Dbitchord.lastfm.secret=$lastfmSecret")
+            jvmArgs("-Dyzmusic.lastfm.key=$lastfmApiKey", "-Dyzmusic.lastfm.secret=$lastfmSecret", "-Dbitchord.lastfm.key=$lastfmApiKey", "-Dbitchord.lastfm.secret=$lastfmSecret")
         }
         if (listenTogetherServer.isNotBlank()) {
-            jvmArgs("-Dbitchord.listentogether.server=$listenTogetherServer")
+            jvmArgs("-Dyzmusic.listentogether.server=$listenTogetherServer", "-Dbitchord.listentogether.server=$listenTogetherServer")
         }
 
         buildTypes.release.proguard {
@@ -558,7 +561,7 @@ compose.desktop {
 
             macOS {
                 iconFile.set(project.file("packaging/icons/AppIcon.icns"))
-                bundleID = "com.music.bitchord"
+                bundleID = "com.music.yzmusic"
                 appCategory = "public.app-category.music"
                 dockName = "YZ Music"
                 infoPlist {
@@ -573,7 +576,7 @@ compose.desktop {
                 iconFile.set(project.file("packaging/icons/AppIcon.png"))
                 menuGroup = "Audio"
                 appCategory = "AudioVideo;Audio;Player"
-                debMaintainer = "85984486+AbhiTheModder@users.noreply.github.com"
+                debMaintainer = "166588383+4shil@users.noreply.github.com"
                 rpmLicenseType = "GPL-3.0"
             }
 

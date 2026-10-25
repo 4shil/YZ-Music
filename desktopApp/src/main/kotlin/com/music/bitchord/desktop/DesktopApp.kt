@@ -6478,7 +6478,7 @@ private fun DesktopSettingsScreen(
                         DesktopStrings["d_tray_icon", "Tray icon"],
                         DesktopStrings[
                             "d_show_bitchord_in_the_system_tray_with_playback_controls",
-                            "Show BitChord in the system tray, with playback controls",
+                            "Show YZ Music in the system tray, with playback controls",
                         ],
                         trayIconEnabled,
                         onTrayIconChange,
@@ -6488,7 +6488,7 @@ private fun DesktopSettingsScreen(
                             DesktopStrings["d_keep_playing_when_closed", "Keep playing when closed"],
                             DesktopStrings[
                                 "d_closing_the_window_leaves_bitchord_in_the_tray_instead_o",
-                                "Closing the window leaves BitChord in the tray instead of quitting",
+                                "Closing the window leaves YZ Music in the tray instead of quitting",
                             ],
                             closeToTray,
                             onCloseToTrayChange,
@@ -6690,23 +6690,21 @@ private fun DesktopSettingsScreen(
 /** The line at the foot of the settings sheet, as Android has it. */
 @Composable
 private fun DesktopSettingsFooter(onLicenses: () -> Unit) {
-    val version = remember { System.getProperty("bitchord.version") ?: "1.8-beta1" }
+    val version = remember {
+        System.getProperty("yzmusic.version") ?: System.getProperty("bitchord.version") ?: "1.8"
+    }
     val linkStyles = TextLinkStyles(
         style = SpanStyle(color = DesktopAccent, textDecoration = TextDecoration.Underline),
     )
     Text(
         text = buildAnnotatedString {
-            append("bitchord $version  ")
-            withLink(LinkAnnotation.Url("https://github.com/kushagrasinghx/BitChord", linkStyles)) {
+            append("YZ Music $version  ")
+            withLink(LinkAnnotation.Url("https://github.com/4shil/YZ-Music", linkStyles)) {
                 append("GitHub")
             }
             append("  ")
-            withLink(LinkAnnotation.Url("https://github.com/kushagrasinghx", linkStyles)) {
+            withLink(LinkAnnotation.Url("https://github.com/4shil", linkStyles)) {
                 append("Developer")
-            }
-            append("  ")
-            withLink(LinkAnnotation.Url("https://discord.gg/pDdKfrdHY6", linkStyles)) {
-                append("Discord")
             }
             append("  ")
             withLink(LinkAnnotation.Clickable("licenses", linkStyles) { onLicenses() }) {
@@ -6732,7 +6730,7 @@ private fun DesktopLicensesPage(onDismiss: () -> Unit) {
             modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
         )
         Text(
-            DesktopStrings["d_bitchord_is_free_software_and_so_is_everything_it_is_bui", "BitChord is free software, and so is everything it is built on."],
+            DesktopStrings["d_bitchord_is_free_software_and_so_is_everything_it_is_bui", "YZ Music is free software, and so is everything it is built on."],
             color = DesktopSecondary,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -6942,7 +6940,7 @@ private fun DesktopSourceEditorDialog(
                 Text(
                     DesktopStrings[
                         "d_an_addon_server",
-                        "An addon server — BitChord asks it over plain HTTP and runs no code from it. " +
+                        "An addon server — YZ Music asks it over plain HTTP and runs no code from it. " +
                             "A compatible module index also works and is stored as one.",
                     ],
                     color = DesktopSecondary,

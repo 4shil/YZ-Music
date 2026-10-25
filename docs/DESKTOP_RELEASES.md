@@ -39,14 +39,14 @@ patterns, where `<v>` is the version from section 1:
 
 | Platform | File |
 |---|---|
-| Windows | `BitChord-<v>-windows-x64-setup.exe` (what the update check downloads) |
-| Windows | `BitChord-<v>-windows-x64.msi` |
-| Windows | `BitChord-<v>-windows-x64-portable.zip` |
-| Linux | `BitChord-<v>-linux-x86_64.AppImage` (preferred by the update check) |
-| Linux | `BitChord-<v>-linux-amd64.deb` (used if there is no AppImage) |
-| Linux | `BitChord-<v>-linux-x86_64.rpm` |
-| macOS | `BitChord-<v>-macos-arm64.dmg` (Apple Silicon; also `.pkg` and `.zip`) |
-| macOS | `BitChord-<v>-macos-x64.dmg` (Intel; also `.pkg` and `.zip`) |
+| Windows | `YZ-Music-<v>-windows-x64-setup.exe` (what the update check downloads) |
+| Windows | `YZ-Music-<v>-windows-x64.msi` |
+| Windows | `YZ-Music-<v>-windows-x64-portable.zip` |
+| Linux | `YZ-Music-<v>-linux-x86_64.AppImage` (preferred by the update check) |
+| Linux | `YZ-Music-<v>-linux-amd64.deb` (used if there is no AppImage) |
+| Linux | `YZ-Music-<v>-linux-x86_64.rpm` |
+| macOS | `YZ-Music-<v>-macos-arm64.dmg` (Apple Silicon; also `.pkg` and `.zip`) |
+| macOS | `YZ-Music-<v>-macos-x64.dmg` (Intel; also `.pkg` and `.zip`) |
 
 Rules:
 
@@ -58,7 +58,7 @@ Rules:
   x86_64.
 - Upload files to the release, do not rely on the generated source archives.
 
-macOS builds are unsigned. Clear the quarantine flag with `xattr -cr /Applications/BitChord.app`.
+macOS builds are unsigned. Clear the quarantine flag with `xattr -cr /Applications/YZ-Music.app`.
 If the app will not start, a missing library may need installing first with Homebrew
 (`brew install <library>`; the exact library still has to be confirmed). The update check does not
 look for macOS files yet, so Mac users get the release page.
@@ -68,7 +68,7 @@ look for macOS files yet, so Mac users get the release page.
 `desktopApp/src/main/kotlin/com/music/bitchord/desktop/DesktopUpdateChecker.kt`, shown as a dialog
 from `BitChordDesktopApp` in `DesktopApp.kt`:
 
-1. At launch it calls `GET https://api.github.com/repos/kushagrasinghx/BitChord/releases/latest`.
+1. At launch it calls `GET https://api.github.com/repos/4shil/YZ-Music/releases/latest`.
 2. It strips the `v` from `tag_name` and compares it with `bitchord.version` (numeric, dot by dot;
    a `-beta` current version is older than the same release).
 3. If newer, it picks the asset for the running OS and shows "Update available" with Download and
