@@ -1981,7 +1981,11 @@ internal fun LyricsPanel(
                             animationSpec = tween(durationMillis = 100, easing = LYRIC_EASING),
                         )
                     } else if (target == null) {
-                        listState.scrollToItem(focusLine, scrollOffset = 0)
+                        if (focusLine == 0) {
+                            listState.smoothScrollToTop()
+                        } else {
+                            listState.scrollToItem(focusLine, scrollOffset = 0)
+                        }
                     }
                 }
             }
@@ -2018,6 +2022,7 @@ internal fun LyricsPanel(
                 listState = listState,
                 scope = lyricsScope,
                 allowScrollToTop = true,
+                onScrolledToTop = { browsingByDrag = true },
                 onClose = onClose,
             )
             // Browsing leaves taps to each lyric row's seek action throughout

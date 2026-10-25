@@ -2055,6 +2055,7 @@ internal fun LyricsPanel(
                 listState = listState,
                 scope = lyricsScope,
                 allowScrollToTop = true,
+                onScrolledToTop = { browsingByDrag = true },
                 onClose = onClose,
             )
             // Browsing leaves taps to each lyric row's seek action throughout

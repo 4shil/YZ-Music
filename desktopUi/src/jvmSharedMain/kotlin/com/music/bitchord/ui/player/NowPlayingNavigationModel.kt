@@ -1,7 +1,12 @@
 package com.music.bitchord.ui.player
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -964,7 +969,7 @@ fun Modifier.queueSwipeDown(
                         QueueSwipeDownAction.SCROLL_TO_TOP -> {
                             change.consume()
                             if (listState != null && scope != null) {
-                                scope.launch { listState.animateScrollToItem(0) }
+                                scope.launch { listState.smoothScrollToTop() }
                             }
                         }
                         QueueSwipeDownAction.NONE -> {
@@ -999,7 +1004,7 @@ fun Modifier.queueSwipeDown(
                         } else {
                             change.consume()
                             if (listState != null && scope != null) {
-                                scope.launch { listState.animateScrollToItem(0) }
+                                scope.launch { listState.smoothScrollToTop() }
                             }
                             while (true) {
                                 val nextEvent = awaitPointerEvent(PointerEventPass.Initial)
@@ -1018,6 +1023,45 @@ fun Modifier.queueSwipeDown(
                 }
             }
         }
+    }
+}
+
+/**
+ * Smoothly and continuously scrolls a [LazyListState] all the way to index 0,
+ * with [MutatePriority.UserInput] so background auto-scrolls cannot interrupt it.
+ */
+suspend fun LazyListState.smoothScrollToTop() {
+    if (firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset == 0) return
+
+    val visibleItems = layoutInfo.visibleItemsInfo
+    val avgHeight = if (visibleItems.isNotEmpty()) {
+        visibleItems.sumOf { it.size }.toFloat() / visibleItems.size
+    } else 60f
+
+    val totalDistance = firstVisibleItemScrollOffset + firstVisibleItemIndex * avgHeight
+    val durationMs = (260L + (firstVisibleItemIndex * 15L)).coerceIn(320L, 550L).toInt()
+
+    var lastValue = 0f
+    try {
+        scroll(MutatePriority.UserInput) {
+            animate(
+                initialValue = 0f,
+                targetValue = totalDistance,
+                animationSpec = tween(durationMillis = durationMs, easing = FastOutSlowInEasing),
+            ) { currentValue, _ ->
+                val delta = currentValue - lastValue
+                lastValue = currentValue
+                scrollBy(-delta)
+            }
+        }
+    } catch (_: Exception) {
+        // Ignored if cancelled
+    }
+
+    if (firstVisibleItemIndex != 0 || firstVisibleItemScrollOffset != 0) {
+        try {
+            scrollToItem(0, 0)
+        } catch (_: Exception) {}
     }
 }
 
@@ -1082,7 +1126,7 @@ fun Modifier.lyricsSwipeDown(
                             change.consume()
                             onScrolledToTop()
                             if (listState != null && scope != null) {
-                                scope.launch { listState.scrollToItem(0) }
+                                scope.launch { listState.smoothScrollToTop() }
                             }
                         }
                         LyricsSwipeDownAction.NONE -> Unit
@@ -1111,18 +1155,23 @@ fun Modifier.lyricsSwipeDown(
                         break
                     }
                     LyricsSwipeDownAction.SCROLL_TO_TOP -> {
-                        change.consume()
-                        onScrolledToTop()
-                        if (listState != null && scope != null) {
-                            scope.launch { listState.scrollToItem(0) }
+                        val currentVelocity = velocityTracker.calculateVelocity()
+                        if (currentVelocity.y < 400.dp.toPx() && change.pressed) {
+                            // User is slowly dragging down to browse — let LazyColumn scroll naturally!
+                        } else {
+                            change.consume()
+                            onScrolledToTop()
+                            if (listState != null && scope != null) {
+                                scope.launch { listState.smoothScrollToTop() }
+                            }
+                            while (true) {
+                                val nextEvent = awaitPointerEvent(PointerEventPass.Initial)
+                                val nextChange = nextEvent.changes.firstOrNull { it.id == pointerId } ?: break
+                                nextChange.consume()
+                                if (!nextChange.pressed) break
+                            }
+                            break
                         }
-                        while (true) {
-                            val nextEvent = awaitPointerEvent(PointerEventPass.Initial)
-                            val nextChange = nextEvent.changes.firstOrNull { it.id == pointerId } ?: break
-                            nextChange.consume()
-                            if (!nextChange.pressed) break
-                        }
-                        break
                     }
                     LyricsSwipeDownAction.NONE -> Unit
                 }
