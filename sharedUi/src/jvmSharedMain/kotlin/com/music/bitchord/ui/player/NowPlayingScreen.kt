@@ -2604,69 +2604,55 @@ fun NowPlayingScreen(
                             // half second lying across a list the finger was already
                             // scrolling.
                             .onGloballyPositioned { dismissBandSpace = it }
-                            .pointerInput(showAudioPipeline, showCast, panelScrolling) {
+                            .pointerInput(showAudioPipeline, showCast, panelScrolling, queueOpen, lyricsOpen) {
                                 if (showAudioPipeline || showCast || panelScrolling) return@pointerInput
                                 awaitEachGesture {
-                                    // Unconsumed on purpose, as the blanket version was:
-                                    // the collapsed sleeve's own clickable — the way back
-                                    // out of the queue — has taken the press by the time
-                                    // an ancestor sees it.
                                     val down = awaitFirstDown(requireUnconsumed = false)
-                                    val space = dismissBandSpace
-                                    val y = space?.localToRoot(down.position)?.y
-                                        ?: down.position.y
-                                    // A panel is up from the moment it is asked for to
-                                    // the moment the sleeve has finished growing back —
-                                    // never mind where the sleeve is in between.
                                     val panelUp = queueOpen || lyricsOpen ||
                                         queueSlide.floatValue > 0.01f
-                                    val bandTop: Float
-                                    val bandBottom: Float
-                                    if (panelUp) {
-                                        bandTop = space?.positionInRoot()?.y ?: 0f
-                                        bandBottom = bandTop +
-                                            (ART_BOX_TOP_PAD + HEADER_HEIGHT).toPx()
+                                    val travel = if (dismissBandBottom > dismissBandTop + HEADER_HEIGHT.toPx()) {
+                                        dismissBandBottom - dismissBandTop - HEADER_HEIGHT.toPx()
                                     } else {
-                                        bandTop = dismissBandTop
-                                        bandBottom = dismissBandBottom
+                                        300.dp.toPx()
                                     }
-                                    if (y >= bandTop && y <= bandBottom) {
-                                        if (!panelUp) {
-                                            dragQueueIn(
-                                                down = down,
-                                                travel = bandBottom - bandTop -
-                                                    HEADER_HEIGHT.toPx(),
-                                                slide = queueSlide,
-                                                onHold = { queueDragging = it },
-                                                onSettle = { open ->
-                                                    if (open != queueOpen) {
-                                                        haptics.play(
-                                                            if (open) Haptic.Expand else Haptic.Tap,
-                                                        )
-                                                        if (open) queueControlsOpen = true
-                                                        queueOpen = open
-                                                    }
-                                                    queueReleased++
-                                                },
-                                            )
-                                        }
-                                        return@awaitEachGesture
+
+                                    if (!panelUp) {
+                                        // Swipe up anywhere (artwork, title, or controls) pulls queue in!
+                                        // Swipe down leaves overSlop unconsumed so the player sheet dismisses downwards!
+                                        dragQueueIn(
+                                            down = down,
+                                            travel = travel,
+                                            slide = queueSlide,
+                                            onHold = { queueDragging = it },
+                                            onSettle = { open ->
+                                                if (open != queueOpen) {
+                                                    haptics.play(
+                                                        if (open) Haptic.Expand else Haptic.Tap,
+                                                    )
+                                                    if (open) queueControlsOpen = true
+                                                    queueOpen = open
+                                                }
+                                                queueReleased++
+                                            },
+                                        )
+                                    } else if (queueOpen) {
+                                        // Queue is open: swipe down on controls/header pulls queue back out!
+                                        dragQueueOut(
+                                            down = down,
+                                            travel = travel,
+                                            slide = queueSlide,
+                                            onHold = { queueDragging = it },
+                                            onSettle = { open ->
+                                                if (open != queueOpen) {
+                                                    haptics.play(
+                                                        if (open) Haptic.Expand else Haptic.Tap,
+                                                    )
+                                                    queueOpen = open
+                                                }
+                                                queueReleased++
+                                            },
+                                        )
                                     }
-                                    // A down already taken means the sheet grabbed it
-                                    // while "settling" after a scroll (see
-                                    // guardSheetFromContentTouches), and the guard is
-                                    // about to hand it back to the list under the
-                                    // finger. Holding it here would strand that list
-                                    // mid-handback, and the list would never scroll.
-                                    if (down.isConsumed) return@awaitEachGesture
-                                    // What detectVerticalDragGestures does, minus the
-                                    // callbacks: cross the slop, then hold the gesture
-                                    // to the end so nothing downstream of the first
-                                    // event reaches the sheet either.
-                                    val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, _ ->
-                                        change.consume()
-                                    }
-                                    if (drag != null) verticalDrag(drag.id) { it.consume() }
                                 }
                             }
                             .padding(horizontal = PLAYER_GUTTER),
@@ -3950,4 +3936,47 @@ private suspend fun AwaitPointerEventScope.dragQueueIn(
     }
     onHold(false)
     onSettle(open)
+}
+
+/**
+ * The downward half of the queue's vertical gesture: dragged down on the header
+ * or controls, the queue pulls closed back to the full player.
+ */
+private suspend fun AwaitPointerEventScope.dragQueueOut(
+    down: PointerInputChange,
+    travel: Float,
+    slide: MutableFloatState,
+    onHold: (Boolean) -> Unit,
+    onSettle: (Boolean) -> Unit,
+) {
+    if (travel < 1f) return
+
+    var pulled = 0f
+    val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, overSlop ->
+        if (overSlop > 0f) {
+            pulled = overSlop
+            change.consume()
+        }
+    }
+    if (drag == null || pulled <= 0f) return
+
+    onHold(true)
+    val velocity = VelocityTracker()
+    velocity.addPointerInputChange(drag)
+    slide.floatValue = (1f - (pulled / travel)).coerceIn(0f, 1f)
+    verticalDrag(drag.id) { change ->
+        velocity.addPointerInputChange(change)
+        pulled += change.positionChange().y
+        slide.floatValue = (1f - (pulled / travel)).coerceIn(0f, 1f)
+        change.consume()
+    }
+
+    val flick = velocity.calculateVelocity().y
+    val close = when {
+        flick >= QUEUE_FLICK_VELOCITY -> true
+        flick <= -QUEUE_FLICK_VELOCITY -> false
+        else -> (1f - slide.floatValue) >= QUEUE_CARRY_FRACTION
+    }
+    onHold(false)
+    onSettle(!close)
 }

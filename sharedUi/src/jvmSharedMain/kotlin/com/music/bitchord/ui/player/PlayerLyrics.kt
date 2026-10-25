@@ -1944,10 +1944,46 @@ internal fun LyricsPanel(
                         animationSpec = tween(durationMillis = span, easing = LYRIC_EASING),
                     )
                 }
-                // Somewhere off screen — after a seek, or a long instrumental
-                // scrolled past. How far is not known without laying the rows
-                // out, so this hands back to the list's own staged scroll.
-                else -> listState.animateScrollToItem(focusLine, scrollOffset = 0)
+                // Somewhere off screen — after a seek, moving backwards/upwards, or a long instrumental
+                // scrolled past. Instead of Compose's default stiff spring animateScrollToItem, estimate
+                // the distance and glide smoothly using LYRIC_EASING and update the ScrollRun so rows fan out.
+                else -> {
+                    val firstIndex = listState.firstVisibleItemIndex
+                    val firstOffset = listState.firstVisibleItemScrollOffset
+                    val visibleItems = listState.layoutInfo.visibleItemsInfo
+                    val avgHeight = if (visibleItems.isNotEmpty()) {
+                        visibleItems.sumOf { it.size }.toFloat() / visibleItems.size
+                    } else 60f
+
+                    val (delta, itemsAway) = if (focusLine < firstIndex) {
+                        val away = firstIndex - focusLine
+                        val estimated = -(firstOffset + away * avgHeight)
+                        estimated to away
+                    } else {
+                        val lastIndex = visibleItems.lastOrNull()?.index ?: firstIndex
+                        val away = (focusLine - lastIndex).coerceAtLeast(1)
+                        val lastOffset = visibleItems.lastOrNull()?.let { it.offset + it.size } ?: 0
+                        val estimated = lastOffset + (away - 1) * avgHeight
+                        estimated to away
+                    }
+
+                    val baseLead = scrollLead(lines, clock.longValue)
+                    val span = (baseLead + itemsAway * 35L).coerceIn(350L, 750L).toInt()
+                    run = ScrollRun(run.id + 1, delta, span)
+                    listState.animateScrollBy(
+                        value = delta,
+                        animationSpec = tween(durationMillis = span, easing = LYRIC_EASING),
+                    )
+                    val target = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == focusLine }
+                    if (target != null && target.offset != 0) {
+                        listState.animateScrollBy(
+                            value = target.offset.toFloat(),
+                            animationSpec = tween(durationMillis = 100, easing = LYRIC_EASING),
+                        )
+                    } else if (target == null) {
+                        listState.scrollToItem(focusLine, scrollOffset = 0)
+                    }
+                }
             }
         }
     }

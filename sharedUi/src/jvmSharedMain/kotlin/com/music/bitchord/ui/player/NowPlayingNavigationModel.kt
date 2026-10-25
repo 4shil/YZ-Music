@@ -1082,7 +1082,7 @@ fun Modifier.lyricsSwipeDown(
                             change.consume()
                             onScrolledToTop()
                             if (listState != null && scope != null) {
-                                scope.launch { listState.scrollToItem(0) }
+                                scope.launch { listState.animateScrollToItem(0) }
                             }
                         }
                         LyricsSwipeDownAction.NONE -> Unit
@@ -1114,7 +1114,7 @@ fun Modifier.lyricsSwipeDown(
                         change.consume()
                         onScrolledToTop()
                         if (listState != null && scope != null) {
-                            scope.launch { listState.scrollToItem(0) }
+                            scope.launch { listState.animateScrollToItem(0) }
                         }
                         while (true) {
                             val nextEvent = awaitPointerEvent(PointerEventPass.Initial)
