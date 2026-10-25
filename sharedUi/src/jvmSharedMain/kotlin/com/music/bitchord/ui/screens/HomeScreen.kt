@@ -499,7 +499,7 @@ fun CompactTrackRow(
 @Composable
 private fun HomeTitle(title: String, modifier: Modifier = Modifier) {
     val style = MaterialTheme.typography.displayLarge
-    val logoHeight = with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() }
+    val logoHeight = maxOf(48.dp, with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() })
     Column(modifier = modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
         Icon(
             painter = painterResource(Res.drawable.ic_logo),
@@ -518,10 +518,10 @@ private fun HomeTitle(title: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** The wordmark's height against the heading's font size. */
-private const val LOGO_TO_FONT = 0.9f
+/** The logo's height against the heading's font size. */
+private const val LOGO_TO_FONT = 1.25f
 
-/** ic_logo's viewport, 432 x 432. */
+/** ic_logo's viewport, 180 x 180. */
 private const val LOGO_ASPECT = 1f
 
 /**

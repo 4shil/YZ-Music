@@ -417,11 +417,11 @@ private fun StoryChrome(
                 painter = painterResource(R.drawable.ic_logo),
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.9f),
-                modifier = Modifier.size(width = 26.dp, height = 17.dp),
+                modifier = Modifier.size(24.dp),
             )
-            Spacer(Modifier.width(7.dp))
+            Spacer(Modifier.width(8.dp))
             Text(
-                text = "BitChord",
+                text = "YZ Music",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.W700,
                 color = Color.White.copy(alpha = 0.9f),

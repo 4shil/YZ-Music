@@ -1,158 +1,160 @@
-<div align="center">
-
-<br/>
-<br/>
-
-<img src="Logo.png" alt="BitChord app icon" width="200" />
-
-# BitChord
-
-### Aesthetic YouTube Music Client
-
-<br/>
-
-[![Latest release](https://img.shields.io/github/v/release/kushagrasinghx/BitChord?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/releases)
-[![License](https://img.shields.io/github/license/kushagrasinghx/BitChord?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/blob/main/LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/kushagrasinghx/BitChord/total?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/releases)
-[![Listening now](https://api.bitchord.kushagrasingh.in/api/stats/live/badge.svg)](https://api.bitchord.kushagrasingh.in/api/stats/live)
-
-<br/>
-
-[**Download**](#download) · [**Features**](#features) · [**Contributing**](#contributing) · [**Support**](#support) · [**Disclaimer**](#disclaimer)
-
-<br/>
-
-<a href="https://fmhy.net/mobile#youtube-music" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/available/fmhy/cozy.svg" alt="Featured on FMHY" height="55"/></a>
-<a href="https://trendshift.io/repositories/177639?utm_source=trendshift-badge&utm_medium=badge&utm_campaign=badge-trendshift-177639" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/177639/daily?language=Kotlin" alt="kushagrasinghx%2FBitChord | Trendshift" width="250" height="55"/></a>
-<a href="https://trendshift.io/repositories/177639?utm_source=trendshift-badge&utm_medium=badge&utm_campaign=badge-trendshift-177639" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/177639/weekly?language=Kotlin" alt="kushagrasinghx%2FBitChord | Trendshift" width="250" height="55"/></a>
-
-</div>
-
-> [!IMPORTANT]
-> BitChord is not affiliated with, endorsed by, or connected to YouTube or Google in any way. Use it at your own discretion.
-
----
+# YZ Music
 
 <div align="center">
 
-<img src="Banner.png" alt="BitChord banner" width="100%" />
+### Modern, High-Fidelity YouTube Music Client for Android & Desktop
 
-<h1><a id="features"></a>Features</h1>
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge&logo=android)](https://github.com/4shil/YZ-Music)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)](LICENSE)
+[![Target SDK](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-orange?style=for-the-badge&logo=android)](app/build.gradle.kts)
+[![Platforms](https://img.shields.io/badge/platforms-Android%20%7C%20Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Wear%20OS-blueviolet?style=for-the-badge)](https://github.com/4shil/YZ-Music)
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-
-#### Playback
-- **Search, browse and play** anything available on YouTube Music.
-- **Hi-Res lossless audio** — FLAC/ALAC from a configured module source, with YouTube Music as fallback.
-- **Gapless playback with true crossfade**, adjustable 0–12s.
-- **Automix [Beta]** — DJ-style transitions with beat-matching and tempo-stretching.
-- **Offline downloads** — save tracks with embedded metadata.
-- **Local music library** integration.
-- **Background playback** via a proper foreground media session.
-- **Apple-like lyrics animation** — credit to [binimum](https://github.com/binimum/am-lyrics).
-
-#### Connectivity & Accounts
-- **Sign in with your Google account** for personalized content.
-- **Spotify integration** — connect your account to play your playlists and Liked Songs.
-- **Discord Rich Presence** — in-app login, live track/artist/album and progress.
-- **Scrobbling** to Last.fm and ListenBrainz.
-- **Pluggable sources** — add, edit, test and health-check module sources.
-
-    </td>
-    <td width="50%" valign="top">
-
-#### Experience
-- **Animated album canvas** — motion artwork on the now-playing screen.
-- **Word-synced lyrics** — word/syllable-level highlighting from multiple sources.
-- **Lyrics providers** — credit to [lrc.red](https://lrc.red), [BiniLyrics](https://github.com/binimum), [BetterLyrics](https://github.com/better-lyrics/better-lyrics), [PaxSenix](https://lyrics.paxsenix.org), [LyricsPlus](https://github.com/ibratabian17/YouLyPlus), [SimpMusic](https://github.com/maxrave-dev/SimpMusic), [Unison](https://unison.boidu.dev), [Megalobiz](https://www.megalobiz.com), [KuGou](https://www.kugou.com), [LRCLIB](https://lrclib.net), [Musixmatch](https://www.musixmatch.com) and [Genius](https://genius.com).
-- **Dynamic, artwork-driven theming** — Material palette extracted from album art.
-- **Frosted-glass UI** — Telegram-style translucent bars via Haze, Material 3 theming.
-
-#### Controls & Tweaks
-- **Per-network audio quality** — separate quality ceilings for Wi-Fi and mobile data.
-- **Playback speed control** (0.5×–2.0×) and **skip silence**.
-- **Sleep timer** — fixed presets or "stop after this track".
-- **System equalizer** integration.
-- **Stats for nerds** — codec, bit depth, sample rate, and more on the now-playing screen.
-
-    </td>
-  </tr>
-</table>
+[**Features**](#features) · [**Architecture**](#architecture) · [**Building from Source**](#building-from-source) · [**Autoplay & Automix Engine**](#autoplay--automix-engine) · [**Privacy & Security**](#privacy--security)
 
 </div>
 
 ---
 
-<div align="center">
+## Overview
 
-<h1><a id="download"></a>Download</h1>
+**YZ Music** is an open-source, high-fidelity music streaming client built with Compose Multiplatform, AndroidX Media3, and C++ digital signal processing. It provides a native, privacy-first, ad-free listening experience across Android, Desktop (Linux, Windows, macOS), and Wear OS, powered by YouTube Music, multi-source synchronized lyrics, dynamic Material 3 theming, intelligent DJ transitions, and robust offline caching.
 
-<a href="https://github.com/kushagrasinghx/BitChord/releases" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/supported/android/cozy.svg" alt="Download for Android" height="55"/></a>
-<a href="https://github.com/kushagrasinghx/BitChord/releases" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/supported/windows/cozy.svg" alt="Download for Windows" height="55"/></a>
-
-Grab the latest signed APK from the [Releases](https://github.com/kushagrasinghx/BitChord/releases) page. Sideloading requires enabling "Install unknown apps" for whichever app you download it with.
-
-For the Windows and Linux desktop app, see [DESKTOP.md](DESKTOP.md).
-
-</div>
+> [!NOTE]
+> YZ Music is an independent project and is not affiliated with, endorsed by, or connected to YouTube, Google, or Alphabet Inc.
 
 ---
 
-<div align="center">
+## Features
 
-<h1><a id="contributing"></a>Contributing</h1>
+### Multiplatform Support
+- **Android**: Phones, tablets, and foldables with responsive layout adaptations and edge-to-edge frosted glass design.
+- **Desktop**: Native Compose Multiplatform standalone binaries for Linux (x64), Windows (x64), and macOS with system tray integration and native window glass.
+- **Wear OS**: Companion app and tiles for wrist playback control and standalone queue browsing.
 
-We welcome contributions to BitChord! Please review our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.
+### Playback & Audio Intelligence
+- **Seamless Streaming**: Full catalogue search, album browsing, artist discography, and playlist playback.
+- **DJ Automix & Beat Tracking**: Native C++ 17 DSP engine with Camelot wheel harmonic key matching, tempo tracking, beat alignment, and WSOLA time-stretching.
+- **Standalone AutoPlay**: Dynamic queue continuation powered by YouTube Music `/next` radio, candidate classification, and per-artist diversity caps.
+- **High-Fidelity Audio**: Lossless audio support (FLAC/ALAC) with fallback to high-bitrate YouTube Music audio streams.
+- **True Crossfade**: Adjustable 0–12s gapless crossfade transitions with automated loudness management.
+- **Offline Downloads**: High-bitrate audio downloads with embedded ID3/Vorbis tags, synchronized lyrics, and artwork, accompanied by real-time progress indicators.
+- **Local Audio Library**: Indexed on-device playback supporting local tracks, albums, folders, and artist tags.
 
-[**Contributing Guide**](CONTRIBUTING.md) · [**Code of Conduct**](CODE_OF_CONDUCT.md) · [**Maintainers**](MAINTAINERS.md) · [**Additional Docs**](ADDITIONAL.md)
+### Visuals & Fluid Experience
+- **Magazine Explore Layout**: Visual discovery featuring curated InnerTube charts, trending releases, mood & genre shelves, and new music highlights.
+- **Gesture-Driven Player Controls**:
+  - Swipe down to dismiss full player to miniplayer
+  - Swipe up to expand the playback queue
+  - Miniplayer swipe gestures for previous/next track
+  - Configurable seek step increments (5s, 10s, 25s)
+- **Motion Artwork**: Real-time canvas animation and Spotify canvas integration on the Now Playing screen.
+- **Synchronized Lyrics**: Word-level, syllable-level, and line-level lyrics synced from LRCLib, Musixmatch, and embedded tags.
+- **Dynamic Theming**: Artwork-driven Material 3 color palettes with AMOLED pure black and light theme support.
+- **Frosted Glass UI**: Ultra-smooth frosted acrylic scrims powered by Haze blur.
+- **Home Screen Widgets**: Now-playing widgets with interactive media controls and dynamic artwork updates.
 
-### Thanks to all contributors ❤
-
-<a href="https://github.com/kushagrasinghx/BitChord/graphs/contributors">
-  <img src="https://raw.githubusercontent.com/kushagrasinghx/BitChord/contributors/contributors.svg" />
-</a>
-
-</div>
-
----
-
-<div align="center">
-
-<h1><a id="support"></a>Support</h1>
-
-BitChord is free and always will be — if it's earned a spot in your rotation, you can chip in here:
-
-<a href="https://ko-fi.com/kushagrasinghx" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/donate/kofi-singular-alt/cozy.svg" alt="Support me on Ko-fi" height="55"/></a>
-<a href="https://paypal.me/kuxhagrasingh" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/donate/paypal-plural/cozy.svg" alt="Support us on PayPal" height="55"/></a>
-
-<br/>
-<img src="upi_support.jpg" alt="UPI Support" width="250" />
-
-</div>
-
----
-
-<div align="center">
-
-<h1><a id="disclaimer"></a>Disclaimer & Legal Notice</h1>
-
-BitChord is an independent, community-driven third-party audio player and client. It is **not** associated with Google LLC, YouTube Music, Deezer, Telegram, or any of their parent companies.
-
-* **No Media Hosting:** BitChord does not host, upload, or store copyrighted music files. It operates strictly as an interface to scan local device storage or stream media directly from public, public-facing, or user-authenticated APIs.
-* **Fair Use & API Usage:** This software is created solely for personal research, educational, and fair-use purposes. The user is entirely responsible for ensuring their usage aligns with their local copyright laws and YouTube Terms of Service.
-* **No Ad-Blocking Guarantee:** While BitChord focuses on providing a clean listening environment, it does not guarantee permanent bypasses or modifications to commercial third-party platform conditions.
-* **Copyleft:** BitChord is free software under the GPLv3. The license does not let anyone forbid others from selling or redistributing copies, but any distribution must come with the Corresponding Source under the same license.
-
-</div>
+### Connectivity & Accounts
+- **Google Account Authentication**: Optional session cookie integration for personal playlists, recommendations, and library sync.
+- **Scrobbling**: Native scrobbling to Last.fm and ListenBrainz.
+- **Discord Rich Presence**: Live playback status, artist, album, and elapsed time on desktop and mobile.
+- **Local Backup & Restore**: Full JSON backup and migration for playlists, playback history, and user settings.
 
 ---
 
-<div align="center">
+## Architecture
 
-<h1><a id="license"></a>License</h1>
+YZ Music follows modern declarative UI and unidirectional data flow architecture:
 
-This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. See the [LICENSE](LICENSE) file for details.
+```text
+┌──────────────────────────────────────────────────────────┐
+│              Compose Multiplatform UI                    │
+│    (Android Jetpack Compose & Desktop Compose JVM)       │
+│  ├── Material 3 Theming & Haze Frosted Glass             │
+│  ├── Magazine Explore & Dynamic Carousel Shelves         │
+│  └── Fluid Gesture Player & Shared Transitions           │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│                 MainViewModel & StateFlow                │
+│    (Authoritative player state, queue sync, settings)    │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│           Playback Engine (AndroidX Media3 / Desktop)     │
+│  ├── MediaSession & AudioAttributes                      │
+│  ├── CrossfadeController (Gapless & dual-player fade)    │
+│  ├── Autoplay & Queue Manager (Dynamic replenishment)    │
+│  └── Persistent Download & AudioCache Subsystem          │
+└──────────────┬─────────────────────────────┬─────────────┘
+               │                             │
+┌──────────────▼─────────────┐ ┌─────────────▼─────────────┐
+│    C++ DSP Native Engine   │ │     Data & InnerTube      │
+│  - Tempo & beat analysis   │ │  - Watch queue parser     │
+│  - Camelot harmonic key    │ │  - Stream URL resolver    │
+│  - WSOLA time stretching   │ │  - Multi-provider lyrics  │
+└────────────────────────────┘ └───────────────────────────┘
+```
 
-</div>
+---
+
+## Autoplay & Automix Engine
+
+YZ Music features an advanced playback continuation and mixing engine:
+
+1. **Seed Extraction**: Extracts remote video IDs or matches local tracks against YouTube Music catalogue metadata.
+2. **Watch Queue Classification**: Evaluates items using structured metadata (`musicVideoType`, non-square thumbnail shape, and album attribution) rather than view count heuristics, preventing unwanted video renderers from polluting the audio queue.
+3. **Harmonic Key & Tempo Alignment**: Analyzes audio segments in real-time or from cached acoustic fingerprints to compute Camelot wheel compatibility and beat phase alignment.
+4. **Fault-Tolerant Resolution**: Candidate audio resolutions are individually isolated; network or cipher failures on single tracks do not discard the recommendation batch.
+5. **Low-Water Replenishment**: Continuously monitors the upcoming playback buffer and proactively requests new recommendations when queued tracks drop below threshold.
+6. **Diversity & Deduplication**: Restricts tracks per artist (`PER_ARTIST_LIMIT = 2`) to ensure recommendation variety and prevents repeat plays of recently heard tracks.
+
+---
+
+## Building from Source
+
+### Prerequisites
+- JDK 17+ (Microsoft OpenJDK 17 or Eclipse Temurin recommended)
+- Android SDK Platform 36 & Build Tools (for Android builds)
+- CMake 3.22.1+ & Android NDK (r27 or newer)
+
+### Android Build Commands
+
+```bash
+# Assemble production release APK
+./gradlew assembleProdRelease
+
+# Assemble production debug APK
+./gradlew assembleProdDebug
+
+# Assemble dev debug APK
+./gradlew assembleDevDebug
+```
+
+Generated APKs are located at `app/build/outputs/apk/`.
+
+### Desktop Build Commands
+
+```bash
+# Build and package standalone desktop distributable
+./gradlew :desktopApp:createDistributable
+
+# Run desktop app directly from source
+./gradlew :desktopApp:run
+```
+
+Desktop binaries are located at `desktopApp/build/compose/binaries/main/app/YZ-Music/`.
+
+---
+
+## Privacy & Security
+
+- **No Third-Party Analytics**: Zero tracking SDKs, advertising frameworks, or telemetry beacons.
+- **Direct-to-Source**: All requests communicate directly with YouTube Music and selected lyrics providers.
+- **Local Storage**: All playback statistics, history, preferences, and downloads reside strictly on your local device.
+- **Credential Protection**: Account session cookies and API tokens are encrypted in private storage and never transmitted to third parties.
+
+---
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
