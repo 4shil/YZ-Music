@@ -194,9 +194,26 @@
                 <data android:host="youtu.be" />
             </intent-filter>
 
-            <!-- Public Listen Together invites. autoVerify makes a tap open
-                 BitChord directly once the domain publishes its assetlinks
-                 association for the production signing certificate. -->
+            <!-- Public Listen Together invites for YZ Music (Vercel) and legacy. autoVerify makes a tap open
+                 YZ Music directly once the domain publishes its assetlinks. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="yz-music.vercel.app"
+                    android:pathPattern="/invite/......" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="yz-music.vercel.com"
+                    android:pathPattern="/invite/......" />
+            </intent-filter>
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -207,7 +224,15 @@
                     android:pathPattern="/invite/......" />
             </intent-filter>
 
-            <!-- Custom scheme for Listen Together invites on custom server deployments. -->
+            <!-- Custom schemes for Listen Together invites on custom server deployments. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="yzmusic"
+                    android:host="party" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

@@ -13,14 +13,18 @@ data class ParsedJamInvite(
     val serverUrl: String? = null,
 )
 
-/** Relays a BitChord web or scheme invite from [com.music.bitchord.MainActivity] to Compose. */
+/** Relays a YZ Music web or scheme invite from [com.music.bitchord.MainActivity] to Compose. */
 object JamInviteLink {
 
-    const val ORIGIN = "https://bitchord.kushagrasingh.in"
+    const val ORIGIN = "https://yz-music.vercel.app"
+    const val ALT_ORIGIN = "https://yz-music.vercel.com"
 
-    private const val EXTRA_CONSUMED = "bitchord.jamInviteConsumed"
-    private const val HOST = "bitchord.kushagrasingh.in"
-    private const val CUSTOM_SCHEME = "bitchord"
+    private const val EXTRA_CONSUMED = "yzmusic.jamInviteConsumed"
+    private const val HOST = "yz-music.vercel.app"
+    private const val ALT_HOST = "yz-music.vercel.com"
+    private const val LEGACY_HOST = "bitchord.kushagrasingh.in"
+    private const val CUSTOM_SCHEME = "yzmusic"
+    private const val LEGACY_SCHEME = "bitchord"
     private const val CUSTOM_HOST = "party"
 
     private val _pending = MutableStateFlow<ParsedJamInvite?>(null)
@@ -49,8 +53,10 @@ object JamInviteLink {
 
     /**
      * Parses an incoming invite:
-     * 1. bitchord://party/<CODE>?server=<SERVER>
-     * 2. https://bitchord.kushagrasingh.in/invite/<CODE>?server=<SERVER>
+     * 1. yzmusic://party/<CODE>?server=<SERVER> or bitchord://party/<CODE>?server=<SERVER>
+     * 2. https://yz-music.vercel.app/invite/<CODE>?server=<SERVER>
+     * 3. https://yz-music.vercel.com/invite/<CODE>?server=<SERVER>
+     * 4. https://bitchord.kushagrasingh.in/invite/<CODE>?server=<SERVER>
      */
     fun parseInvite(value: String?): ParsedJamInvite? {
         val uri = runCatching { URI(value ?: return null) }.getOrNull() ?: return null
@@ -59,16 +65,16 @@ object JamInviteLink {
         val query = uri.rawQuery
         val server = extractQueryParam(query, "server")?.let { sanitizeServerUrl(it) }
 
-        // 1. Custom scheme: bitchord://party/<CODE> or bitchord://party?code=<CODE>
-        if (scheme == CUSTOM_SCHEME && host == CUSTOM_HOST) {
+        // 1. Custom scheme: yzmusic://party/<CODE> or bitchord://party/<CODE>
+        if ((scheme == CUSTOM_SCHEME || scheme == LEGACY_SCHEME) && host == CUSTOM_HOST) {
             val pathPart = uri.path.orEmpty().trim('/').takeIf { it.isNotBlank() }
             val candidate = pathPart ?: extractQueryParam(query, "code") ?: return null
             val code = cleanCode(candidate) ?: return null
             return ParsedJamInvite(code = code, serverUrl = server)
         }
 
-        // 2. Official web domain: https://bitchord.kushagrasingh.in/invite/<CODE>
-        if (scheme == "https" && host == HOST) {
+        // 2. Official web domain: yz-music.vercel.app, yz-music.vercel.com, or legacy bitchord.kushagrasingh.in
+        if (scheme == "https" && (host == HOST || host == ALT_HOST || host == LEGACY_HOST)) {
             val match = INVITE_PATH.matchEntire(uri.path.orEmpty()) ?: return null
             val code = match.groupValues[1].uppercase()
             return ParsedJamInvite(code = code, serverUrl = server)
@@ -79,7 +85,7 @@ object JamInviteLink {
 
     fun url(code: String, customServer: String? = null): String {
         val base = customServer?.trim()?.trimEnd('/')
-        return if (!base.isNullOrBlank() && !base.equals(ORIGIN, ignoreCase = true)) {
+        return if (!base.isNullOrBlank() && !base.equals(ORIGIN, ignoreCase = true) && !base.equals(ALT_ORIGIN, ignoreCase = true)) {
             "$base/invite/${code.uppercase()}"
         } else {
             "$ORIGIN/invite/${code.uppercase()}"
@@ -91,9 +97,9 @@ object JamInviteLink {
         val base = customServer?.trim()?.trimEnd('/')
         return if (!base.isNullOrBlank()) {
             val encoded = runCatching { URLEncoder.encode(base, "UTF-8") }.getOrDefault(base)
-            "bitchord://party/$normalizedCode?server=$encoded"
+            "yzmusic://party/$normalizedCode?server=$encoded"
         } else {
-            "bitchord://party/$normalizedCode"
+            "yzmusic://party/$normalizedCode"
         }
     }
 

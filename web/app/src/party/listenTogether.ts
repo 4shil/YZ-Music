@@ -35,7 +35,7 @@ import {
  * the server's 45 s grace, so a refresh is invisible to everyone else.
  */
 
-export const DEFAULT_SERVER = 'https://api.bitchord.kushagrasingh.in';
+export const DEFAULT_SERVER = 'https://yz-music-party.onrender.com';
 export const MAX_UPCOMING = 25;
 const PING_INTERVAL_MS = 15_000;
 const REPORT_INTERVAL_MS = 10_000;

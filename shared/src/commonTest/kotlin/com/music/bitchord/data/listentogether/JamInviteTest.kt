@@ -32,6 +32,12 @@ class JamInviteTest {
     }
 
     @Test
+    fun `accepts alt origin and legacy origin`() {
+        assertEquals("ABC123", JamInvite.parse("https://yz-music.vercel.com/invite/ABC123"))
+        assertEquals("ABC123", JamInvite.parse("https://bitchord.kushagrasingh.in/invite/ABC123"))
+    }
+
+    @Test
     fun `plain http is refused`() {
         assertNull(JamInvite.parse("http://bitchord.kushagrasingh.in/invite/ABC123"))
     }
