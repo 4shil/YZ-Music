@@ -1,7 +1,9 @@
 # Gradle
 .gradle/
+.vscode/
 /build/
 /app/build/
+/desktopApp/bin/
 build/
 gradle-app.setting
 !gradle-wrapper.jar
@@ -15,6 +17,7 @@ local.properties
 
 # Android Studio / IntelliJ
 .idea/
+.claude/
 *.iml
 *.ipr
 *.iws
@@ -26,11 +29,8 @@ captures/
 
 # Log/OS files
 *.log
-*.tmp
-*.bak
 .DS_Store
 Thumbs.db
-desktop.ini
 
 # Release signing — never commit the key or its passwords
 keystore.properties
@@ -42,15 +42,10 @@ keystore.properties
 .tmp_verify/
 .debug/
 
-commit_manifest*.md
-generate_synthetic_history.js
+# AI agent configuration
+AGENTS.md
+/output/
 
-# Temporary test files & unwanted scratch
-.freebuff/
-test_beat.onnx
-*.onnx
-app/src/test/java/com/music/yzmusic/CustomModuleValidationTest.kt
-
-# APKs staged for GitHub Release uploads - binaries are attached to the
-# release, never committed.
-release-artifacts/
+# Built packages — release APKs/bundles are handed out, never committed
+*.apk
+*.aab

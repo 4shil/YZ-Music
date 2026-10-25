@@ -1,0 +1,32 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="432"
+    android:viewportHeight="432">
+    <!-- Waveform Bars -->
+    <path
+        android:pathData="M 148,201 L 148,231"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="18"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 182,177 L 182,255"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="18"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 216,143 L 216,289"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="18"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 250,177 L 250,255"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="18"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 284,201 L 284,231"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="18"
+        android:strokeLineCap="round" />
+</vector>

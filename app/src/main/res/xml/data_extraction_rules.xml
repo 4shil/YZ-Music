@@ -1,23 +1,27 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Backup and device-transfer rules for Android 12 and newer.
-
-   See backup_rules.xml for why these files are excluded. The one thing that
-   differs from Android 11 and older is that this file has two independent
-   blocks: <cloud-backup> and <device-transfer>. A file excluded from only one
-   of them still travels by the other route, which for a cleartext session
-   cookie is the whole point of the exercise.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Backup and device-transfer rules for Android 12 and newer; see
+   backup_rules.xml for why these files are excluded.
 -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="bitchord_auth.xml" />
         <exclude domain="sharedpref" path="bitchord_auth_plain.xml" />
-        <exclude domain="sharedpref" path="yzmusic_sources.xml" />
-        <exclude domain="sharedpref" path="yzmusic_sources_plain.xml" />
+        <exclude domain="sharedpref" path="bitchord_sources.xml" />
+        <exclude domain="sharedpref" path="bitchord_sources_plain.xml" />
+        <!-- Playback queues are local session state; do not resurrect them after reinstall. -->
+        <exclude domain="sharedpref" path="bitchord_last_played.xml" />
+        <exclude domain="sharedpref" path="bitchord_bounded_context.xml" />
+        <exclude domain="sharedpref" path="bitchord_party_queue_stash.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="bitchord_auth.xml" />
         <exclude domain="sharedpref" path="bitchord_auth_plain.xml" />
-        <exclude domain="sharedpref" path="yzmusic_sources.xml" />
-        <exclude domain="sharedpref" path="yzmusic_sources_plain.xml" />
+        <exclude domain="sharedpref" path="bitchord_sources.xml" />
+        <exclude domain="sharedpref" path="bitchord_sources_plain.xml" />
+        <!-- Playback queues are local session state; do not resurrect them after reinstall. -->
+        <exclude domain="sharedpref" path="bitchord_last_played.xml" />
+        <exclude domain="sharedpref" path="bitchord_bounded_context.xml" />
+        <exclude domain="sharedpref" path="bitchord_party_queue_stash.xml" />
     </device-transfer>
 </data-extraction-rules>
