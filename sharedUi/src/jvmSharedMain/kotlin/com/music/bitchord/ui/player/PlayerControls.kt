@@ -106,6 +106,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.music.bitchord.ui.haptics.Haptic
+import com.music.bitchord.ui.haptics.Haptics
 import com.music.bitchord.ui.haptics.rememberHaptics
 import com.music.bitchord.ui.icons.BitChordIcons
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -566,15 +567,15 @@ internal fun PlayerActionRow(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onToggleAutoplay: () -> Unit,
-    onOpenOutput: () -> Unit,
-    onListenTogether: () -> Unit,
+    onOpenOutput: () -> Unit = {},
+    onListenTogether: () -> Unit = {},
     /** Opens [ListenTogetherMembersSheet] rather than settings directly. */
-    onOpenListenTogetherMembers: () -> Unit,
+    onOpenListenTogetherMembers: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -584,62 +585,208 @@ internal fun PlayerActionRow(
             onClick = onToggleLyrics,
             highlighted = lyricsOpen,
         )
-        Pill {
-            PillSegment(
-                icon = BitChordIcons.Shuffle,
-                contentDescription = stringResource(
-                    if (shuffleEnabled) Res.string.shuffle_on else Res.string.shuffle_off,
-                ),
-                onClick = onToggleShuffle,
-                highlighted = shuffleEnabled,
-                haptic = if (shuffleEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
-                tapWindowMs = SHUFFLE_TAP_WINDOW_MS,
-            )
-            PillDivider()
-            PillSegment(
-                icon = if (repeatMode == RepeatModes.ONE) null else BitChordIcons.Repeat,
-                label = if (repeatMode == RepeatModes.ONE) "1" else null,
-                contentDescription = when (repeatMode) {
-                    RepeatModes.ONE -> stringResource(Res.string.repeat_one)
-                    RepeatModes.ALL -> stringResource(Res.string.repeat_all)
-                    else -> stringResource(Res.string.repeat_off)
-                },
-                onClick = onCycleRepeat,
-                highlighted = repeatMode != RepeatModes.OFF,
-                haptic = when (repeatMode) {
-                    RepeatModes.OFF -> Haptic.ToggleOn
-                    RepeatModes.ONE -> Haptic.ToggleOff
-                    else -> Haptic.Select
-                },
-            )
-            PillDivider()
-            PillSegment(
-                icon = BitChordIcons.Infinity,
-                contentDescription = stringResource(
-                    if (autoplayEnabled) Res.string.autoplay_on else Res.string.autoplay_off,
-                ),
-                onClick = onToggleAutoplay,
-                highlighted = autoplayEnabled,
-                haptic = if (autoplayEnabled) Haptic.ToggleOff else Haptic.ToggleOn,
-                tapWindowMs = AUTOPLAY_TAP_WINDOW_MS,
-            )
-        }
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DownloadBottomGlyph(
-                state = downloadState,
-                onClick = onDownload,
-            )
-            Spacer(Modifier.width(8.dp))
-            BottomGlyph(
-                icon = BitChordIcons.Queue,
-                contentDescription = stringResource(Res.string.up_next),
-                onClick = onToggleQueue,
-                highlighted = queueOpen,
-                haptic = if (queueOpen) Haptic.Tap else Haptic.Expand,
-            )
+        PlaybackModeSwitchButton(
+            shuffleEnabled = shuffleEnabled,
+            repeatMode = repeatMode,
+            autoplayEnabled = autoplayEnabled,
+            onToggleShuffle = onToggleShuffle,
+            onCycleRepeat = onCycleRepeat,
+            onToggleAutoplay = onToggleAutoplay,
+        )
+
+        DownloadBottomGlyph(
+            state = downloadState,
+            onClick = onDownload,
+        )
+
+        BottomGlyph(
+            icon = BitChordIcons.Queue,
+            contentDescription = stringResource(Res.string.up_next),
+            onClick = onToggleQueue,
+            highlighted = queueOpen,
+            haptic = if (queueOpen) Haptic.Tap else Haptic.Expand,
+        )
+    }
+}
+
+/**
+ * A single switching button that cycles through playback modes:
+ * Shuffle -> Repeat All -> Repeat One -> Infinite (Autoplay) -> Off
+ */
+@Composable
+private fun PlaybackModeSwitchButton(
+    shuffleEnabled: Boolean,
+    repeatMode: Int,
+    autoplayEnabled: Boolean,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    onToggleAutoplay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = rememberHaptics()
+    val lastTap = remember { mutableLongStateOf(0L) }
+
+    val isRepeatOne = repeatMode == RepeatModes.ONE
+    val isRepeatAll = repeatMode == RepeatModes.ALL
+    val isShuffle = shuffleEnabled
+    val isAutoplay = autoplayEnabled
+    val isAnyActive = isRepeatOne || isRepeatAll || isShuffle || isAutoplay
+
+    val contentDesc = when {
+        isRepeatOne -> stringResource(Res.string.repeat_one)
+        isRepeatAll -> stringResource(Res.string.repeat_all)
+        isShuffle -> stringResource(Res.string.shuffle_on)
+        isAutoplay -> stringResource(Res.string.autoplay_on)
+        else -> stringResource(Res.string.shuffle_off)
+    }
+
+    val discAlpha by animateFloatAsState(
+        targetValue = if (isAnyActive) 0.20f else 0f,
+        label = "modeSwitchDisc",
+    )
+    val tint = LocalPlayerTint.current.copy(alpha = if (isAnyActive) 1f else 0.75f)
+
+    Box(
+        modifier = modifier
+            .size(BOTTOM_ACTION_SIZE)
+            .clip(CircleShape)
+            .background(LocalPlayerTint.current.copy(alpha = discAlpha))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                val now = uptimeMillis()
+                if (now - lastTap.longValue >= 100L) {
+                    lastTap.longValue = now
+                    cyclePlaybackMode(
+                        shuffleEnabled = shuffleEnabled,
+                        repeatMode = repeatMode,
+                        autoplayEnabled = autoplayEnabled,
+                        onToggleShuffle = onToggleShuffle,
+                        onCycleRepeat = onCycleRepeat,
+                        onToggleAutoplay = onToggleAutoplay,
+                        haptics = haptics,
+                    )
+                }
+            }
+            .semantics { this.contentDescription = contentDesc },
+        contentAlignment = Alignment.Center,
+    ) {
+        Crossfade(
+            targetState = when {
+                isRepeatOne -> 1
+                isRepeatAll -> 2
+                isShuffle -> 3
+                isAutoplay -> 4
+                else -> 0
+            },
+            animationSpec = tween(durationMillis = 180),
+            label = "modeSwitchIcon",
+        ) { modeState ->
+            when (modeState) {
+                1 -> {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = BitChordIcons.Repeat,
+                            contentDescription = null,
+                            tint = tint,
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .offset(x = 2.dp, y = 2.dp)
+                                .background(LocalPlayerTint.current.copy(alpha = 0.25f), CircleShape)
+                                .padding(horizontal = 2.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "1",
+                                color = tint,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                lineHeight = 10.sp,
+                            )
+                        }
+                    }
+                }
+                2 -> {
+                    Icon(
+                        imageVector = BitChordIcons.Repeat,
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(25.dp),
+                    )
+                }
+                3 -> {
+                    Icon(
+                        imageVector = BitChordIcons.Shuffle,
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+                4 -> {
+                    Icon(
+                        imageVector = BitChordIcons.Infinity,
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(25.dp),
+                    )
+                }
+                else -> {
+                    Icon(
+                        imageVector = BitChordIcons.Shuffle,
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun cyclePlaybackMode(
+    shuffleEnabled: Boolean,
+    repeatMode: Int,
+    autoplayEnabled: Boolean,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    onToggleAutoplay: () -> Unit,
+    haptics: Haptics,
+) {
+    when {
+        repeatMode == RepeatModes.ONE -> {
+            haptics.play(Haptic.ToggleOn)
+            onCycleRepeat()
+            if (!autoplayEnabled) onToggleAutoplay()
+            if (shuffleEnabled) onToggleShuffle()
+        }
+        repeatMode == RepeatModes.ALL -> {
+            haptics.play(Haptic.Select)
+            onCycleRepeat()
+            if (shuffleEnabled) onToggleShuffle()
+            if (autoplayEnabled) onToggleAutoplay()
+        }
+        shuffleEnabled -> {
+            haptics.play(Haptic.Select)
+            onToggleShuffle()
+            onCycleRepeat()
+            if (autoplayEnabled) onToggleAutoplay()
+        }
+        autoplayEnabled -> {
+            haptics.play(Haptic.ToggleOff)
+            onToggleAutoplay()
+            if (repeatMode != RepeatModes.OFF) {
+                repeat(if (repeatMode == RepeatModes.ALL) 2 else 1) { onCycleRepeat() }
+            }
+            if (shuffleEnabled) onToggleShuffle()
+        }
+        else -> {
+            haptics.play(Haptic.ToggleOn)
+            onToggleShuffle()
         }
     }
 }
