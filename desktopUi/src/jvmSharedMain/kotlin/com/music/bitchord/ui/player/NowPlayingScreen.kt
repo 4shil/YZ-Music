@@ -1175,19 +1175,49 @@ fun NowPlayingScreen(
     // [QUEUE_CARRY_FRACTION] has to fall back to 0 just as surely as one that
     // carried has to finish reaching 1.
     var queueReleased by remember { mutableIntStateOf(0) }
+    var queueSettling by remember { mutableStateOf(false) }
+    var lastOpenedPanel by remember {
+        mutableStateOf(
+            when (restoredPlayerScreen) {
+                LastPlayerScreen.LYRICS -> LastPlayerScreen.LYRICS
+                LastPlayerScreen.QUEUE -> LastPlayerScreen.QUEUE
+                else -> LastPlayerScreen.MAIN
+            },
+        )
+    }
+
+    LaunchedEffect(lyricsOpen, queueOpen, queueDragging) {
+        if (lyricsOpen) {
+            lastOpenedPanel = LastPlayerScreen.LYRICS
+        } else if (queueOpen || queueDragging) {
+            lastOpenedPanel = LastPlayerScreen.QUEUE
+        }
+    }
+
     LaunchedEffect(queueOpen, queueDragging, queueReleased) {
-        if (queueDragging) return@LaunchedEffect
+        if (queueDragging) {
+            queueSettling = false
+            return@LaunchedEffect
+        }
         val target = if (queueOpen) 1f else 0f
         val from = queueSlide.floatValue
-        if (from == target) return@LaunchedEffect
-        animate(
-            initialValue = from,
-            targetValue = target,
-            animationSpec = tween(
-                durationMillis = (QUEUE_TRAVEL_MS * abs(target - from)).roundToInt(),
-                easing = FastOutSlowInEasing,
-            ),
-        ) { value, _ -> queueSlide.floatValue = value }
+        if (from == target) {
+            queueSettling = false
+            return@LaunchedEffect
+        }
+        queueSettling = true
+        try {
+            animate(
+                initialValue = from,
+                targetValue = target,
+                animationSpec = tween(
+                    durationMillis = (QUEUE_TRAVEL_MS * abs(target - from)).roundToInt(),
+                    easing = FastOutSlowInEasing,
+                ),
+            ) { value, _ -> queueSlide.floatValue = value }
+        } finally {
+            queueSettling = false
+        }
     }
 
     // Horizontal fling anywhere on the player skips tracks; the artwork
@@ -1266,8 +1296,8 @@ fun NowPlayingScreen(
     // and draw lambdas call it where they place or paint; composition only asks
     // the thresholds below, each of which changes once per collapse.
     val p: () -> Float = {
-        val queueOwnsCollapse = !lyricsOpen &&
-            (queueOpen || queueDragging || queueSlide.floatValue > 0.001f)
+        val queueIsActive = queueOpen || queueDragging || queueSettling || queueSlide.floatValue > 0f
+        val queueOwnsCollapse = !lyricsOpen && (queueIsActive || lastOpenedPanel == LastPlayerScreen.QUEUE)
         if (queueOwnsCollapse) queueSlide.floatValue else animatedCollapse.value
     }
     val collapseStarted by remember { derivedStateOf { p() > 0f } }
