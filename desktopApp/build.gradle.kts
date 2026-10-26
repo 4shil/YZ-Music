@@ -370,6 +370,10 @@ tasks.named<ProcessResources>("processResources") {
         into("native")
     }
     // The Automix models, taken from the Android module rather than copied into this one.
+    from(rootProject.file("app/src/debug/assets")) {
+        include("*.onnx")
+        into("models")
+    }
     from(rootProject.file("app/src/main/assets")) {
         include("*.onnx")
         into("models")
