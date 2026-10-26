@@ -1,12 +1,12 @@
-﻿/*
+/*
  * Ported from Orchard (https://github.com/SFG5453/Orchard).
  *
  * Copyright (C) 2026 SFG545 (original Orchard implementation)
- * Copyright (C) 2026 Kushagra Singh (YZ Music adaptation)
+ * Copyright (C) 2026 Kushagra Singh (BitChord adaptation)
  *
  * Orchard's original source is licensed under the GNU Affero General Public
  * License, version 3 or later. Per AGPLv3 section 13, this file is combined
- * here into YZ Music -- a work licensed under the GNU General Public
+ * here into BitChord -- a work licensed under the GNU General Public
  * License, version 3 or later -- and remains itself governed by the AGPLv3
  * as part of that combination.
  *
@@ -24,7 +24,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace yzmusic::smart {
+namespace bitchord::smart {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
@@ -122,4 +122,4 @@ std::vector<float> Resample(
   return output;
 }
 
-}  // namespace yzmusic::smart
+}  // namespace bitchord::smart

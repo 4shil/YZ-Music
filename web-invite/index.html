@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YZ Music — Listen Together Invite</title>
+  <meta name="description" content="Join a real-time listening party on YZ Music. Listen to tracks synchronized with your friends.">
+  <meta name="theme-color" content="#0a0a0c">
+
+  <!-- OpenGraph -->
+  <meta property="og:title" content="Join my YZ Music Party">
+  <meta property="og:description" content="Listen together in real-time on YZ Music. Tap to join!">
+  <meta property="og:type" content="music.song">
+  <meta name="twitter:card" content="summary">
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: #08080a;
+      color: #f2f2f7;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Ambient background blur glow */
+    .glow {
+      position: fixed;
+      width: 480px;
+      height: 480px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(235, 75, 55, 0.15) 0%, rgba(255, 120, 60, 0.04) 50%, transparent 70%);
+      top: 15%;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 460px;
+      background: rgba(22, 22, 28, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border-radius: 28px;
+      padding: 36px 28px;
+      text-align: center;
+      box-shadow: 0 30px 60px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      position: relative;
+      z-index: 1;
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .logo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 6px 16px;
+      border-radius: 999px;
+      margin-bottom: 24px;
+    }
+
+    .logo-badge svg {
+      width: 18px;
+      height: 18px;
+      fill: #ff4d3a;
+    }
+
+    .logo-badge span {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #e5e5ea;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      color: #ffffff;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #8e8e93;
+      line-height: 1.5;
+      margin-bottom: 28px;
+    }
+
+    /* Party code display */
+    .code-box {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1.5px dashed rgba(255, 255, 255, 0.18);
+      border-radius: 20px;
+      padding: 22px 16px;
+      margin-bottom: 24px;
+      position: relative;
+    }
+
+    .code-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #8e8e93;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .code-value {
+      font-size: 40px;
+      font-weight: 900;
+      letter-spacing: 0.22em;
+      color: #ffffff;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      text-shadow: 0 0 20px rgba(255, 77, 58, 0.35);
+    }
+
+    /* Buttons */
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      height: 52px;
+      border-radius: 16px;
+      font-size: 16px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #ff453a 0%, #ff5e3a 100%);
+      color: #ffffff;
+      box-shadow: 0 8px 24px rgba(255, 69, 58, 0.35);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 12px 30px rgba(255, 69, 58, 0.45);
+      filter: brightness(1.05);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    /* QR Code section */
+    .qr-container {
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 20px;
+      padding: 20px;
+      margin-bottom: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .qr-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #aeaeb2;
+    }
+
+    #qrCanvas {
+      width: 140px;
+      height: 140px;
+      border-radius: 12px;
+      background: #ffffff;
+      padding: 8px;
+    }
+
+    /* Manual input section (if no code in URL) */
+    .input-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .code-input {
+      flex: 1;
+      height: 52px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+      font-size: 20px;
+      font-weight: 800;
+      text-align: center;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      outline: none;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
+    }
+
+    .code-input:focus {
+      border-color: #ff453a;
+      box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.2);
+    }
+
+    /* Download section */
+    .download-section {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 20px;
+      text-align: center;
+    }
+
+    .download-title {
+      font-size: 12px;
+      color: #636366;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+
+    .download-links {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .pill-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #aeaeb2;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+
+    .pill-link:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #ffffff;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      background: rgba(30, 30, 36, 0.95);
+      color: #34c759;
+      border: 1px solid rgba(52, 199, 89, 0.25);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      padding: 12px 24px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 700;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(16px);
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 100;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="glow"></div>
+
+  <div class="container">
+    <div class="logo-badge">
+      <svg viewBox="0 0 24 24">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/>
+      </svg>
+      <span>YZ Music &bull; Party</span>
+    </div>
+
+    <h1>Listen Together</h1>
+    <p class="subtitle">You're invited to listen to music simultaneously in real-time with your friends.</p>
+
+    <!-- Detected Code View -->
+    <div id="codeView" style="display: none;">
+      <div class="code-box">
+        <div class="code-label">Party Invite Code</div>
+        <div class="code-value" id="partyCode">------</div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-primary" id="btnJoin">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          Open & Join in App
+        </button>
+        <button class="btn btn-secondary" id="btnCopy">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          Copy Code
+        </button>
+      </div>
+
+      <div class="qr-container">
+        <div class="qr-title">Scan from another phone:</div>
+        <canvas id="qrCanvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Manual Code Entry View (if no code provided in URL) -->
+    <div id="manualView" style="display: none;">
+      <div class="input-group">
+        <input type="text" id="manualInput" class="code-input" placeholder="ABC123" maxlength="6" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-primary" id="btnManualJoin">
+          Enter Party
+        </button>
+      </div>
+    </div>
+
+    <!-- Download YZ Music -->
+    <div class="download-section">
+      <div class="download-title">Get YZ Music</div>
+      <div class="download-links">
+        <a href="https://github.com/4shil/YZ-Music/releases/latest" class="pill-link" target="_blank" rel="noopener">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Android (.apk)
+        </a>
+        <a href="https://github.com/4shil/YZ-Music/releases/latest" class="pill-link" target="_blank" rel="noopener">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          Linux Desktop
+        </a>
+        <a href="https://github.com/4shil/YZ-Music" class="pill-link" target="_blank" rel="noopener">
+          GitHub
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Copied to clipboard!</div>
+
+  <!-- QR Code Generator Lib (Tiny inline QR generator) -->
+  <script>
+    // Lightweight QR code generation via QRSVG/Canvas
+    function renderQRCode(canvas, text) {
+      // Use Google Chart API image fallback drawn to canvas, or high-speed SVG
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = function() {
+        const ctx = canvas.getContext('2d');
+        canvas.width = 280;
+        canvas.height = 280;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 280, 280);
+        ctx.drawImage(img, 0, 0, 280, 280);
+      };
+      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=' + encodeURIComponent(text);
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    function extractCode() {
+      // 1. Path match: /invite/ABC123 or /ABC123
+      const path = window.location.pathname;
+      const match = path.match(/\/invite\/([A-Za-z0-9]{6})/i) || path.match(/\/([A-Za-z0-9]{6})$/i);
+      if (match && match[1]) return match[1].toUpperCase();
+
+      // 2. Query param: ?code=ABC123
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+      if (code && code.length === 6 && /^[A-Za-z0-9]+$/.test(code)) {
+        return code.toUpperCase();
+      }
+
+      return null;
+    }
+
+    function extractServer() {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get('server');
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const code = extractCode();
+      const server = extractServer();
+      const codeView = document.getElementById('codeView');
+      const manualView = document.getElementById('manualView');
+
+      if (code) {
+        document.title = `Join Party ${code} \u2014 YZ Music`;
+        document.getElementById('partyCode').innerText = code;
+        codeView.style.display = 'block';
+
+        const customServerParam = server ? `?server=${encodeURIComponent(server)}` : '';
+        const yzSchemeUrl = `yzmusic://party/${code}${customServerParam}`;
+        const bitchordSchemeUrl = `bitchord://party/${code}${customServerParam}`;
+        const webUrl = `${window.location.origin}/invite/${code}`;
+
+        // Render QR Code
+        const canvas = document.getElementById('qrCanvas');
+        renderQRCode(canvas, webUrl);
+
+        // Join button
+        document.getElementById('btnJoin').addEventListener('click', () => {
+          // Attempt deep link open
+          window.location.href = yzSchemeUrl;
+          setTimeout(() => {
+            window.location.href = bitchordSchemeUrl;
+          }, 300);
+        });
+
+        // Copy button
+        document.getElementById('btnCopy').addEventListener('click', () => {
+          navigator.clipboard.writeText(code).then(() => {
+            showToast('Party code copied: ' + code);
+          }).catch(() => {
+            showToast('Party code: ' + code);
+          });
+        });
+
+        // Auto-launch deep link on mobile browsers
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+          setTimeout(() => {
+            window.location.href = yzSchemeUrl;
+          }, 400);
+        }
+
+      } else {
+        manualView.style.display = 'block';
+        const input = document.getElementById('manualInput');
+        document.getElementById('btnManualJoin').addEventListener('click', () => {
+          const typed = input.value.trim().toUpperCase();
+          if (typed.length === 6) {
+            window.location.href = `/invite/${typed}`;
+          } else {
+            showToast('Enter a valid 6-character code');
+          }
+        });
+        input.addEventListener('keyup', (e) => {
+          if (e.key === 'Enter') {
+            document.getElementById('btnManualJoin').click();
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

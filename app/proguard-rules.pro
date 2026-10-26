@@ -1,125 +1,79 @@
-# ===========================================================================
-# YZ MUSIC — R8 / PROGUARD OPTIMIZATION & PINPOINT KEEP RULES
-# ===========================================================================
+# R8 is on for release for speed, not size — see the note on isMinifyEnabled in
+# build.gradle.kts. These rules keep it away from everything that finds classes
+# by name at runtime, where a missing class shows up as a crash on a device
+# rather than as a build error.
 
-# Preserve line numbers and source files for readable stacktraces and debugging
--keepattributes SourceFile,LineNumberTable
--renamesourcefileattribute SourceFile
+# Nothing is renamed. Stack traces stay readable, and every lookup by name —
+# enum names in preferences, Media3 custom commands, library reflection — keeps
+# working without a rule of its own.
+-dontobfuscate
+-keepattributes SourceFile,LineNumberTable,Signature,InnerClasses,EnclosingMethod,Exceptions,*Annotation*
 
-# Preserve runtime annotations, generic signatures, inner class attributes and exceptions
--keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,Exceptions
-
-# ---------------------------------------------------------------------------
-# 1. Native Methods & JNI
-# ---------------------------------------------------------------------------
--keepclasseswithmembers class * {
-    native <methods>;
-}
-
-# Automix DSP Analyzer JNI front-end
--keep class com.music.yzmusic.playback.smart.AudioAnalysis$* { *; }
--keep class com.music.yzmusic.playback.smart.MelSpectrogram$* { *; }
--keep class com.music.yzmusic.playback.smart.VocalSpectrogram$* { *; }
--keep class com.music.yzmusic.playback.smart.TrackFeatures$* { *; }
-
-# ---------------------------------------------------------------------------
-# 2. Mozilla Rhino Engine (used by NewPipeExtractor for YouTube JS deciphering)
-# ---------------------------------------------------------------------------
+# ---- Script engines and extractors ------------------------------------------
+# Rhino compiles and runs YouTube's player JavaScript and binds Java classes into
+# it reflectively; NewPipe and InnerTubeX drive it and parse with nanojson/jsoup.
 -keep class org.mozilla.javascript.** { *; }
--keep class org.mozilla.javascript.engine.** { *; }
--dontwarn org.mozilla.javascript.**
-
-# ---------------------------------------------------------------------------
-# 3. NewPipeExtractor, NanoJSON & Jsoup
-# ---------------------------------------------------------------------------
--keep class org.schabi.newpipe.extractor.** { *; }
--keep interface org.schabi.newpipe.extractor.** { *; }
--dontwarn org.schabi.newpipe.extractor.**
+-keep class org.mozilla.classfile.** { *; }
+-keep class org.schabi.newpipe.** { *; }
 -keep class com.grack.nanojson.** { *; }
--dontwarn com.grack.nanojson.**
 -keep class org.jsoup.** { *; }
--dontwarn org.jsoup.**
--keep class com.google.protobuf.** { *; }
--dontwarn com.google.protobuf.**
+-keep class com.metrolist.** { *; }
+-keep class com.dokar.quickjs.** { *; }
 
-# ---------------------------------------------------------------------------
-# 4. Ktor & kotlinx.serialization
-# ---------------------------------------------------------------------------
--keepclassmembers class * {
-    @kotlinx.serialization.Serializable <fields>;
-    @kotlinx.serialization.SerialName <fields>;
-}
--keepclassmembers class * {
-    *** Companion;
-}
--keepclasseswithmembers class * {
-    kotlinx.serialization.KSerializer serializer(...);
-}
--keepclassmembers class **$$serializer {
-    *;
-}
--keepclassmembers class * implements kotlinx.serialization.KSerializer {
-    *;
-}
--keep class com.music.yzmusic.innertube.models.** { *; }
--keep class com.music.yzmusic.data.models.** { *; }
--dontwarn io.ktor.**
--dontwarn kotlinx.serialization.**
-
-# ---------------------------------------------------------------------------
-# 5. QuickJS (JavaScript execution engine for style source plugins)
-# ---------------------------------------------------------------------------
--keep class io.github.dokar3.quickjs.** { *; }
--dontwarn io.github.dokar3.quickjs.**
-
-# ---------------------------------------------------------------------------
-# 6. ONNX Runtime & JNI bindings
-# ---------------------------------------------------------------------------
+# ---- Native and crypto --------------------------------------------------------
+# ONNX Runtime and QuickJS are called from JNI, which R8 cannot see. SMBJ picks
+# its BouncyCastle providers and event bus handlers reflectively.
 -keep class ai.onnxruntime.** { *; }
--dontwarn ai.onnxruntime.**
+-keep class com.hierynomus.** { *; }
+-keep class net.engio.mbassy.** { *; }
+-keep class org.bouncycastle.** { *; }
+-keepclasseswithmembernames,includedescriptorclasses class * { native <methods>; }
+# Automix DSP Analyzer JNI front-end
+-keep class com.music.bitchord.playback.smart.AudioAnalysis** { *; }
+-keep class com.music.bitchord.playback.smart.MelSpectrogram** { *; }
+-keep class com.music.bitchord.playback.smart.VocalSpectrogram** { *; }
+-keep class com.music.bitchord.playback.smart.TrackFeatures** { *; }
+-keep class com.music.bitchord.playback.smart.SmartAudioModelManager** { *; }
+# The vendored FFmpeg extension's JNI calls back into this by name to grow
+# its output buffer (native/ffmpeg/ffmpeg_jni.cc, JNI_OnLoad).
+-keep,includedescriptorclasses class androidx.media3.decoder.ffmpeg.FfmpegAudioDecoder {
+    private java.nio.ByteBuffer growOutputBuffer(androidx.media3.decoder.SimpleDecoderOutputBuffer, int);
+}
 
-# ---------------------------------------------------------------------------
-# 7. Media3 / ExoPlayer
-# ---------------------------------------------------------------------------
--keep class androidx.media3.exoplayer.** { *; }
--keep class androidx.media3.datasource.** { *; }
--keep class androidx.media3.session.** { *; }
--dontwarn androidx.media3.**
+# ---- Serialization --------------------------------------------------------------
+# protobuf-lite reads its generated messages' fields reflectively.
+-keep class * extends com.google.protobuf.GeneratedMessageLite { *; }
+# Ktor resolves serializers and engine pieces by type at runtime.
+-keep class io.ktor.** { *; }
+# Our own @Serializable models, whole: kotlinx.serialization's bundled rules
+# cover the generated serializers, and keeping the classes too costs little.
+-keep @kotlinx.serialization.Serializable class com.music.bitchord.** { *; }
+-keep @kotlinx.serialization.Serializable class com.my.kizzy.** { *; }
 
-# ---------------------------------------------------------------------------
-# 8. Coil 3 Image Loading & Palette
-# ---------------------------------------------------------------------------
--keep class coil3.** { *; }
--dontwarn coil3.**
--keep class androidx.palette.** { *; }
+# ---- WebView bridges ------------------------------------------------------------
+# PoToken minting and the Spotify token page call back into these from JavaScript.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
+# ---- JVM-only APIs ------------------------------------------------------------
+# Referenced by desktop-only paths in Rhino (JSR-223, java.beans, dynalink),
+# mbassy's EL filters, SMBJ's Kerberos and Ktor's IntelliJ debugger probe. None
+# of them exist on Android and none of those paths run here — the debug build,
+# which R8 never touches, has always lived without them.
+-dontwarn java.beans.**
+-dontwarn java.lang.management.**
+-dontwarn javax.el.**
+-dontwarn javax.script.**
+-dontwarn jdk.dynalink.**
+-dontwarn org.ietf.jgss.**
 
-# ---------------------------------------------------------------------------
-# 9. ZXing (party invite QR codes)
-# ---------------------------------------------------------------------------
-# The encode path is all direct calls (QRCodeWriter → Encoder →
-# DefaultGridPlacement), so R8 would in fact trace it correctly on its own. The
-# rule is here to make that a guarantee rather than a property of R8's
-# whole-program analysis today.
-#
-# The QR *decoder* rides along under this rule, which is not what it is for —
-# nothing in the app reads a code; the other phone's camera does that, by
-# pointing a lens at a link. It is left in deliberately. Pruning it to a
-# hand-picked list of the ~20 classes the encoder actually reaches saves a few
-# hundred KB against a ~53 MB APK, and buys a release-only NoClassDefFoundError
-# in the encoder if that list is ever one class short — a failure where a
-# minified build and a debug build disagree and no local test would catch it.
--keep class com.google.zxing.qrcode.** { *; }
--keep class com.google.zxing.common.** { *; }
--keep interface com.google.zxing.Writer { *; }
--keep class com.google.zxing.EncodeHintType { *; }
--keep class com.google.zxing.BarcodeFormat { *; }
-# The rest of the artifact is unused, and the AWT/imageio-based helpers in it
-# have no Android equivalent — R8 would warn about every one of them.
--dontwarn com.google.zxing.**
-
-# ---------------------------------------------------------------------------
-# 10. UI Frameworks & Utilities
-# ---------------------------------------------------------------------------
--dontwarn dev.chrisbanes.haze.**
--dontwarn com.halilibo.richtext.**
+# ---- "BitChord for Wear OS": the ADB client that installs the watch app ----
+# libadb-android drives the pairing and transport through Conscrypt and SPAKE2,
+# both of which reach their native halves by name.
+-keep class io.github.muntashirakon.adb.** { *; }
+-keep class org.conscrypt.** { *; }
+-keep class com.android.org.conscrypt.** { *; }
+-dontwarn org.conscrypt.**
+-dontwarn com.android.org.conscrypt.**
+-dontwarn io.github.muntashirakon.adb.**

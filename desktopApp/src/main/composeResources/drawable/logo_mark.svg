@@ -1,0 +1,10 @@
+<svg width="292" height="292" viewBox="70 70 292 292" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Outer Ring -->
+    <circle cx="216" cy="216" r="133.5" stroke="white" stroke-width="13" />
+    <!-- Waveform Bars -->
+    <line x1="148" y1="201" x2="148" y2="231" stroke="white" stroke-width="18" stroke-linecap="round" />
+    <line x1="182" y1="177" x2="182" y2="255" stroke="white" stroke-width="18" stroke-linecap="round" />
+    <line x1="216" y1="143" x2="216" y2="289" stroke="white" stroke-width="18" stroke-linecap="round" />
+    <line x1="250" y1="177" x2="250" y2="255" stroke="white" stroke-width="18" stroke-linecap="round" />
+    <line x1="284" y1="201" x2="284" y2="231" stroke="white" stroke-width="18" stroke-linecap="round" />
+</svg>

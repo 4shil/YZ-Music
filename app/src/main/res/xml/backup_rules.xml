@@ -1,24 +1,20 @@
-<?xml version="1.0" encoding="utf-8"?><!--
+<?xml version="1.0" encoding="utf-8"?>
+<!--
    Auto-backup rules for Android 11 and older; data_extraction_rules.xml
    replaces these from Android 12.
 
-   The credential stores are excluded because their keysets are wrapped by an
-   Android Keystore key that never leaves the device: restored anywhere else
-   they cannot be decrypted (see auth/AuthStore.kt). Their plain fallbacks are
-   excluded because they hold the same credentials in cleartext, and that is
-   the case that actually leaks.
-
-   auth is still named `bitchord_auth` — carry-over from the fork. Renaming it
-   would sign every existing user out, so the names here are the ones
-   AuthStore.kt and SourceRegistry.kt really use, not ideal ones.
+   The encrypted stores are excluded because their keysets are wrapped by an
+   Android Keystore key that never leaves the device: restored anywhere, they
+   can't be decrypted (see EncryptedPrefs). Their plain fallbacks are excluded
+   because they hold the same credentials in cleartext.
 -->
 <full-backup-content>
-    <!-- AuthStore: EncryptedSharedPreferences, and the cleartext file it
-         degrades to when the Keystore is unusable. -->
     <exclude domain="sharedpref" path="bitchord_auth.xml" />
     <exclude domain="sharedpref" path="bitchord_auth_plain.xml" />
-
-    <!-- SourceRegistry: the same pair, for source endpoints and their tokens. -->
-    <exclude domain="sharedpref" path="yzmusic_sources.xml" />
-    <exclude domain="sharedpref" path="yzmusic_sources_plain.xml" />
+    <exclude domain="sharedpref" path="bitchord_sources.xml" />
+    <exclude domain="sharedpref" path="bitchord_sources_plain.xml" />
+    <!-- Playback queues are local session state; do not resurrect them after reinstall. -->
+    <exclude domain="sharedpref" path="bitchord_last_played.xml" />
+    <exclude domain="sharedpref" path="bitchord_bounded_context.xml" />
+    <exclude domain="sharedpref" path="bitchord_party_queue_stash.xml" />
 </full-backup-content>

@@ -1,0 +1,9 @@
+{
+  "name": "yz-music-invite",
+  "version": "1.8.0",
+  "description": "YZ Music Listen Together party invite portal",
+  "scripts": {
+    "dev": "npx serve .",
+    "deploy": "npx vercel --prod"
+  }
+}
