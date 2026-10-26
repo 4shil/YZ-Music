@@ -314,6 +314,7 @@ import com.music.bitchord.data.settings.LocalMusicSort
 import com.music.bitchord.ui.screens.HomeScreen
 import com.music.bitchord.ui.screens.LibraryGridPage
 import com.music.bitchord.ui.screens.LibraryScreen
+import com.music.bitchord.data.model.MoodGenre
 import com.music.bitchord.ui.screens.MoodGenrePlaylistsScreen
 import com.music.bitchord.ui.screens.SearchScreen
 import com.music.bitchord.data.settings.SongSort
@@ -3160,12 +3161,24 @@ private fun BitChordApp(
                                             ),
                                         )
                                     } ?: item.browseId?.let { browseId ->
-                                        viewModel.openDetail(
-                                            browseId = browseId,
-                                            title = item.title,
-                                            subtitle = item.subtitle,
-                                            thumbnailUrl = item.thumbnailUrl,
-                                        )
+                                        if (browseId.startsWith("FEmusic_") || item.stripeColor != null) {
+                                            viewModel.openMoodGenre(
+                                                MoodGenre(
+                                                    title = item.title,
+                                                    browseId = browseId,
+                                                    params = item.params,
+                                                    stripeColor = item.stripeColor,
+                                                )
+                                            )
+                                        } else {
+                                            viewModel.openDetail(
+                                                browseId = browseId,
+                                                title = item.title,
+                                                subtitle = item.subtitle,
+                                                thumbnailUrl = item.thumbnailUrl,
+                                                params = item.params,
+                                            )
+                                        }
                                     }
                                 },
                                 onRetry = { viewModel.openMoodGenre(category) },
@@ -3182,13 +3195,26 @@ private fun BitChordApp(
                                         song,
                                         QueueSource("Explore", PlaybackSourceType.SEARCH),
                                     )
-                                    browseId != null -> viewModel.openDetail(
-                                        browseId = browseId,
-                                        title = item.title,
-                                        subtitle = item.subtitle,
-                                        thumbnailUrl = item.thumbnailUrl,
-                                        params = item.params,
-                                    )
+                                    browseId != null -> {
+                                        if (browseId.startsWith("FEmusic_") || item.stripeColor != null) {
+                                            viewModel.openMoodGenre(
+                                                MoodGenre(
+                                                    title = item.title,
+                                                    browseId = browseId,
+                                                    params = item.params,
+                                                    stripeColor = item.stripeColor,
+                                                )
+                                            )
+                                        } else {
+                                            viewModel.openDetail(
+                                                browseId = browseId,
+                                                title = item.title,
+                                                subtitle = item.subtitle,
+                                                thumbnailUrl = item.thumbnailUrl,
+                                                params = item.params,
+                                            )
+                                        }
+                                    }
                                 }
                             },
                             onSongClick = { songs, index ->
@@ -3202,12 +3228,22 @@ private fun BitChordApp(
                             onItemLongPress = onShelfLongPress,
                             onShowAll = { shelf ->
                                 shelf.moreBrowseId?.let { browseId ->
-                                    viewModel.openDetail(
-                                        browseId = browseId,
-                                        title = shelf.title,
-                                        subtitle = shelf.subtitle,
-                                        params = shelf.moreParams,
-                                    )
+                                    if (browseId.startsWith("FEmusic_")) {
+                                        viewModel.openMoodGenre(
+                                            MoodGenre(
+                                                title = shelf.title,
+                                                browseId = browseId,
+                                                params = shelf.moreParams,
+                                            )
+                                        )
+                                    } else {
+                                        viewModel.openDetail(
+                                            browseId = browseId,
+                                            title = shelf.title,
+                                            subtitle = shelf.subtitle,
+                                            params = shelf.moreParams,
+                                        )
+                                    }
                                 }
                             },
                             onRetry = viewModel::loadExplore,
@@ -3986,7 +4022,7 @@ private fun BitChordApp(
                 // One tab handler, whichever bar is drawing it.
                 val onTabSelected: (Int) -> Unit = { index ->
                     viewModel.clearDetail()
-                    viewModel.closeMoodGenre()
+                    viewModel.clearMoodGenre()
                     showSettings = false
                     showAccountScrobbling = false
                     showSources = false

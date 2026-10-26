@@ -453,7 +453,16 @@ object YtMusicRepository {
         val key = "$browseId:${params.orEmpty()}"
         moodGenreShelfCache[key]?.let { return Result.success(it) }
         return call("mood-genre:$browseId") {
-            InnertubeParser.parseHome(Innertube.browse(browseId, params))
+            if (browseId == "FEmusic_charts") {
+                val songsPage = browseSongs("FEmusic_charts").getOrNull()
+                if (songsPage != null && songsPage.sections.isNotEmpty()) {
+                    songsPage.sections
+                } else {
+                    InnertubeParser.parseHome(Innertube.browse(browseId, params))
+                }
+            } else {
+                InnertubeParser.parseHome(Innertube.browse(browseId, params))
+            }
         }.also { result -> result.getOrNull()?.let { moodGenreShelfCache.putIfAbsent(key, it) } }
     }
 

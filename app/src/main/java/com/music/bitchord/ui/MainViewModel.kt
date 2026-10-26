@@ -1569,29 +1569,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    private val moodGenreStack = mutableListOf<MoodGenre>()
+
     fun openMoodGenre(item: MoodGenre) {
+        if (moodGenreStack.lastOrNull() != item) {
+            moodGenreStack.add(item)
+        }
         _selectedMoodGenre.value = item
         _moodGenreShelves.value = UiState.Loading
         viewModelScope.launch {
-            _moodGenreShelves.value = YtMusicRepository.moodGenreShelves(item.browseId, item.params).fold(
-                onSuccess = { shelves ->
-                    if (shelves.isEmpty()) UiState.Error(text(R.string.nothing_to_explore))
-                    else UiState.Success(shelves)
-                },
-                onFailure = { UiState.Error(it.friendly()) },
-            )
+            loadMoodGenreShelves(item)
         }
     }
 
+    private suspend fun loadMoodGenreShelves(item: MoodGenre) {
+        _moodGenreShelves.value = YtMusicRepository.moodGenreShelves(item.browseId, item.params).fold(
+            onSuccess = { shelves ->
+                if (shelves.isEmpty()) UiState.Error(text(R.string.nothing_to_explore))
+                else UiState.Success(shelves)
+            },
+            onFailure = { UiState.Error(it.friendly()) },
+        )
+    }
+
     fun closeMoodGenre(): Boolean {
-        if (_selectedMoodGenre.value == null) return false
-        _selectedMoodGenre.value = null
+        if (moodGenreStack.isEmpty() && _selectedMoodGenre.value == null) return false
+        if (moodGenreStack.isNotEmpty()) {
+            moodGenreStack.removeAt(moodGenreStack.lastIndex)
+        }
+        val prev = moodGenreStack.lastOrNull()
+        _selectedMoodGenre.value = prev
+        if (prev != null) {
+            _moodGenreShelves.value = UiState.Loading
+            viewModelScope.launch {
+                loadMoodGenreShelves(prev)
+            }
+        }
         return true
+    }
+
+    fun clearMoodGenre() {
+        moodGenreStack.clear()
+        _selectedMoodGenre.value = null
     }
 
     /** Tapping a tab should leave any pushed page behind. */
     fun clearDetail() {
         if (_detailStack.value.isNotEmpty()) _detailStack.value = emptyList()
+        clearMoodGenre()
     }
 
     fun loadHome() {
@@ -2487,6 +2512,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 it.browseId == browseId && it.songs is UiState.Loading
             } == true
         ) return
+        if (browseId.startsWith("FEmusic_")) {
+            openMoodGenre(
+                MoodGenre(
+                    title = title.ifBlank { "Explore" },
+                    browseId = browseId,
+                    params = params,
+                    thumbnailUrl = thumbnailUrl,
+                )
+            )
+            return
+        }
         if (browseId.startsWith(SPOTIFY_PAGE_PREFIX)) {
             openSpotifyPage(browseId, title, subtitle, thumbnailUrl)
             return
@@ -2577,6 +2613,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 else -> {
                     YtMusicRepository.browseSongs(browseId, params).fold(
                         onSuccess = { page ->
+                            sections = page.sections
                             // Free here — the page that returned these rows is
                             // the one thing that states who made the playlist,
                             // so its own menu never has to go and ask. Recorded
@@ -2599,7 +2636,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                 if (thumbnailUrl == null) artwork = header.thumbnailUrl
                             }
                             description = page.description
-                            if (page.songs.isEmpty()) {
+                            if (page.songs.isEmpty() && sections.isEmpty()) {
                                 UiState.Error(text(R.string.no_tracks_here))
                             } else {
                                 more = page.continuation

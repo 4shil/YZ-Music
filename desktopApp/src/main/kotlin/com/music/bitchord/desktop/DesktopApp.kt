@@ -1082,6 +1082,16 @@ fun BitChordDesktopApp() {
         }
     }
 
+    fun openMoodGenre(item: MoodGenre) {
+        openedArtist = null
+        openedCollection = null
+        overlays.replay = false
+        overlays.settingsPage = null
+        destination = DesktopDestination.EXPLORE
+        selectedMoodGenre = item
+        moodGenreShelves = UiState.Loading
+    }
+
     /**
      * Opens an album or playlist in place of whatever page was open. The page it replaces is kept
      * in the history, not underneath: an artist page left standing under an album would be drawn
@@ -1100,7 +1110,17 @@ fun BitChordDesktopApp() {
      * artist's page opens — rather than leaving the click with nothing to show until YouTube answers.
      * [fallback] is what the card that was clicked already knew.
      */
-    fun openCollection(browseId: String, fallback: BrowseItem? = null) {
+    fun openCollection(browseId: String, fallback: BrowseItem? = null, params: String? = null) {
+        if (browseId.startsWith("FEmusic_")) {
+            openMoodGenre(
+                MoodGenre(
+                    title = fallback?.title.orEmpty().ifBlank { "Explore" },
+                    browseId = browseId,
+                    params = params,
+                )
+            )
+            return
+        }
         val current = openedCollection
         if (current?.browseId == browseId && !current.loading) {
             showCollection(current)
@@ -1114,6 +1134,7 @@ fun BitChordDesktopApp() {
                 thumbnailUrl = fallback?.thumbnailUrl,
                 type = fallback?.type?.takeIf { it != BrowseType.OTHER } ?: browseTypeOf(browseId),
                 songs = emptyList(),
+                params = params,
                 loading = true,
             ),
         )
@@ -1136,6 +1157,7 @@ fun BitChordDesktopApp() {
                 thumbnailUrl = pending.thumbnailUrl,
                 type = pending.type,
             ),
+            params = pending.params,
         ).fold(
             onSuccess = { loaded ->
                 if (openedCollection?.browseId == pending.browseId) openedCollection = loaded
@@ -2165,6 +2187,8 @@ fun BitChordDesktopApp() {
     fun openBrowseItem(item: BrowseItem) {
         if (item.type == BrowseType.ARTIST) {
             openArtist(item.browseId, item.title)
+        } else if (item.browseId.startsWith("FEmusic_")) {
+            openMoodGenre(MoodGenre(item.title, item.browseId, params = null))
         } else {
             openCollection(item.browseId, item)
         }
@@ -2181,6 +2205,15 @@ fun BitChordDesktopApp() {
             // An artist is a page of its own, not a list of tracks with a photograph on top.
             browseTypeOf(browseId.orEmpty()) == BrowseType.ARTIST ->
                 openArtist(browseId!!, item.title)
+            browseId?.startsWith("FEmusic_") == true || item.stripeColor != null ->
+                openMoodGenre(
+                    MoodGenre(
+                        title = item.title,
+                        browseId = browseId ?: "FEmusic_moods_and_genres_category",
+                        params = item.params,
+                        stripeColor = item.stripeColor,
+                    )
+                )
             browseId != null -> openCollection(
                 browseId = browseId,
                 fallback = BrowseItem(
@@ -2190,6 +2223,7 @@ fun BitChordDesktopApp() {
                     thumbnailUrl = item.thumbnailUrl,
                     type = BrowseType.OTHER,
                 ),
+                params = item.params,
             )
         }
     }
@@ -2910,11 +2944,6 @@ fun BitChordDesktopApp() {
                 artistReloads++
             }
         }
-    }
-
-    fun openMoodGenre(item: MoodGenre) {
-        selectedMoodGenre = item
-        moodGenreShelves = UiState.Loading
     }
 
     LaunchedEffect(selectedMoodGenre, moodGenreReloads) {
@@ -4192,16 +4221,27 @@ fun BitChordDesktopApp() {
                             },
                             onShowAll = { shelf ->
                                 shelf.moreBrowseId?.let { browseId ->
-                                    openCollection(
-                                        browseId = browseId,
-                                        fallback = BrowseItem(
+                                    if (browseId.startsWith("FEmusic_")) {
+                                        openMoodGenre(
+                                            MoodGenre(
+                                                title = shelf.title,
+                                                browseId = browseId,
+                                                params = shelf.moreParams,
+                                            )
+                                        )
+                                    } else {
+                                        openCollection(
                                             browseId = browseId,
-                                            title = shelf.title,
-                                            subtitle = shelf.subtitle,
-                                            thumbnailUrl = null,
-                                            type = BrowseType.OTHER,
-                                        ),
-                                    )
+                                            fallback = BrowseItem(
+                                                browseId = browseId,
+                                                title = shelf.title,
+                                                subtitle = shelf.subtitle,
+                                                thumbnailUrl = null,
+                                                type = BrowseType.OTHER,
+                                            ),
+                                            params = shelf.moreParams,
+                                        )
+                                    }
                                 }
                             },
                             onRetry = { exploreReloads++ },

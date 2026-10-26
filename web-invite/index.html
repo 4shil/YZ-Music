@@ -420,9 +420,9 @@
     }
 
     function extractCode() {
-      // 1. Path match: /invite/ABC123
+      // 1. Path match: /invite/ABC123 or /ABC123
       const path = window.location.pathname;
-      const match = path.match(/\/invite\/([A-Za-z0-9]{6})/i);
+      const match = path.match(/\/invite\/([A-Za-z0-9]{6})/i) || path.match(/\/([A-Za-z0-9]{6})$/i);
       if (match && match[1]) return match[1].toUpperCase();
 
       // 2. Query param: ?code=ABC123

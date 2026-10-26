@@ -63,12 +63,45 @@ fun TvExploreScreen(
     val mood = selected
     if (mood == null) {
         val explore by viewModel.explore.collectAsState()
-        TvMoodGrid(
-            state = explore,
-            onCategory = viewModel::openMoodGenre,
-            onRetry = { viewModel.loadExplore() },
-            modifier = modifier,
-        )
+        val scope = rememberCoroutineScope()
+        var menuSong by remember { mutableStateOf<Song?>(null) }
+
+        when (val state = explore) {
+            is UiState.Loading -> TvShelvesLoading(modifier)
+            is UiState.Error -> TvErrorState(
+                message = state.message,
+                onRetry = { viewModel.loadExplore() },
+                modifier = modifier,
+            )
+            is UiState.Success -> {
+                TvShelfFeed(
+                    shelves = state.data,
+                    onPlaySong = { song ->
+                        scope.launch { mediaController?.playSongs(listOf(song), 0) }
+                        onNavigateToNowPlaying()
+                    },
+                    onSongMenu = { menuSong = it },
+                    onNavigateToDetail = { browseId, title, subtitle, thumbnailUrl, type ->
+                        if (browseId.startsWith("FEmusic_")) {
+                            viewModel.openMoodGenre(MoodGenre(title, browseId, null))
+                        } else {
+                            onNavigateToDetail(browseId, title, subtitle, thumbnailUrl, type)
+                        }
+                    },
+                    modifier = modifier,
+                )
+            }
+        }
+
+        menuSong?.let { song ->
+            TvSongMenu(
+                song = song,
+                viewModel = viewModel,
+                mediaController = mediaController,
+                onNavigateToDetail = onNavigateToDetail,
+                onDismiss = { menuSong = null },
+            )
+        }
     } else {
         BackHandler { viewModel.closeMoodGenre() }
         TvMoodPage(
@@ -155,7 +188,13 @@ private fun TvMoodPage(
                 onNavigateToNowPlaying()
             },
             onSongMenu = { menuSong = it },
-            onNavigateToDetail = onNavigateToDetail,
+            onNavigateToDetail = { browseId, title, subtitle, thumbnailUrl, type ->
+                if (browseId.startsWith("FEmusic_")) {
+                    viewModel.openMoodGenre(MoodGenre(title, browseId, null))
+                } else {
+                    onNavigateToDetail(browseId, title, subtitle, thumbnailUrl, type)
+                }
+            },
             header = {
                 Text(
                     text = mood.title,

@@ -87,6 +87,8 @@ import com.music.bitchord.ui.icons.BitChordIcons
 import org.jetbrains.compose.resources.stringResource
 import java.util.Locale
 
+const val MOOD_CARD_ASPECT = 16f / 9f
+
 /**
  * Explore screen for music discovery.
  * Apple Music-inspired discovery presentation powered by YouTube Music data.

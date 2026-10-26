@@ -70,6 +70,7 @@ object DesktopSearchClient {
                 songs = page.songs,
                 continuation = page.continuation,
                 owned = page.owned,
+                params = params,
             )
         }
 
@@ -187,6 +188,7 @@ data class DesktopCollection(
      * knew, drawn as a loader until the browse answers.
      */
     val loading: Boolean = false,
+    val params: String? = null,
 ) {
     /** The raw id an edit is addressed to; the browse id carries a `VL` prefix. */
     val playlistId: String get() = browseId.removePrefix("VL")
