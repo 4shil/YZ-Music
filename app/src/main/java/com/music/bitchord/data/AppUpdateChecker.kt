@@ -20,7 +20,7 @@ import okhttp3.Request
 import java.io.File
 
 /**
- * BitChord ships as a sideloaded APK off GitHub Releases rather than through
+ * YZ Music ships as a sideloaded APK off GitHub Releases rather than through
  * a store, so there's nothing to push an update notice on its own — this
  * polls the repo's "latest release" once per launch and compares its tag
  * against the running build.
@@ -97,13 +97,13 @@ object AppUpdateChecker {
      * One release carries the phone app and the TV app, each as a universal
      * APK plus per-ABI splits:
      *
-     *     BitChord-v1.8.apk     BitChord-v1.8_arm64-v8a.apk     ...
-     *     BitChordTV-v1.8.apk   BitChordTV-v1.8_arm64-v8a.apk   ...
+     *     YZMusic-v1.8.apk     YZMusic-v1.8-arm64-v8a-release.apk     ...
+     *     YZMusicTV-v1.8.apk   YZMusicTV-v1.8-arm64-v8a-release.apk   ...
      *
      * so this app's APKs are the ones named with its own
-     * [BuildConfig.UPDATE_APK_PREFIX] — "BitChord-" never matches a TV file,
-     * since the prefix ends at the hyphen. The universal build (no `_ABI`
-     * suffix) is taken first, as it installs anywhere; failing that, the split
+     * [BuildConfig.UPDATE_APK_PREFIX] — "YZMusic-" never matches a TV file,
+     * since the prefix ends at the hyphen. The universal build
+     * is taken first, as it installs anywhere; failing that, the split
      * for this device's ABI. A release with neither leaves
      * [UpdateInfo.apkUrl] null and the UI falls back to opening the releases
      * page.
@@ -120,10 +120,15 @@ object AppUpdateChecker {
                 if (ours) name.removeSuffix(".apk").removeSuffix(".APK") to url else null
             }
             .orEmpty()
-        apks.firstOrNull { (name, _) -> '_' !in name }?.second
+        // Prioritize the universal APK build first as it installs on any architecture
+        apks.firstOrNull { (name, _) -> name.contains("universal", ignoreCase = true) }?.second
+            ?: apks.firstOrNull { (name, _) ->
+                '_' !in name && !name.contains("-arm", ignoreCase = true) && !name.contains("-x86", ignoreCase = true)
+            }?.second
             ?: Build.SUPPORTED_ABIS.firstNotNullOfOrNull { abi ->
-                apks.firstOrNull { (name, _) -> name.endsWith("_$abi") }?.second
+                apks.firstOrNull { (name, _) -> name.contains(abi, ignoreCase = true) }?.second
             }
+            ?: apks.firstOrNull()?.second
     }.getOrNull()
 
     /**
@@ -142,7 +147,7 @@ object AppUpdateChecker {
             val dir = File(context.cacheDir, CACHE_SUBDIR).apply { mkdirs() }
             // Drop anything left over from an earlier attempt.
             dir.listFiles()?.forEach { it.delete() }
-            val target = File(dir, "bitchord-${info.version}.apk")
+            val target = File(dir, "yzmusic-${info.version}.apk")
 
             val request = Request.Builder().url(url).build()
             Http.client.newCall(request).execute().use { response ->
@@ -214,16 +219,31 @@ object AppUpdateChecker {
             if (opened) return
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        context.startActivity(
-            Intent(Intent.ACTION_INSTALL_PACKAGE)
-                .setDataAndType(uri, "application/vnd.android.package-archive")
-                .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
-                .putExtra(Intent.EXTRA_RETURN_RESULT, true)
-                .addFlags(
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_ACTIVITY_NEW_TASK,
-                ),
-        )
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_ACTIVITY_NEW_TASK,
+            )
+        }
+        val launched = runCatching {
+            context.startActivity(installIntent)
+        }.isSuccess
+        if (!launched) {
+            runCatching {
+                context.startActivity(
+                    Intent(Intent.ACTION_INSTALL_PACKAGE)
+                        .setDataAndType(uri, "application/vnd.android.package-archive")
+                        .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                        .putExtra(Intent.EXTRA_RETURN_RESULT, true)
+                        .addFlags(
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                Intent.FLAG_ACTIVITY_NEW_TASK,
+                        ),
+                )
+            }
+        }
     }
 
     /** A version split into its numeric dotted parts and whether it carries a "-suffix" (e.g. "-beta2"). */
